@@ -1,0 +1,16 @@
+# Word文档（不推送）
+*.docx
+*.pdf
+*.pptx
+*.xlsx
+*.xls
+*.ppt
+*.doc
+
+# Python缓存
+__pycache__/
+*.pyc
+
+# 临时文件
+~$*
+temp*

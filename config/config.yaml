@@ -1,0 +1,10 @@
+哈喽沃尔得有限公司:
+  简称:
+  - 哈喽公司
+  - 沃尔得
+  代字: 哈沃发
+  印章位置: ./config/哈喽沃尔得有限公司.png
+
+compare:
+  sentence_similarity_threshold: 0.40
+  para_similarity_threshold: 0.40

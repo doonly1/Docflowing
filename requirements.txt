@@ -1,0 +1,6 @@
+python-docx==1.2.0
+pywin32
+pyyaml
+docx2pdf
+flask
+flask-cors
