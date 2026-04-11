@@ -15,7 +15,7 @@ CORS(app)
 # 工具脚本映射
 TOOL_SCRIPTS = {
     'to_docx': 'to_docx.py',
-    'to_wordcloud': 'to_wordcloud.py',
+    'to_index': 'to_index.py',
     'to_compare': 'to_compare.py',
     'to_pdf': 'to_pdf.py',
     'to_pageNum': 'to_pageNum.py',
@@ -55,7 +55,7 @@ def api_list_files():
     # 各工具支持的文件类型
     tool_extensions = {
         'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_wordcloud': ('.docx', '.doc'),
+        'to_index': ('.docx', '.doc'),
         'to_compare': ('.docx', '.doc'),
         'to_pdf': ('.docx', '.doc'),
         'to_pageNum': ('.docx', '.doc'),
@@ -408,7 +408,7 @@ def api_upload_files():
     tool = request.form.get('tool', 'to_docx')
     tool_extensions = {
         'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_wordcloud': ('.docx', '.doc'),
+        'to_index': ('.docx', '.doc'),
         'to_compare': ('.docx', '.doc'),
         'to_pdf': ('.docx', '.doc'),
         'to_pageNum': ('.docx', '.doc'),

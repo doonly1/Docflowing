@@ -4,3 +4,4 @@ pyyaml
 docx2pdf
 flask
 flask-cors
+openpyxl

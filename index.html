@@ -435,10 +435,10 @@
                     <div class="name">批量转化</div>
                     <div class="desc">PDF/TXT → DOCX</div>
                 </div>
-                <div class="tool-item" onclick="selectTool('to_wordcloud')">
-                    <div class="icon">☁️</div>
-                    <div class="name">词云生成</div>
-                    <div class="desc">DOCX → 词云图片</div>
+                <div class="tool-item" onclick="selectTool('to_index')">
+                    <div class="icon">📑</div>
+                    <div class="name">文件索引</div>
+                    <div class="desc">目录 → Excel索引表</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_compare')">
                     <div class="icon">📊</div>
@@ -622,13 +622,13 @@
                     '生成国标公文格式文档'
                 ]
             },
-            to_wordcloud: {
-                name: '词云生成',
-                intro: '读取 DOCX 文档内容，jieba 分词后生成词云图片。',
+            to_index: {
+                name: '文件索引',
+                intro: '扫描目录及子目录，生成带超链接的 Excel 索引表。',
                 features: [
-                    '自动将 DOC 转换为 DOCX',
-                    '使用 jieba 进行中文分词',
-                    '生成 PNG 格式词云'
+                    '自动扫描所有子目录',
+                    '文件名可点击跳转',
+                    '显示文件大小、修改日期'
                 ]
             },
             to_compare: {
@@ -892,7 +892,7 @@
             // 添加文件（只添加当前工具支持的类型）
             const toolExtensions = {
                 'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
-                'to_wordcloud': ['.docx', '.doc'],
+                'to_index': ['.docx', '.doc'],
                 'to_compare': ['.docx', '.doc'],
                 'to_pdf': ['.docx', '.doc'],
                 'to_pageNum': ['.docx', '.doc'],
