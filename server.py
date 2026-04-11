@@ -169,6 +169,60 @@ def api_get_server_config():
         return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
 
 
+@app.route('/get_last_workdir', methods=['GET'])
+def api_get_last_workdir():
+    """获取最近使用的文件夹路径（从用户独立的配置文件读取）"""
+    import yaml
+    
+    # 用户配置文件路径：~/.config/doc_tool/config.yaml
+    user_config_dir = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool')
+    config_path = os.path.join(user_config_dir, 'config.yaml')
+    
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            last_workdir = config.get('last_workdir', '') if config else ''
+            return jsonify({'success': True, 'path': last_workdir})
+        return jsonify({'success': True, 'path': ''})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/save_last_workdir', methods=['POST'])
+def api_save_last_workdir():
+    """保存最近使用的文件夹路径到用户独立的config.yaml"""
+    import yaml
+    
+    data = request.get_json()
+    workdir = data.get('path', '')
+    
+    # 用户配置文件路径：~/.config/doc_tool/config.yaml
+    user_config_dir = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool')
+    config_path = os.path.join(user_config_dir, 'config.yaml')
+    
+    try:
+        # 读取现有配置（保留其他配置字段）
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f) or {}
+        
+        # 只更新 last_workdir，保留其他字段
+        config['last_workdir'] = workdir
+        
+        # 确保目录存在
+        os.makedirs(user_config_dir, exist_ok=True)
+        
+        # 写回配置文件
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
 @app.route('/run_tool_with_config', methods=['POST'])
 def api_run_tool_with_config():
     """执行工具（支持自定义配置）"""
@@ -305,6 +359,16 @@ def api_auto_save_config():
         os.makedirs(config_dir, exist_ok=True)
         
         save_path = os.path.join(config_dir, 'config.yaml')
+        
+        # 读取现有配置，保留 last_workdir
+        existing_config = {}
+        if os.path.exists(save_path):
+            with open(save_path, 'r', encoding='utf-8') as f:
+                existing_config = yaml.safe_load(f) or {}
+        
+        # 合并配置：保留 last_workdir，只更新其他配置
+        last_workdir = existing_config.get('last_workdir', '')
+        user_config['last_workdir'] = last_workdir
         
         with open(save_path, 'w', encoding='utf-8') as f:
             yaml.dump(user_config, f, allow_unicode=True, default_flow_style=False)

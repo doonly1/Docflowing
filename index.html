@@ -487,11 +487,12 @@
                 </div>
             </div>
 
-            <!-- 按钮区域：显示文件列表 + 清理 + 执行 -->
+            <!-- 按钮区域：显示文件列表 + 清理 + 下载 + 执行 -->
             <div style="display: flex; gap: 8px; align-items: center;">
-                <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: 103px;">📂查看</button>
-                <button class="btn" id="clearFilesBtn" onclick="clearSessionFiles()" style="width: 103px;">🗑️清理</button>
-                <button class="btn" onclick="runTool()">执行</button>
+                <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📂 查看</button>
+                <button class="btn" id="clearFilesBtn" onclick="clearSessionFiles()" style="width: auto; padding: 10px 16px; white-space: nowrap;">🗑️ 清理</button>
+                <button class="btn" id="downloadBtn" onclick="downloadResults()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📥 下载</button>
+                <button class="btn" onclick="runTool()" style="flex: 1;">执行</button>
             </div>
 
             <!-- 文件列表展示（紧凑） -->
@@ -594,21 +595,41 @@
     </div>
 
     <script>
-        // 页面加载时默认选中第一个工具，并恢复上次路径
+        // 页面加载时默认选中"文档比较"，并恢复上次路径
         document.addEventListener('DOMContentLoaded', async function() {
-            selectTool('to_docx');
-            // 优先从localStorage恢复路径，否则使用桌面路径
-            const savedPath = localStorage.getItem('workdir');
-            if (savedPath) {
-                document.getElementById('workdir').value = savedPath;
-            } else {
-                try {
-                    const res = await fetch('/get_desktop', { method: 'POST' });
-                    const data = await res.json();
-                    if (data.success) {
-                        document.getElementById('workdir').value = data.path;
+            // 1. 默认选中文档比较功能
+            selectTool('to_compare');
+            
+            // 2. 恢复上次选择的路径（优先从服务器获取，fallback到localStorage）
+            try {
+                // 先尝试从服务器获取保存的路径
+                const pathRes = await fetch('/get_last_workdir');
+                const pathData = await pathRes.json();
+                if (pathData.success && pathData.path && pathData.path.length > 0) {
+                    document.getElementById('workdir').value = pathData.path;
+                    localStorage.setItem('workdir', pathData.path);
+                } else {
+                    // Fallback: 从localStorage恢复
+                    const savedPath = localStorage.getItem('workdir');
+                    if (savedPath) {
+                        document.getElementById('workdir').value = savedPath;
+                    } else {
+                        // 最后fallback到桌面路径
+                        try {
+                            const res = await fetch('/get_desktop', { method: 'POST' });
+                            const data = await res.json();
+                            if (data.success) {
+                                document.getElementById('workdir').value = data.path;
+                            }
+                        } catch (e) {}
                     }
-                } catch (e) {}
+                }
+            } catch (e) {
+                // 网络错误时用localStorage
+                const savedPath = localStorage.getItem('workdir');
+                if (savedPath) {
+                    document.getElementById('workdir').value = savedPath;
+                }
             }
         });
 
@@ -849,6 +870,10 @@
                     const workdir = data.path;
                     document.getElementById('workdir').value = workdir;
                     localStorage.setItem('workdir', workdir);
+                    
+                    // 同时保存到服务器config.yaml
+                    saveLastWorkdir(workdir);
+                    
                     fileListCache = [];
                     isRemoteMode = false;
                     currentSessionId = null;
@@ -870,6 +895,19 @@
                 }
             } catch (error) {
                 console.error('选择文件夹失败:', error);
+            }
+        }
+        
+        // 保存最近使用的文件夹路径到服务器config.yaml
+        async function saveLastWorkdir(path) {
+            try {
+                await fetch('/save_last_workdir', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: path})
+                });
+            } catch (e) {
+                console.log('保存路径到服务器失败:', e);
             }
         }
 
@@ -1110,7 +1148,8 @@
                                         const errorContent = data.error || outputLines.join('\n') || '执行失败';
                                         resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(errorContent) + '</pre>';
                                     } else {
-                                        // 处理成功
+                                        // 处理成功，显示结果文件列表并启用下载按钮
+                                        outputLog.textContent += '\n\n[结束]';
                                         if (isRemoteMode && currentSessionId) {
                                             // 先获取并显示结果文件列表
                                             const checkRes = await fetch('/check_results', {
@@ -1121,11 +1160,9 @@
                                             const checkData = await checkRes.json();
                                             if (checkData.success && checkData.files.length > 0) {
                                                 const fileList = checkData.files.map(f => `  - ${f.name}`).join('\n');
-                                                outputLog.textContent += `\n\n[处理完成] 生成 ${checkData.files.length} 个文件:\n${fileList}\n\n[正在打包下载...]`;
-                                            } else {
-                                                outputLog.textContent += '\n\n[正在打包下载结果...]';
+                                                outputLog.textContent += `\n生成 ${checkData.files.length} 个文件:\n${fileList}`;
                                             }
-                                            await downloadResults();
+                                            // 下载按钮始终可用
                                         }
                                     }
                                 }
@@ -1141,9 +1178,24 @@
 
         // 下载处理结果
         async function downloadResults() {
-            if (!currentSessionId) return;
+            if (!currentSessionId) {
+                alert('没有文件可供下载');
+                return;
+            }
             
             try {
+                // 先检查是否有结果文件
+                const checkRes = await fetch('/check_results', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({session_id: currentSessionId})
+                });
+                const checkData = await checkRes.json();
+                if (!checkData.success || !checkData.files || checkData.files.length === 0) {
+                    alert('没有文件可供下载');
+                    return;
+                }
+                
                 const folderName = document.getElementById('workdir').value.split('（')[0];
                 const response = await fetch('/download_results', {
                     method: 'POST',
@@ -1384,14 +1436,15 @@
             const formDiv = document.getElementById('companyConfigForm');
             formDiv.innerHTML = '';
             
-            // 移除compare部分
-            const configWithoutCompare = {...config};
-            delete configWithoutCompare.compare;
+            // 移除 compare 和 last_workdir 部分
+            const configWithoutMeta = {...config};
+            delete configWithoutMeta.compare;
+            delete configWithoutMeta.last_workdir;
             
             let formHtml = '';
             
-            for (const companyName in configWithoutCompare) {
-                const companyInfo = configWithoutCompare[companyName];
+            for (const companyName in configWithoutMeta) {
+                const companyInfo = configWithoutMeta[companyName];
                 const shortNames = companyInfo.简称 || [];
                 const daizi = companyInfo.代字 || '';
                 const stampPath = companyInfo['印章位置'] || '';
@@ -1497,6 +1550,11 @@
                     para_similarity_threshold: parseFloat(document.getElementById('paragraphThreshold').value) || 0.40
                 };
                 
+                // 保留 last_workdir
+                if (userConfig && userConfig.last_workdir) {
+                    updatedConfig.last_workdir = userConfig.last_workdir;
+                }
+                
                 // 验证配置
                 if (Object.keys(updatedConfig).length === 0) {
                     throw new Error('配置不能为空');
@@ -1536,7 +1594,11 @@
                     for (const subKey in obj[key]) {
                         yaml += `  ${subKey}: ${obj[key][subKey]}\n`;
                     }
+                } else if (key === 'last_workdir') {
+                    // last_workdir 是普通字符串字段
+                    yaml += `${key}: "${obj[key] || ''}"\n`;
                 } else {
+                    // 公司配置
                     yaml += `${key}:\n`;
                     const companyInfo = obj[key];
                     yaml += `  简称:\n`;
