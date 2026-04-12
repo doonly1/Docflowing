@@ -151,11 +151,187 @@ def split_into_sentences(text):
     return result
 
 
+def _longest_increasing_subsequence(indices):
+    """
+    求 indices 的最长递增子序列，返回 LIS 中元素在 indices 中的位置集合。
+    用于句子匹配后检测顺序变化：LIS 内的配对顺序一致，LIS 外的为"移动"。
+    """
+    if not indices:
+        return set()
+    
+    n = len(indices)
+    # dp[i]: 以 indices[i] 结尾的 LIS 长度
+    dp = [1] * n
+    # prev[i]: 前驱索引，用于回溯路径
+    prev = [-1] * n
+    
+    for i in range(1, n):
+        for j in range(i):
+            if indices[j] < indices[i] and dp[j] + 1 > dp[i]:
+                dp[i] = dp[j] + 1
+                prev[i] = j
+    
+    # 找 LIS 末端
+    max_len = max(dp)
+    end = dp.index(max_len)
+    
+    # 回溯 LIS 路径
+    lis_positions = set()
+    pos = end
+    while pos != -1:
+        lis_positions.add(pos)
+        pos = prev[pos]
+    
+    return lis_positions
+
+
+def _output_split_diff(result_doc, orig_text, all_f_indices, final_paras, SENTENCE_SIM_THRESHOLD):
+    """
+    处理拆分组输出：1原稿段落 → N终稿段落
+    将原稿文本与合并后的终稿文本做字符级 diff，
+    然后按终稿段落边界切割 diff 结果，分别输出到不同结果段落。
+    
+    Args:
+        result_doc: 结果文档
+        orig_text: 原稿段落文本
+        all_f_indices: 终稿段落索引列表（按终稿顺序，主段落在前）
+        final_paras: 终稿段落列表
+        SENTENCE_SIM_THRESHOLD: 句子相似度阈值
+    """
+    # 合并所有终稿段落文本
+    combined_final_text = "".join(
+        final_paras[sf]['text'] for sf in all_f_indices
+    )
+    
+    # 字符级 diff
+    diffs = char_level_diff(orig_text, combined_final_text)
+    
+    # 构建终稿段落边界表：[(start, end, f_idx), ...]
+    # start/end 是在 combined_final_text 中的字符位置
+    boundaries = []
+    cursor = 0
+    for sf in all_f_indices:
+        sf_text = final_paras[sf]['text']
+        sf_len = len(sf_text)
+        boundaries.append((cursor, cursor + sf_len, sf))
+        cursor += sf_len
+    
+    # 跟踪每个 diff 片段在 combined_final_text 中的位置
+    # f_pos: 当前在终稿合并文本中的位置
+    f_pos = 0
+    
+    # 为每个终稿段落收集其范围内的 diff 片段
+    # para_diffs[f_idx] = [(tag, text), ...]
+    para_diffs = {sf: [] for sf in all_f_indices}
+    
+    for tag, text in diffs:
+        if not text:
+            continue
+        text_len = len(text)
+        
+        if tag == 'delete':
+            # delete 不占终稿位置，归入当前 f_pos 所在的终稿段落
+            target_sf = _find_boundary(boundaries, f_pos)
+            para_diffs[target_sf].append((tag, text))
+            # f_pos 不变
+        elif tag == 'equal':
+            # equal 占据 f_pos ~ f_pos+text_len 的终稿范围
+            # 可能跨越多个终稿段落，需要按边界拆分
+            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
+            f_pos += text_len
+        elif tag == 'insert':
+            # insert 占据 f_pos ~ f_pos+text_len 的终稿范围
+            # 可能跨越多个终稿段落，需要按边界拆分
+            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
+            f_pos += text_len
+    
+    # 逐终稿段落输出
+    for sf in all_f_indices:
+        p = result_doc.add_paragraph()
+        sf_diffs = para_diffs[sf]
+        
+        if not sf_diffs:
+            # 无 diff 内容，直接输出终稿原文
+            p.add_run(final_paras[sf]['text'])
+        else:
+            # 检查是否全是 equal（即无改动）
+            all_equal = all(t == 'equal' for t, _ in sf_diffs)
+            if all_equal:
+                for t, txt in sf_diffs:
+                    p.add_run(txt)
+            else:
+                _apply_diff_run(p, sf_diffs)
+
+
+def _find_boundary(boundaries, pos):
+    """根据位置找到对应的终稿段落索引"""
+    for b_start, b_end, sf in boundaries:
+        if b_start <= pos < b_end:
+            return sf
+    # 如果 pos 恰好落在边界末端，归入前一个段落
+    # 如果 pos == 0 或超出范围，归入最后一个段落或第一个段落
+    if boundaries:
+        if pos >= boundaries[-1][1]:
+            return boundaries[-1][2]
+        return boundaries[0][2]
+    return None
+
+
+def _split_diff_to_boundaries(para_diffs, boundaries, tag, text, start_pos):
+    """
+    将一个 diff 片段按终稿段落边界拆分，分配到对应的终稿段落。
+    
+    Args:
+        para_diffs: {f_idx: [(tag, text), ...]} 分配结果
+        boundaries: [(start, end, f_idx), ...] 终稿段落边界表
+        tag: diff 标记 ('equal' 或 'insert')
+        text: diff 文本
+        start_pos: 该片段在 combined_final_text 中的起始位置
+    """
+    end_pos = start_pos + len(text)
+    text_offset = 0
+    
+    for b_start, b_end, sf in boundaries:
+        # 跳过不重叠的段落
+        if end_pos <= b_start:
+            break
+        if start_pos >= b_end:
+            continue
+        
+        # 计算交集在 text 中的偏移
+        chunk_start = max(start_pos, b_start) - start_pos
+        chunk_end = min(end_pos, b_end) - start_pos
+        
+        chunk = text[chunk_start:chunk_end]
+        if chunk:
+            para_diffs[sf].append((tag, chunk))
+
+
+def _apply_diff_run(result_para, diffs):
+    """
+    将 char_level_diff 的结果写入结果段落。
+    连续相同 tag 的文本会合并为一个 run，减少 Word 中的 run 碎片。
+    """
+    for tag, text in diffs:
+        if not text:
+            continue
+        if tag == 'equal':
+            result_para.add_run(text)
+        elif tag == 'delete':
+            run = result_para.add_run(text)
+            run.font.color.rgb = RGBColor(0, 0, 255)
+            run.font.strike = True
+        elif tag == 'insert':
+            run = result_para.add_run(text)
+            run.font.color.rgb = RGBColor(255, 0, 0)
+
+
 def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD):
     """
-    句子级别差异比较
-    无论整体相似度如何，都先按句子进行比对
-    按句子相似度阈值进行字符级比对，低于阈值直接标记删除/新增
+    句子级别差异比较（改进版）
+    - 按终稿句子顺序输出
+    - 使用 LIS 检测句子互换：LIS 内走字符级 diff，LIS 外标记为移动（红增/蓝删）
+    - 低于相似度阈值的配对直接标记新增+删除
     """
     orig_sentences = split_into_sentences(orig_text)
     final_sentences = split_into_sentences(final_text)
@@ -163,24 +339,15 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     # 只有一个句子时，直接字符级比对
     if len(orig_sentences) == 1 and len(final_sentences) == 1:
         para_diff = char_level_diff(orig_text, final_text)
-        for tag, text in para_diff:
-            if tag == 'equal':
-                result_para.add_run(text)
-            elif tag == 'delete':
-                run = result_para.add_run(text)
-                run.font.color.rgb = RGBColor(0, 0, 255)
-                run.font.strike = True
-            elif tag == 'insert':
-                run = result_para.add_run(text)
-                run.font.color.rgb = RGBColor(255, 0, 0)
+        _apply_diff_run(result_para, para_diff)
         return
     
-    # 使用贪心匹配找最佳句子对应关系
+    # ---- 步骤1: 贪心匹配 ----
     used_orig = set()
     used_final = set()
     
-    # 记录句子级匹配关系
-    sentence_match = []  # [(orig_idx, final_idx, ratio), ...]
+    # sentence_match: [(orig_idx, final_idx, ratio), ...]
+    sentence_match = []
     
     for f_idx, f_sent in enumerate(final_sentences):
         best_ratio = 0
@@ -198,49 +365,104 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
             used_orig.add(best_o_idx)
             used_final.add(f_idx)
     
-    # 按原始句子顺序输出
-    for o_idx in range(len(orig_sentences)):
-        if o_idx in used_orig:
-            # 找对应的终句子
-            matched = next((m for m in sentence_match if m[0] == o_idx), None)
-            if matched is None:
-                continue
-            f_idx = matched[1]
-            ratio = matched[2]
-            f_sent = final_sentences[f_idx]
+    # ---- 步骤2: 逆序对检测句子顺序变化 ----
+    # 逆序对：若 orig_i < orig_j 但 final_i > final_j，说明两者发生了交叉重排
+    # - 向后移的句子（orig 较小的那个）：原位蓝删 + 终稿新位红增
+    # - 向前移的句子（orig 较大的那个）：终稿位置直接显示终稿文本，不做字符级diff
+    # 双方都不做字符级diff，避免标点变化（句号↔逗号）被误标为修改
+    moved_orig_set = set()       # 向后移的句子索引（原位蓝删 + 新位红增）
+    forward_moved_set = set()    # 向前移的句子索引（终稿位直接显示，不做diff）
+    sentence_match_sorted = sorted(sentence_match, key=lambda m: m[0])
+    for i in range(len(sentence_match_sorted)):
+        for j in range(i + 1, len(sentence_match_sorted)):
+            if sentence_match_sorted[i][1] > sentence_match_sorted[j][1]:
+                # 交叉：orig_i 在前但 final_i 在后
+                moved_orig_set.add(sentence_match_sorted[i][0])    # 向后移
+                forward_moved_set.add(sentence_match_sorted[j][0]) # 向前移
+    
+    # ---- 步骤3: 按终稿句子顺序输出，同时在原稿位置插入蓝色删除 ----
+    
+    # 构建: final_idx -> (orig_idx, ratio)
+    final_to_match = {}
+    for o_idx, f_idx, ratio in sentence_match:
+        final_to_match[f_idx] = (o_idx, ratio)
+    
+    # 构建: orig_idx -> final_idx（用于判断移动句子在终稿中的位置）
+    orig_to_final = {}
+    for o_idx, f_idx, ratio in sentence_match:
+        orig_to_final[o_idx] = f_idx
+    
+    # 已处理的原稿句子索引
+    processed_orig = set()
+    # 原稿位置追踪指针
+    next_orig = 0
+    
+    for f_idx in range(len(final_sentences)):
+        f_sent = final_sentences[f_idx]
+        
+        # 确定当前终稿句子匹配的原稿位置（用于推进指针）
+        if f_idx in final_to_match:
+            current_orig_idx = final_to_match[f_idx][0]
+        else:
+            current_orig_idx = len(orig_sentences)  # 无匹配，不限制
+        
+        # 输出原稿中"本应在此位置但已移走或已删除"的句子（蓝色删除）
+        while next_orig < current_orig_idx:
+            if next_orig not in processed_orig:
+                if next_orig in moved_orig_set:
+                    # 向后移动的句子 → 在原位输出蓝色删除
+                    run = result_para.add_run(orig_sentences[next_orig])
+                    run.font.color.rgb = RGBColor(0, 0, 255)
+                    run.font.strike = True
+                elif next_orig not in orig_to_final:
+                    # 未匹配的原稿句子（纯删除）→ 蓝色删除
+                    run = result_para.add_run(orig_sentences[next_orig])
+                    run.font.color.rgb = RGBColor(0, 0, 255)
+                    run.font.strike = True
+                # 顺序不变的配对句子，会在其终稿位置正常输出字符级diff
+            processed_orig.add(next_orig)
+            next_orig += 1
+        
+        # 输出当前终稿句子
+        if f_idx not in final_to_match:
+            # 未匹配的终稿句子 → 红色新增
+            run = result_para.add_run(f_sent)
+            run.font.color.rgb = RGBColor(255, 0, 0)
+        else:
+            o_idx, ratio = final_to_match[f_idx]
             o_sent = orig_sentences[o_idx]
+            processed_orig.add(o_idx)
+            if o_idx >= next_orig:
+                next_orig = o_idx + 1
             
-            if ratio >= SENTENCE_SIM_THRESHOLD:
-                # 句子相似度高，进行字符级比对
-                para_diff = char_level_diff(o_sent, f_sent)
-                for tag, text in para_diff:
-                    if tag == 'equal':
-                        result_para.add_run(text)
-                    elif tag == 'delete':
-                        run = result_para.add_run(text)
-                        run.font.color.rgb = RGBColor(0, 0, 255)
-                        run.font.strike = True
-                    elif tag == 'insert':
-                        run = result_para.add_run(text)
-                        run.font.color.rgb = RGBColor(255, 0, 0)
-            else:
-                # 句子相似度低，直接标记新增+删除（红色在前，蓝色在后）
+            if ratio < SENTENCE_SIM_THRESHOLD:
+                # 相似度低 → 直接标记新增+删除
                 run1 = result_para.add_run(f_sent)
                 run1.font.color.rgb = RGBColor(255, 0, 0)
                 run2 = result_para.add_run(o_sent)
                 run2.font.color.rgb = RGBColor(0, 0, 255)
                 run2.font.strike = True
-        else:
-            # 未匹配的原始句子（删除）
-            run = result_para.add_run(orig_sentences[o_idx])
+            elif o_idx in moved_orig_set:
+                # 向后移动的句子 → 在终稿新位输出红色新增（蓝色删除已在原位输出）
+                run = result_para.add_run(f_sent)
+                run.font.color.rgb = RGBColor(255, 0, 0)
+            elif o_idx in forward_moved_set:
+                # 向前移动的句子 → 直接显示终稿文本，不做字符级diff
+                # 避免标点变化（句号↔逗号）被误标为修改
+                result_para.add_run(f_sent)
+            else:
+                # 顺序一致，走字符级 diff
+                para_diff = char_level_diff(o_sent, f_sent)
+                _apply_diff_run(result_para, para_diff)
+    
+    # 输出剩余未处理的原稿句子（移动到更后位置 或 纯删除）
+    while next_orig < len(orig_sentences):
+        if next_orig not in processed_orig:
+            run = result_para.add_run(orig_sentences[next_orig])
             run.font.color.rgb = RGBColor(0, 0, 255)
             run.font.strike = True
-    
-    # 输出未匹配的终句子（新增）
-    for f_idx in range(len(final_sentences)):
-        if f_idx not in used_final:
-            run = result_para.add_run(final_sentences[f_idx])
-            run.font.color.rgb = RGBColor(255, 0, 0)
+        processed_orig.add(next_orig)
+        next_orig += 1
 
 
 def compare_with_python(original_path, final_path, output_path):
@@ -400,9 +622,91 @@ def compare_with_python(original_path, final_path, output_path):
                 f_match[f_idx] = o_idx
                 matched_orig.add(o_idx)
         
+        # 步骤2.5: 拆分检测（1原稿段落 → N终稿段落）
+        # o_match[o_idx] = [f_idx1, f_idx2, ...] 反向映射
+        o_match = {}
+        split_matched_final = set()  # 已参与拆分组匹配的终稿索引
+        
+        # 找出仍未匹配的终稿段落
+        final_unmatched_after_step2 = [i for i in range(len(final_paras)) if f_match[i] == -1]
+        
+        if final_unmatched_after_step2:
+            # 对每个未匹配终稿段落，扫描所有已1:1匹配的原稿段落（不含已在matched_orig中的）
+            # 拆分场景：原稿段落被拆为多个终稿段落，所以原稿段落已被1:1匹配但仍有剩余终稿段落与它相似
+            split_candidates = []
+            for f_idx in final_unmatched_after_step2:
+                f_text = final_paras[f_idx]['text']
+                if not f_text:
+                    continue
+                
+                for o_idx in range(len(orig_paras)):
+                    o_text = orig_paras[o_idx]['text']
+                    if not o_text:
+                        continue
+                    
+                    # 跳过已在拆分组中的原稿段落（避免无限拆分）
+                    if o_idx in o_match:
+                        continue
+                    
+                    ratio = difflib.SequenceMatcher(None, o_text, f_text).ratio()
+                    
+                    if ratio >= PARA_SIM_THRESHOLD:
+                        position_score = 1.0 / (abs(o_idx - f_idx) + 1)
+                        total_score = ratio * 0.7 + position_score * 0.3
+                        split_candidates.append((total_score, ratio, o_idx, f_idx))
+            
+            # 按总分排序
+            split_candidates.sort(reverse=True, key=lambda x: x[0])
+            
+            # 贪心分配：将未匹配终稿段落分配到原稿段落的拆分组
+            for total_score, ratio, o_idx, f_idx in split_candidates:
+                if f_idx in split_matched_final:
+                    continue
+                if o_idx in o_match and len(o_match[o_idx]) >= 3:
+                    # 限制每个原稿段落最多拆为3个终稿段落
+                    continue
+                
+                # 检查终稿段落连续性：同组的终稿段落应相邻
+                if o_idx in o_match:
+                    existing_f_indices = o_match[o_idx]
+                    # 新加入的终稿段落必须与组内已有段落相邻
+                    if not any(abs(f_idx - ef) == 1 for ef in existing_f_indices):
+                        continue
+                
+                if o_idx not in o_match:
+                    o_match[o_idx] = []
+                o_match[o_idx].append(f_idx)
+                split_matched_final.add(f_idx)
+        
+        # 步骤2.75: 段落级逆序对检测（段落互换/重排）
+        # 检测一对一匹配中是否存在原稿位置与终稿位置顺序不一致的配对
+        # 互换处理：
+        #   - 向后移的段落（原在前、后来在后）：原位输出蓝色删除整段（占位标记）
+        #   - 向前移的段落（原在后、后来在前）：终稿位置正常做 sentence_level_diff
+        #   - 终稿新位的向后移段落：也正常做 sentence_level_diff，保留内部差异
+        moved_para_orig_set = set()       # 向后移的原稿段落索引（原位输出蓝删占位）
+        forward_moved_para_orig_set = set()  # 向前移的原稿段落索引
+        
+        # 收集所有一对一匹配的配对
+        para_pairs = []  # [(o_idx, f_idx), ...]
+        for f_i in range(len(final_paras)):
+            o_i = f_match[f_i]
+            if o_i != -1 and not isinstance(o_i, list):
+                para_pairs.append((o_i, f_i))
+        
+        # 按 o_idx 排序，检测逆序对
+        para_pairs_sorted = sorted(para_pairs, key=lambda x: x[0])
+        for i in range(len(para_pairs_sorted)):
+            for j in range(i + 1, len(para_pairs_sorted)):
+                if para_pairs_sorted[i][1] > para_pairs_sorted[j][1]:
+                    # 交叉：orig_i 在前但 final_i 在后 → orig_i 向后移
+                    moved_para_orig_set.add(para_pairs_sorted[i][0])
+                    forward_moved_para_orig_set.add(para_pairs_sorted[j][0])
+        
         # 3. 按终文档顺序输出 - 修复删除段落顺序问题
         processed_orig = set()  # 已处理的原文档段落索引
         next_orig_idx = 0  # 下一个待处理的原文档段落索引
+        outputted_split_final = set()  # 已通过拆分组输出的终稿段落索引
         
         for f_idx in range(len(final_paras)):
             o_idx = f_match[f_idx]
@@ -413,13 +717,17 @@ def compare_with_python(original_path, final_path, output_path):
                 result_doc.add_paragraph()
                 continue
             
+            # 跳过已在拆分组中输出的终稿段落
+            if f_idx in outputted_split_final:
+                continue
+            
             if o_idx == -1:
                 # 新增段落
                 p = result_doc.add_paragraph()
                 run = p.add_run(final_text)
                 run.font.color.rgb = RGBColor(255, 0, 0)
             else:
-                # 处理一对多匹配
+                # 处理一对多匹配（合并：N原稿 → 1终稿）
                 if isinstance(o_idx, list):
                     # 先输出 o_idx 列表中第一个索引之前的未处理段落（删除的）
                     first_o_idx = min(o_idx)
@@ -449,40 +757,83 @@ def compare_with_python(original_path, final_path, output_path):
                     # 进行对比
                     sentence_level_diff(combined_orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
                 else:
-                    # 一对一匹配 - 先输出 o_idx 之前的未处理段落（删除的）
+                    # 一对一匹配 - 先输出 o_idx 之前的未处理段落
                     while next_orig_idx < o_idx:
-                        # 检查这个段落是否已经被匹配（在一对多匹配中可能已被匹配）
-                        if next_orig_idx not in matched_orig:
+                        if next_orig_idx in processed_orig:
+                            next_orig_idx += 1
+                            continue
+                        if next_orig_idx in moved_para_orig_set:
+                            # 向后移的段落 → 原位输出蓝色删除整段（占位标记）
                             orig_del_text = orig_paras[next_orig_idx]['text']
                             if orig_del_text:
                                 p = result_doc.add_paragraph()
                                 run = p.add_run(orig_del_text)
                                 run.font.color.rgb = RGBColor(0, 0, 255)
                                 run.font.strike = True
+                            processed_orig.add(next_orig_idx)
+                        elif next_orig_idx not in matched_orig:
+                            # 未匹配的原稿段落 → 蓝色删除
+                            orig_del_text = orig_paras[next_orig_idx]['text']
+                            if orig_del_text:
+                                p = result_doc.add_paragraph()
+                                run = p.add_run(orig_del_text)
+                                run.font.color.rgb = RGBColor(0, 0, 255)
+                                run.font.strike = True
+                            processed_orig.add(next_orig_idx)
+                        # 顺序不变的已匹配段落（forward_moved也在matched_orig中），
+                        # 不在原位输出，会在其终稿位置正常输出
                         next_orig_idx += 1
                     
-                    if o_idx in processed_orig:
-                        # 如果这个原始段落已经被处理过，就当作新增段落处理
+                    if o_idx in processed_orig and o_idx not in moved_para_orig_set:
+                        # 如果这个原始段落已经被处理过，且不是向后移的段落，就当作新增段落处理
                         p = result_doc.add_paragraph()
                         run = p.add_run(final_text)
                         run.font.color.rgb = RGBColor(255, 0, 0)
+                    elif o_idx in moved_para_orig_set:
+                        # 向后移的段落：蓝删占位已在原位输出，终稿新位正常做diff保留内部差异
+                        # 注意：processed_orig 已在 while 循环中添加了 o_idx，这里不再重复添加
+                        next_orig_idx = max(next_orig_idx, o_idx + 1)
+                        orig_text = orig_paras[o_idx]['text']
+                        p = result_doc.add_paragraph()
+                        sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
                     else:
                         # 处理当前匹配的段落
                         processed_orig.add(o_idx)
                         next_orig_idx = o_idx + 1
                         
                         orig_text = orig_paras[o_idx]['text']
-                        if orig_text == final_text:
+                        
+                        # 检查拆分组：1原稿 → N终稿
+                        if o_idx in o_match:
+                            # 收集该原稿段落的所有终稿段落（包括1:1匹配的主段落 + 拆分组）
+                            split_f_indices = sorted(o_match[o_idx])
+                            # 主段落 f_idx 在前，拆分组附加在后，按终稿顺序排列
+                            all_f_indices = [f_idx] + [sf for sf in split_f_indices if sf != f_idx]
+                            
+                            # 按终稿段落边界切割字符级 diff，分别输出
+                            _output_split_diff(
+                                result_doc, orig_text, all_f_indices, 
+                                final_paras, SENTENCE_SIM_THRESHOLD
+                            )
+                            
+                            # 标记拆分组终稿段落为已输出
+                            for sf in all_f_indices:
+                                if sf != f_idx:
+                                    outputted_split_final.add(sf)
+                        
+                        elif orig_text == final_text and o_idx not in moved_para_orig_set and o_idx not in forward_moved_para_orig_set:
+                            # 文本完全相同且非移动段落 → 直接输出
                             result_doc.add_paragraph(orig_text)
                         else:
-                            # 根据整体相似度决定比对方式
+                            # 有差异，或是移动段落 → 走 sentence_level_diff
+                            # 移动段落的蓝删占位已在原位输出，终稿新位正常做diff保留内部差异
                             p = result_doc.add_paragraph()
                             sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
         
-        # 4. 输出剩余的删除段落（跳过空段落）
+        # 4. 输出剩余的删除段落（跳过空段落和已处理的移动段落）
         while next_orig_idx < len(orig_paras):
-            # 检查这个段落是否已经被匹配
-            if next_orig_idx not in matched_orig:
+            # 检查这个段落是否已经被匹配或已处理
+            if next_orig_idx not in matched_orig and next_orig_idx not in processed_orig:
                 orig_del_text = orig_paras[next_orig_idx]['text']
                 if orig_del_text:
                     p = result_doc.add_paragraph()
@@ -557,9 +908,8 @@ def main(workdir, original_path=None, final_path=None):
     success, result_msg = compare_with_python(original, final, os.path.join(workdir, output_name))
     
     if success:
-        print(f"\n比较完成!")
         print(f"方法: {result_msg}")
-        print(f"结果保存至: {os.path.normpath(os.path.join(workdir, output_name))}")
+        print(f"比较完成: {os.path.normpath(os.path.join(workdir, output_name))}")
     else:
         print(f"\n比较失败: {result_msg}")
 
