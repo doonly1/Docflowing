@@ -138,10 +138,10 @@ def char_level_diff(original_text, final_text):
 
 
 def split_into_sentences(text):
-    """按逗号和句号分割句子，保留标点符号"""
+    """按逗号和句号分割句子，保留标点符号（支持中英文标点）"""
     import re
-    # 按逗号和句号分割，保留标点符号
-    sentences = re.split(r'([，。！？；：])', text)
+    # 按逗号和句号分割，保留标点符号（同时支持中英文标点）
+    sentences = re.split(r'([，,。！!？?；;：:])', text)
     # 合并句子和标点符号
     result = []
     for i in range(0, len(sentences) - 1, 2):
@@ -626,6 +626,71 @@ def compare_with_python(original_path, final_path, output_path):
         # o_match[o_idx] = [f_idx1, f_idx2, ...] 反向映射
         o_match = {}
         split_matched_final = set()  # 已参与拆分组匹配的终稿索引
+        
+        # 步骤2.4: 合并检测（N原稿段落 → 1终稿段落）
+        # 检查已1:1匹配的终稿段落，其匹配的原稿段落相邻位置是否有未匹配的orig段落，
+        # 拼接后是否能更好地匹配终稿文本。这对短段落合并场景尤为重要
+        # （如标题"关于…的" + "通知" → "关于…的通知"）
+        if True:
+            # 收集所有仍未匹配的orig段落
+            unmatched_orig = set()
+            for o_i in range(len(orig_paras)):
+                if o_i not in matched_orig:
+                    unmatched_orig.add(o_i)
+            
+            # 合并候选：检查每个已1:1匹配的终稿段落
+            merge_candidates = []
+            for f_i in range(len(final_paras)):
+                o_i = f_match[f_i]
+                if o_i == -1 or isinstance(o_i, list):
+                    continue
+                
+                # 检查 o_i 相邻位置的未匹配 orig 段落
+                for adjacent_o in [o_i - 1, o_i + 1]:
+                    if adjacent_o < 0 or adjacent_o >= len(orig_paras):
+                        continue
+                    if adjacent_o in matched_orig:
+                        continue
+                    if not orig_paras[adjacent_o]['text']:
+                        continue
+                    
+                    # 拼接文本（按原稿顺序）
+                    if adjacent_o < o_i:
+                        combined = orig_paras[adjacent_o]['text'] + orig_paras[o_i]['text']
+                    else:
+                        combined = orig_paras[o_i]['text'] + orig_paras[adjacent_o]['text']
+                    
+                    combined_ratio = difflib.SequenceMatcher(
+                        None, combined, final_paras[f_i]['text']
+                    ).ratio()
+                    
+                    # 当前单段落匹配的 ratio
+                    current_ratio = difflib.SequenceMatcher(
+                        None, orig_paras[o_i]['text'], final_paras[f_i]['text']
+                    ).ratio()
+                    
+                    # 合并后 ratio 必须高于当前单段落 ratio，且高于阈值
+                    if combined_ratio > current_ratio and combined_ratio >= PARA_SIM_THRESHOLD:
+                        # 改进程度
+                        improvement = combined_ratio - current_ratio
+                        merge_candidates.append((improvement, combined_ratio, o_i, adjacent_o, f_i))
+            
+            # 按改进程度降序排序，贪心处理
+            merge_candidates.sort(reverse=True, key=lambda x: x[0])
+            
+            for improvement, combined_ratio, o_i, adjacent_o, f_i in merge_candidates:
+                # 再次检查：两个 orig 段落是否仍可用
+                if adjacent_o in matched_orig:
+                    continue
+                if isinstance(f_match[f_i], list) and adjacent_o in f_match[f_i]:
+                    continue
+                
+                # 升级为一对多匹配
+                if isinstance(f_match[f_i], list):
+                    f_match[f_i] = sorted(f_match[f_i] + [adjacent_o])
+                else:
+                    f_match[f_i] = sorted([o_i, adjacent_o])
+                matched_orig.add(adjacent_o)
         
         # 找出仍未匹配的终稿段落
         final_unmatched_after_step2 = [i for i in range(len(final_paras)) if f_match[i] == -1]
