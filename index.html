@@ -841,6 +841,7 @@
         // 当前会话ID（用于文件上传模式）
         let currentSessionId = null;
         let isRemoteMode = false;  // 标记是否是远程模式（通过上传文件）
+        let isMetadataMode = false;  // 标记是否是元信息模式（to_index不上传文件内容）
 
         // 检测是否是局域网访问
         function isLanAccess() {
@@ -876,6 +877,7 @@
                     
                     fileListCache = [];
                     isRemoteMode = false;
+                    isMetadataMode = false;
                     currentSessionId = null;
                     
                     if (currentTool === 'to_compare') {
@@ -919,7 +921,75 @@
             // 获取文件夹路径（从第一个文件的路径推断）
             const fullPath = files[0].webkitRelativePath;
             const folderName = fullPath.split('/')[0];
-            
+
+            // to_index 工具：只提取元信息，不上传文件内容
+            if (currentTool === 'to_index') {
+                await handleFolderSelectMetadata(files, folderName);
+            } else {
+                await handleFolderSelectUpload(files, folderName);
+            }
+        }
+
+        // to_index 专用：只提取文件元信息发送给后端，不上传文件内容
+        async function handleFolderSelectMetadata(files, folderName) {
+            document.getElementById('uploadProgress').style.display = 'block';
+            document.getElementById('workdir').value = folderName + '（扫描中...）';
+
+            // 从 FileList 提取元信息（所有文件类型，不限扩展名）
+            const metadata = [];
+            for (const file of files) {
+                metadata.push({
+                    name: file.name,
+                    path: file.webkitRelativePath || file.name,
+                    size: file.size,
+                    lastModified: file.lastModified  // 毫秒时间戳
+                });
+            }
+
+            if (metadata.length === 0) {
+                alert('该文件夹中没有文件');
+                document.getElementById('uploadProgress').style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch('/build_index_from_metadata', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        metadata: metadata,
+                        folder_name: folderName,
+                        session_id: currentSessionId || undefined
+                    })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentSessionId = data.session_id;
+                    isRemoteMode = true;
+                    isMetadataMode = true;  // 标记为元信息模式
+                    document.getElementById('workdir').value = folderName + '（已索引 ' + data.file_count + ' 个文件）';
+                    document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 索引完成，共 ' + data.file_count + ' 个文件（仅元信息，未上传文件内容）</span>';
+
+                    // 清空文件列表缓存
+                    fileListCache = [];
+
+                    // 3秒后隐藏进度提示
+                    setTimeout(() => {
+                        document.getElementById('uploadProgress').style.display = 'none';
+                    }, 3000);
+                } else {
+                    throw new Error(data.message || '索引生成失败');
+                }
+            } catch (error) {
+                console.error('索引生成失败:', error);
+                document.getElementById('workdir').value = '';
+                document.getElementById('uploadProgress').innerHTML = '<span style="color: #dc3545;">✗ 索引生成失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 其他工具：上传文件内容到服务器
+        async function handleFolderSelectUpload(files, folderName) {
             // 显示上传进度
             document.getElementById('uploadProgress').style.display = 'block';
             document.getElementById('workdir').value = folderName + '（上传中...）';
@@ -969,6 +1039,7 @@
                 if (data.success) {
                     currentSessionId = data.session_id;
                     isRemoteMode = true;
+                    isMetadataMode = false;
                     document.getElementById('workdir').value = folderName + '（已上传 ' + data.files.length + ' 个文件）';
                     document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 上传完成，共 ' + data.files.length + ' 个文件</span>';
                     
@@ -1038,6 +1109,32 @@
                 resultDiv.className = 'error';
                 resultDiv.textContent = '请选择工作目录';
                 resultDiv.style.display = 'block';
+                return;
+            }
+
+            // to_index 元信息模式：索引已在前端选文件夹时生成，直接展示结果
+            if (isMetadataMode && currentTool === 'to_index' && currentSessionId) {
+                resultDiv.className = 'success';
+                resultDiv.innerHTML = '<pre class="output-pre" id="outputLog"></pre>';
+                resultDiv.style.display = 'block';
+                const outputLog = document.getElementById('outputLog');
+
+                try {
+                    const checkRes = await fetch('/check_results', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({session_id: currentSessionId})
+                    });
+                    const checkData = await checkRes.json();
+                    if (checkData.success && checkData.files.length > 0) {
+                        const fileList = checkData.files.map(f => `  - ${f.name}`).join('\n');
+                        outputLog.textContent = `索引已生成（仅元信息，未上传文件内容）\n生成 ${checkData.files.length} 个文件:\n${fileList}\n\n[结束]`;
+                    } else {
+                        outputLog.textContent = '索引已生成\n\n[结束]';
+                    }
+                } catch (e) {
+                    outputLog.textContent = '索引已生成\n\n[结束]';
+                }
                 return;
             }
 

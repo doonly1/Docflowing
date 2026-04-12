@@ -132,6 +132,60 @@ def build_index(workdir):
     create_excel(file_info_list, workdir, 'file_index.xlsx')
 
 
+def build_index_from_metadata(metadata_list, folder_name, output_dir):
+    """从前端传入的文件元信息直接构建索引（无需读取服务器文件系统）
+
+    Args:
+        metadata_list: 前端 FileList 提取的元信息列表
+            [{name, path, size, lastModified}, ...]
+        folder_name: 文件夹名称（用于 Excel 中超链接的相对路径前缀）
+        output_dir: 输出目录（服务器临时目录）
+
+    Returns:
+        output_path: 生成的 Excel 文件路径
+    """
+    file_info_list = []
+    for item in metadata_list:
+        rel_path = item.get('path', item.get('name', ''))
+        filename = item.get('name', rel_path.split('/')[-1] if '/' in rel_path else rel_path)
+        # webkitRelativePath 格式: folderName/sub/file.docx
+        # 去掉第一层 folderName，使目录层级与本地模式一致
+        path_parts = rel_path.split('/') if rel_path else [filename]
+        if len(path_parts) > 1 and path_parts[0] == folder_name:
+            path_parts = path_parts[1:]
+        # 构建不含根目录名的相对路径（与本地 collect_file_info 一致）
+        rel_path_no_root = '/'.join(path_parts) if path_parts else filename
+        dir_levels = path_parts[:-1]
+        # 修改日期
+        last_mod = item.get('lastModified', '')
+        if isinstance(last_mod, (int, float)):
+            mod_time = datetime.fromtimestamp(last_mod / 1000).strftime('%Y-%m-%d')
+        elif isinstance(last_mod, str) and last_mod:
+            mod_time = last_mod[:10]
+        else:
+            mod_time = ''
+        # 文件大小
+        file_size_bytes = item.get('size', 0)
+        formatted_size = format_file_size(file_size_bytes)
+
+        file_info_list.append({
+            'filename': filename,
+            'rel_path': rel_path_no_root,
+            'abs_path': rel_path,  # 远程模式无绝对路径，用原始路径占位
+            'dir_levels': dir_levels,
+            'mod_time': mod_time,
+            'file_size': formatted_size
+        })
+
+    if not file_info_list:
+        print("没有找到任何文件")
+        return None
+
+    create_excel(file_info_list, output_dir, 'file_index.xlsx')
+    output_path = os.path.join(output_dir, 'file_index.xlsx')
+    return output_path
+
+
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:

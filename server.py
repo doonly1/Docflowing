@@ -539,6 +539,7 @@ def api_download_results():
         # 获取上传完成时间，用于过滤原始文件
         session_info = user_sessions.get(session_id, {})
         upload_time = session_info.get('upload_finished', 0)
+        metadata_only = session_info.get('metadata_only', False)
         
         # 创建内存中的ZIP文件
         memory_file = io.BytesIO()
@@ -547,8 +548,8 @@ def api_download_results():
             for root, dirs, files in os.walk(user_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
-                    # 只打包上传完成时间之后修改的文件（处理结果）
-                    if os.path.getmtime(file_path) > upload_time:
+                    # 元信息模式：打包所有文件；普通模式：只打包处理结果
+                    if metadata_only or os.path.getmtime(file_path) > upload_time:
                         arcname = os.path.relpath(file_path, user_dir)
                         zf.write(file_path, arcname)
         
@@ -600,8 +601,9 @@ def api_check_results():
         # 获取上传完成时间，用于过滤处理结果文件
         session_info = user_sessions.get(session_id, {})
         upload_time = session_info.get('upload_finished', 0)
+        metadata_only = session_info.get('metadata_only', False)
         
-        # 获取所有生成的文件（只返回上传完成后修改的文件）
+        # 获取所有生成的文件
         result_files = []
         for f in os.listdir(user_dir):
             file_path = os.path.join(user_dir, f)
@@ -609,8 +611,9 @@ def api_check_results():
                 # 跳过临时文件
                 if f.startswith('~$'):
                     continue
-                # 只返回上传完成后修改的文件（处理结果）
-                if os.path.getmtime(file_path) > upload_time:
+                # 元信息模式：没有上传原始文件，返回所有文件
+                # 普通模式：只返回上传完成后修改的文件（处理结果）
+                if metadata_only or os.path.getmtime(file_path) > upload_time:
                     result_files.append({
                         'name': f,
                         'size': os.path.getsize(file_path)
@@ -623,6 +626,53 @@ def api_check_results():
             'server_path': user_dir
         })
         
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/build_index_from_metadata', methods=['POST'])
+def api_build_index_from_metadata():
+    """从前端上传的文件元信息直接构建索引（无需上传文件内容）"""
+    import uuid
+    import json
+    from to_index import build_index_from_metadata
+
+    data = request.get_json()
+    metadata_list = data.get('metadata', [])
+    folder_name = data.get('folder_name', 'unknown')
+    session_id = data.get('session_id')
+
+    if not metadata_list:
+        return jsonify({'success': False, 'message': '没有文件元信息'})
+
+    # 创建或复用临时目录
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    output_dir = get_user_temp_dir(session_id)
+
+    try:
+        output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)
+        if not output_path:
+            return jsonify({'success': False, 'message': '生成索引失败：无有效文件'})
+
+        # 记录会话信息
+        user_sessions[session_id] = {
+            'original_path': folder_name,
+            'created_at': time.time(),
+            'last_active': time.time(),
+            'upload_finished': time.time(),
+            'files': ['file_index.xlsx'],
+            'ip': request.remote_addr,
+            'metadata_only': True  # 标记为纯元信息模式
+        }
+
+        file_count = len(metadata_list)
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'file_count': file_count,
+            'message': f'已索引 {file_count} 个文件'
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
