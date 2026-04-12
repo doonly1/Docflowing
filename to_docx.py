@@ -10,27 +10,28 @@ import re
 
 def extract_text_from_pdf(file_path):
     """从PDF提取文本"""
-    import fitz
-    doc = fitz.open(file_path)
+    import pdfplumber
     full_text = ""
-    for page in doc:
-        page_text = page.get_text("text")
-        lines = page_text.split('\n')
-        for line in lines:
-            line = line.strip()
-            if not line:
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if not page_text:
                 continue
-            # 过滤页码
-            if re.match(r'^-?\d+-?$', line):
-                continue
-            if re.match(r'^第\s*\d+\s*页$', line):
-                continue
-            if line.isdigit() and len(line) <= 3:
-                continue
-            if '版权所有' in line or '翻印必究' in line:
-                continue
-            full_text += line + '\n'
-    doc.close()
+            lines = page_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # 过滤页码
+                if re.match(r'^-?\d+-?$', line):
+                    continue
+                if re.match(r'^第\s*\d+\s*页$', line):
+                    continue
+                if line.isdigit() and len(line) <= 3:
+                    continue
+                if '版权所有' in line or '翻印必究' in line:
+                    continue
+                full_text += line + '\n'
     return full_text.strip()
 
 
