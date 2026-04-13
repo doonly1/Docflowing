@@ -89,7 +89,7 @@ python server.py
 
 ## 配置说明
 
-服务端配置文件位于 `config/` 目录下
+服务端配置文件位于 `config/` 目录下 
 用户端自动创建`~/.config/doc_tool/config.yaml`
 
 ### 发文字号与印章配置 (config.yaml)
