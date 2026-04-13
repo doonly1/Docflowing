@@ -6,7 +6,7 @@
 
 | 模块 | 说明 |
 |------|------|
-| `to_compare.py` | **文档比对**（段落/句子/字符三级 diff，红蓝高亮） |
+| `to_compare.py` | 文档比对（段落/句子/字符三级 diff，红蓝高亮） |
 | `to_redhead.py` | 红头文件生成（套红、印章、文号） |
 | `to_docx.py` | 多格式转 DOCX（PDF/DOC/DOCX/TXT/HTML/MD） |
 | `to_pageNum.py` | 批量添加页码 |
@@ -46,7 +46,7 @@
 | 一段落拆分为多 | 拆分检测，按终稿段落边界切割 diff |
 | 中英文标点混用 | 统一支持中英文逗号、句号、叹号、问号、分号、冒号分句 |
 
-### 配置项
+### 匹配阈值设置
 
 `config/config.yaml` 中的 `compare` 段：
 
@@ -89,7 +89,8 @@ python server.py
 
 ## 配置说明
 
-配置文件位于 `config/` 目录下：
+服务端配置文件位于 `config/` 目录下
+用户端自动创建`~/.config/doc_tool/config.yaml`
 
 ### 发文字号与印章配置 (config.yaml)
 
@@ -99,7 +100,6 @@ python server.py
     - 公司简称
   代字: 发文代字
   印章位置: ./config/公司名称.png
-  存储路径: ./output
 
 compare:
   sentence_similarity_threshold: 0.40
@@ -110,8 +110,8 @@ last_workdir: ""
 
 ### 印章图片
 
-将公司印章图片命名后放入 `config/` 目录：
-- 文件名需与 `config.yaml` 中的公司名称一致
+将印章图片放入“印章位置”对应的目录：
+- 文件名需与 `config.yaml` 中配置的公司名称一致
 - 格式：PNG
 
 ## 项目结构
