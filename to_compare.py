@@ -360,7 +360,7 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
                 best_ratio = ratio
                 best_o_idx = o_idx
         
-        if best_o_idx != -1:
+        if best_o_idx != -1 and best_ratio >= SENTENCE_SIM_THRESHOLD:
             sentence_match.append((best_o_idx, f_idx, best_ratio))
             used_orig.add(best_o_idx)
             used_final.add(f_idx)
