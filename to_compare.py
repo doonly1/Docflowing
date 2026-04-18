@@ -443,6 +443,7 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
             run = result_para.add_run(f_sent)
             run.font.color.rgb = RGBColor(255, 0, 0)
         else:
+            
             o_idx, ratio = final_to_match[f_idx]
             o_sent = orig_sentences[o_idx]
             processed_orig.add(o_idx)

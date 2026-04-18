@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文档处理工具</title>
+    <title>DocProc</title>
     <style>
         * {
             margin: 0;
@@ -629,6 +629,14 @@
                 const savedPath = localStorage.getItem('workdir');
                 if (savedPath) {
                     document.getElementById('workdir').value = savedPath;
+                }
+            }
+
+            // 3. 路径恢复后，如果当前工具是文档比较，加载原稿/终稿列表
+            if (currentTool === 'to_compare') {
+                const workdir = document.getElementById('workdir').value.trim();
+                if (workdir) {
+                    loadCompareFiles(workdir);
                 }
             }
         });
