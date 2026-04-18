@@ -397,6 +397,15 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     # 原稿位置追踪指针
     next_orig = 0
     
+    # 预计算：每个原稿句子索引之后（含自身）最近的已配对原稿句子索引
+    # 用于确定未匹配终稿句子的蓝删输出上限
+    next_matched_orig_after = [len(orig_sentences)] * len(orig_sentences)
+    latest_matched = len(orig_sentences)
+    for i in range(len(orig_sentences) - 1, -1, -1):
+        if i in orig_to_final:
+            latest_matched = i
+        next_matched_orig_after[i] = latest_matched
+    
     for f_idx in range(len(final_sentences)):
         f_sent = final_sentences[f_idx]
         
@@ -404,7 +413,12 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
         if f_idx in final_to_match:
             current_orig_idx = final_to_match[f_idx][0]
         else:
-            current_orig_idx = len(orig_sentences)  # 无匹配，不限制
+            # 未匹配终稿句子：只推进到下一个已配对原稿句子之前
+            # 避免一次性输出所有后续原稿蓝删，导致位置错乱
+            if next_orig < len(orig_sentences):
+                current_orig_idx = next_matched_orig_after[next_orig]
+            else:
+                current_orig_idx = next_orig  # 已到末尾，不推进
         
         # 输出原稿中"本应在此位置但已移走或已删除"的句子（蓝色删除）
         while next_orig < current_orig_idx:
