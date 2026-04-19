@@ -870,6 +870,27 @@
             }
         });
 
+        // 心跳定时器：每30秒发送一次心跳保持会话活跃
+        let heartbeatTimer = null;
+        function startHeartbeat() {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            heartbeatTimer = setInterval(function() {
+                if (currentSessionId) {
+                    fetch('/heartbeat', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({session_id: currentSessionId})
+                    }).catch(() => {});
+                }
+            }, 30000);
+        }
+        function stopHeartbeat() {
+            if (heartbeatTimer) {
+                clearInterval(heartbeatTimer);
+                heartbeatTimer = null;
+            }
+        }
+
         // 选择文件夹 - 根据访问方式决定使用哪种模式
         window.selectFolder = async function() {
             if (isLanAccess()) {
@@ -989,6 +1010,7 @@
                     currentSessionId = data.session_id;
                     isRemoteMode = true;
                     isMetadataMode = true;  // 标记为元信息模式
+                    startHeartbeat();
                     document.getElementById('workdir').value = folderName + '（已索引 ' + data.file_count + ' 个文件）';
                     document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 索引完成，共 ' + data.file_count + ' 个文件（仅元信息，未上传文件内容）</span>';
 
@@ -1061,6 +1083,7 @@
                     currentSessionId = data.session_id;
                     isRemoteMode = true;
                     isMetadataMode = false;
+                    startHeartbeat();
                     document.getElementById('workdir').value = folderName + '（已上传 ' + data.files.length + ' 个文件）';
                     document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 上传完成，共 ' + data.files.length + ' 个文件</span>';
                     

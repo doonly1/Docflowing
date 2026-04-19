@@ -409,7 +409,7 @@ def get_user_temp_dir(session_id):
     return user_dir
 
 def cleanup_old_sessions():
-    """清理超过4小时未活动的临时目录"""
+    """清理超时未活动的临时目录（2分钟无心跳则清理）"""
     temp_base = os.path.join(os.path.dirname(__file__), 'temp_workdirs')
     if not os.path.exists(temp_base):
         return
@@ -427,8 +427,8 @@ def cleanup_old_sessions():
                 if last_active == 0:
                     last_active = os.path.getmtime(session_dir)
                 
-                # 4小时无活动则清理
-                if current_time - last_active > 14400:
+                # 2分钟无心跳则清理
+                if current_time - last_active > 120:
                     shutil.rmtree(session_dir, ignore_errors=True)
                     user_sessions.pop(session_id, None)
             except:
@@ -438,6 +438,21 @@ def update_session_activity(session_id):
     """更新会话活动时间"""
     if session_id in user_sessions:
         user_sessions[session_id]['last_active'] = time.time()
+
+
+@app.route('/heartbeat', methods=['POST'])
+def api_heartbeat():
+    """客户端心跳，保持会话活跃"""
+    data = request.get_json() if request.is_json else {}
+    session_id = data.get('session_id')
+    
+    if not session_id:
+        return jsonify({'success': False})
+    
+    if session_id in user_sessions:
+        user_sessions[session_id]['last_active'] = time.time()
+    
+    return jsonify({'success': True})
 
 @app.route('/clear_session', methods=['POST'])
 def api_clear_session():

@@ -11,7 +11,7 @@ import yaml
 from docx import Document
 from docx.shared import RGBColor
 from doc_process import doc_to_docx
-from mystyle import clear_styles, add_my_styles, my_number_style, set_page
+from mystyle import clear_styles, add_my_styles, my_number_style, set_page, change_origin_styles
 
 
 def load_compare_config():
