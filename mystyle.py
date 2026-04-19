@@ -73,8 +73,7 @@ def clear_styles(doc):
     #删除冗余样式
     for style in itertools.chain(doc.styles, doc.styles.latent_styles):
         style_attr(style, style.priority)
-        if style.name not in ['Normal', 'page number', 'Title',
-                              'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4']:
+        if style.name not in ['Normal', 'page number']:
             try:
                 style.quick_style = False
                 style.delete()
