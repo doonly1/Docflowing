@@ -6,7 +6,7 @@
 import os
 import sys
 import time
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
@@ -343,9 +343,7 @@ def api_run_tool_with_config():
 @app.route('/auto_save_config', methods=['POST'])
 def api_auto_save_config():
     """自动保存配置到用户 ~/.config/ 目录"""
-    import json
     import yaml
-    from datetime import datetime
     
     data = request.get_json()
     user_config = data.get('userConfig')
@@ -455,7 +453,6 @@ def api_clear_session():
 def api_upload_files():
     """接收用户上传的文件，保存到临时目录"""
     import uuid
-    import shutil
     
     # 清理旧会话
     cleanup_old_sessions()
@@ -634,7 +631,6 @@ def api_check_results():
 def api_build_index_from_metadata():
     """从前端上传的文件元信息直接构建索引（无需上传文件内容）"""
     import uuid
-    import json
     from to_index import build_index_from_metadata
 
     data = request.get_json()

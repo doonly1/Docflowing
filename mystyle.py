@@ -32,6 +32,15 @@ STYLE_DEFS = [
     ('Sign',     14,  '仿宋',           16, 0, 0, 28.95,  0, 0,    0, 'R'),
 ]
 
+# 中文字体名 → ASCII 字体名映射
+ASCII_FONT_MAP = {
+    '宋体': 'SimSun',
+    '黑体': 'SimHei',
+    '仿宋': 'Times New Roman',
+    '楷体': 'KaiTi',
+    '方正小标宋简体': 'FZXiaoBiaoSong-B05S',
+}
+
 
 def set_page(doc):
     for sec in doc.sections:
@@ -106,15 +115,6 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
     para_f.page_break_before = False
     para_f.keep_together = False
 
-
-# 中文字体名 → ASCII 字体名映射
-ASCII_FONT_MAP = {
-    '宋体': 'SimSun',
-    '黑体': 'SimHei',
-    '仿宋': 'Times New Roman',
-    '楷体': 'KaiTi',
-    '方正小标宋简体': 'FZXiaoBiaoSong-B05S',
-}
 
 def run_fm(run, font_type='仿宋', font_size=16, r=0, g=0, b=0):
     font3 = run.font

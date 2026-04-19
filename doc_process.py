@@ -1,12 +1,9 @@
-from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-import time
 import os
 
-from mystyle import para_fm, run_fm, clear_styles, add_my_styles, my_number_style, set_page
+from mystyle import para_fm, run_fm
 from win32com import client
-from win32com.client import constants
 
 
 def doc_to_docx(workdir):
@@ -25,6 +22,7 @@ def doc_to_docx(workdir):
             except:
                 pass
     word.Quit()
+
 
 def save_docx(doc, doc_name, workdir=None):
     """
@@ -73,6 +71,7 @@ def save_docx(doc, doc_name, workdir=None):
         print(f"另存失败: {e}")
         return None
 
+
 def set_headings(doc):
     paras=doc.paragraphs
     title = ['决议','决定','命令','公报','公告','通告','意见',\
@@ -105,7 +104,8 @@ def set_headings(doc):
             para.style = doc.styles['H2']
             for run in para.runs:
                 run_fm(run,'楷体',16,0,0,0)
-        
+
+
 def set_appendix(doc):
     paras=doc.paragraphs
     #2段落遍历完毕后，再次遍历到“附件”段落。设置附件格式，并获得其个数和内容。
@@ -148,13 +148,10 @@ def set_appendix(doc):
         para_fm(paras[dx_s[0]],0,0,28.95,16*6,0,0,'L')
         para_fm(paras[dx_s[0]],0,0,28.95,16*6,0,-16*4,'L')  #重设附件1.的格式
 
-    #4查找|附件|，标记到[]
-    ps=[]
+    #4设置顶格附件格式
     if len(dx_s) != 0:
         for para in paras[dx_s[0]:len(paras)-1]:
-            
             if '附' in para.text and '件' in para.text and len(para.text)<5:   #找到顶格'附件'
-                ps.append(paras.index(para))
 #                print('第{}段有|附件|：{}'.format(ps[-1]+1,para.text.strip('\n')))
                 if '：' in para.text[-1]:
                     para.text=para.text[:-1]
@@ -162,32 +159,7 @@ def set_appendix(doc):
                 para_fm(para,0,0,28.95,0,0,0,'L')
                 for run in para.runs:
                     run_fm(run,'黑体',16,0,0,0)	#设置顶格附件格式
-
-    #5取用[]于后续比对
-    if len(ps) != 0:
-        p=ps[0]
-        for para in paras[p:]:   #其下的每一段与附件说明内逐个对比
-            for _str in dx_n_strs:
-                if len(para.text)>2 and similar(para.text,_str)==1:
-#                    print('第{}段有附件标题：{}'.format(paras.index(para)+1,para.text))
-                    para.style=doc.styles['Tit']
-                    para_fm(para,0,0,28.95,0,0,0,'C')
-                    for run in para.runs:
-                        run_fm(run,'方正小标宋简体',22,0,0,0)
-                                         
-def similar(text_a,text_b):
-    if type(text_a)==type([]):
-        a=set(text_a)
-        b=set(text_b)
-    elif type(text_a)==type('你好'):
-        a=set(list(text_a))
-        b=set(list(text_b))
-    ab = a & b
-    ba = a ^ b
-    if len(ab)/(0.1+len(ba))>2:
-        return 1
-    else:
-        return 0
+                                      
 
 def set_date(doc):
     #3署名及日期设置 

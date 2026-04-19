@@ -9,14 +9,9 @@ import glob
 import difflib
 import yaml
 from docx import Document
-from docx.shared import RGBColor, Pt
-from docx.oxml.ns import qn  # noqa: F401
-
-# 导入文档处理函数
-from doc_process import (
-    clear_styles, add_my_styles, my_number_style, 
-    set_page, set_appendix, set_date, doc_to_docx
-    )
+from docx.shared import RGBColor
+from doc_process import doc_to_docx
+from mystyle import clear_styles, add_my_styles, my_number_style, set_page
 
 
 def load_compare_config():

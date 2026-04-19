@@ -6,9 +6,6 @@
 
 import os
 from datetime import datetime
-from openpyxl import Workbook
-from openpyxl.styles import Font
-from openpyxl.utils import get_column_letter
 from doc_process import doc_to_docx
 
 

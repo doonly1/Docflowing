@@ -3,7 +3,7 @@ from docx import Document
 from docx.shared import Pt
 
 from mystyle import para_fm,run_fm
-from float_picture import parse_xml, nsdecls, CT_Anchor, add_float_picture
+from float_picture import parse_xml, nsdecls, add_float_picture
 
 
 def add_seal(workdir):
