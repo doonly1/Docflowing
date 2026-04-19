@@ -31,7 +31,7 @@ def _make_text_run(text):
 
 def set_page_number(doc):
     """
-    用 python-docx 替代 win32 COM，在所有 section 的 footer 末尾追加
+    用 python-docx 替代 win32 COM
     "- 页 -" 域。
     只需在第一个 section 的 footer 添加，其余节通过 is_linked_to_previous 自动继承。
     """
@@ -47,30 +47,6 @@ def set_page_number(doc):
     try:
         para.style = doc.styles['page number']
     except Exception:
-<<<<<<< HEAD
-        word = win32.Dispatch('Word.Application')
-    word.Visible = 0
-    # Word COM 要求绝对路径
-    file_path = os.path.abspath(file_path)
-    doc = word.Documents.Open(file_path)
-    
-    # 使用动态方式获取常量
-    wdHeaderFooterPrimary = constants.__dict__.get('wdHeaderFooterPrimary', 1)
-    
-    for wd_section in doc.Sections:
-        try:
-            wd_section.Footers(wdHeaderFooterPrimary).PageNumbers.Add(PageNumberAlignment=2)
-            wd_section.Footers(wdHeaderFooterPrimary).PageNumbers.NumberStyle = 57
-        except Exception as e:
-            # 备用方案：直接通过索引访问
-            try:
-                wd_section.Footers(1).PageNumbers.Add(PageNumberAlignment=2)
-                wd_section.Footers(1).PageNumbers.NumberStyle = 57
-            except Exception as e2:
-                print(f"  页码设置失败: {e2}")
-    doc.Save()
-    doc.Close()
-=======
         pass
 
     # 如果段落已有内容，先加空格分隔
@@ -82,7 +58,6 @@ def set_page_number(doc):
     para._p.append(_make_page_field())
     para._p.append(_make_text_run(' -'))
 
->>>>>>> libreoffice
 
 def add_page_numbers(workdir):
     print('当前工作目录：', workdir)
