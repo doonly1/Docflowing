@@ -165,4 +165,4 @@ def my_number_style(doc):
     if not done:
         add_style(doc, 'page number', 20)
         run_fm(doc.styles['page number'], '宋体', 14)
-        para_fm(doc.styles['page number'], 0, 0, 1, 16, 16, 0, 'R')
+        para_fm(doc.styles['page number'], 0, 0, 1, 14, 14, 0, 'R')
