@@ -493,6 +493,7 @@ def compare_with_python(original_path, final_path, output_path):
         result_doc = Document()
         clear_styles(result_doc)
         add_my_styles(result_doc)
+        change_origin_styles(result_doc)
         my_number_style(result_doc)
         set_page(result_doc)
         

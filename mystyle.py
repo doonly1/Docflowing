@@ -4,7 +4,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.ns import qn
 import itertools
 
-# 对齐方式映射（替代 eval）
+# 对齐方式映射
 ALIGN_MAP = {
     'L': WD_PARAGRAPH_ALIGNMENT.LEFT,
     'R': WD_PARAGRAPH_ALIGNMENT.RIGHT,
@@ -30,6 +30,16 @@ STYLE_DEFS = [
     ('foter',    16,  '宋体',           14, 0, 0,     1, 16, 16,   0, 'L'),
     ('dater',    13,  '仿宋',           16, 0, 0, 28.95,  0, 64,   0, 'R'),
     ('Sign',     14,  '仿宋',           16, 0, 0, 28.95,  0, 0,    0, 'R'),
+]
+
+# 固有样式
+ORIGIN_STYLES = [
+    ('Normal',    2,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
+    ('Title',     3,  '方正小标宋简体',  22, 0, 0, 28.95,  0, 0,   0, 'C'),
+    ('Heading 1', 4,  '黑体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
+    ('Heading 2', 5,  '楷体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
+    ('Heading 3', 6,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
+    ('Heading 4', 21, '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J')    
 ]
 
 # 中文字体名 → ASCII 字体名映射
@@ -60,6 +70,7 @@ def set_page(doc):
 
 
 def clear_styles(doc):
+    #删除冗余样式
     for style in itertools.chain(doc.styles, doc.styles.latent_styles):
         style_attr(style, style.priority)
         if style.name not in ['Normal', 'page number', 'Title',
@@ -70,12 +81,16 @@ def clear_styles(doc):
             except Exception:
                 print('未删除：', style.name)
 
-    try:
-        run_fm(doc.styles['Normal'], '仿宋', 16)
-        para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
-    except Exception:
-        pass
-
+def change_origin_styles(doc):
+    #改变原始样式
+    for name, priority, font, size, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align in ORIGIN_STYLES:
+        for styles in [doc.styles, doc.styles.latent_styles]:
+            try:
+                run_fm(styles[name], font, size)
+                para_fm(styles[name],
+                        spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align)
+            except Exception:
+                pass
 
 def add_my_styles(doc):
     for name, priority, *_ in STYLE_DEFS:
