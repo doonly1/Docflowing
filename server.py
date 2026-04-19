@@ -12,6 +12,12 @@ from flask_cors import CORS
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
 
+# 上传限制
+MAX_FILE_SIZE = 50 * 1024 * 1024       # 单文件最大 50MB
+MAX_SESSION_SIZE = 200 * 1024 * 1024    # 单会话总大小最大 200MB
+MAX_FILES_PER_UPLOAD = 99              # 单次最多上传 99 个文件
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE  # Flask 请求体大小限制
 # 工具脚本映射
 TOOL_SCRIPTS = {
     'to_docx': 'to_docx.py',
@@ -26,6 +32,11 @@ TOOL_SCRIPTS = {
 @app.route('/')
 def index():
     return app.send_static_file('index.html')
+
+# 请求体过大处理
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'success': False, 'message': f'上传总大小超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'}), 413
 
 # 添加当前目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -147,8 +158,14 @@ def api_open_folder():
         return jsonify({'success': False, 'message': '目录不存在'})
 
     try:
-        # Windows 系统使用 explorer 打开目录
-        subprocess.Popen(['explorer', path])
+        import platform
+        system = platform.system()
+        if system == 'Windows':
+            subprocess.Popen(['explorer', path])
+        elif system == 'Darwin':
+            subprocess.Popen(['open', path])
+        else:
+            subprocess.Popen(['xdg-open', path])
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -483,14 +500,39 @@ def api_upload_files():
     # 保存上传的文件（保留原有文件）
     saved_files = []
     uploaded_files = request.files.getlist('files')
-    
+
+    # 限制单次上传文件数量
+    if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
+        return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
+
+    # 检查当前会话已用空间
+    session_used = 0
+    if os.path.exists(user_dir):
+        for f in os.listdir(user_dir):
+            fpath = os.path.join(user_dir, f)
+            if os.path.isfile(fpath):
+                session_used += os.path.getsize(fpath)
+
     for file in uploaded_files:
         if file.filename:
             # 安全检查：只保存允许的文件类型
             if file.filename.lower().endswith(extensions):
+                # 读取文件内容并检查大小
+                file_content = file.read()
+                file_size = len(file_content)
+                file.seek(0)  # 重置指针
+
+                if file_size > MAX_FILE_SIZE:
+                    return jsonify({'success': False, 'message': f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制（{file_size // 1024 // 1024}MB）'})
+
+                if session_used + file_size > MAX_SESSION_SIZE:
+                    return jsonify({'success': False, 'message': f'会话总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
+
                 filename = os.path.basename(file.filename)  # 防止路径遍历
                 save_path = os.path.join(user_dir, filename)
-                file.save(save_path)
+                with open(save_path, 'wb') as f:
+                    f.write(file_content)
+                session_used += file_size
                 saved_files.append(filename)
     
     # 保存会话信息，记录上传完成时间
@@ -691,14 +733,17 @@ def api_load_config_from_path():
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+
     print("=" * 50)
     print("文档处理服务")
-    print("访问地址: http://localhost:5000")
+    print(f"访问地址: http://0.0.0.0:{port}")
     print("=" * 50)
 
-    # 打开浏览器（只在主进程中执行，避免debug模式下重复打开）
-    import webbrowser
-    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        webbrowser.open('http://localhost:5000')
+    # 本地运行时打开浏览器（云端部署时无显示器，跳过）
+    if port == 5000:
+        import webbrowser
+        if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+            webbrowser.open(f'http://localhost:{port}')
 
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=(port == 5000), threaded=True)

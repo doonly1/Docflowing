@@ -1,9 +1,12 @@
 python-docx>=0.8.11
-pywin32>=305
 pyyaml>=6.0
-docx2pdf>=0.1.8
 flask>=2.3.0
 flask-cors>=4.0.0
 openpyxl>=3.1.0
 pdfplumber>=0.10.0
 beautifulsoup4>=4.12.0
+
+
+# Windows 可选依赖（提供 Word COM 支持，其他平台不需要）
+# pywin32>=305
+# docx2pdf>=0.1.8

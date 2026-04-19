@@ -1,27 +1,117 @@
 from docx.shared import Pt
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import os
+import platform
+import subprocess
 
 from mystyle import para_fm, run_fm
-from win32com import client
+
+
+def find_libreoffice():
+    """查找 LibreOffice 可执行文件路径，未找到返回 None
+
+    Returns:
+        str or None: soffice 可执行文件路径
+    """
+    candidates = []
+    system = platform.system()
+    if system == 'Windows':
+        candidates = [
+            os.path.join(os.environ.get('PROGRAMFILES', r'C:\Program Files'),
+                         'LibreOffice', 'program', 'soffice.exe'),
+            os.path.join(os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)'),
+                         'LibreOffice', 'program', 'soffice.exe'),
+        ]
+        # 尝试从注册表查找
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                 r'SOFTWARE\LibreOffice\LibreOffice', 0,
+                                 winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
+            install_dir, _ = winreg.QueryValueEx(key, 'InstallDir')
+            candidates.insert(0, os.path.join(install_dir, 'program', 'soffice.exe'))
+        except Exception:
+            pass
+    elif system == 'Darwin':
+        candidates = ['/Applications/LibreOffice.app/Contents/MacOS/soffice']
+    else:  # Linux
+        candidates = ['libreoffice', 'soffice',
+                      '/usr/bin/libreoffice', '/usr/bin/soffice',
+                      '/snap/bin/libreoffice']
+    for cmd in candidates:
+        try:
+            if os.path.isabs(cmd):
+                if os.path.isfile(cmd):
+                    return cmd
+            else:
+                result = subprocess.run(['which', cmd], capture_output=True, text=True)
+                if result.returncode == 0:
+                    return cmd
+        except Exception:
+            continue
+    return None
+
+
+def libreoffice_install_hint():
+    """返回当前平台的 LibreOffice 安装提示"""
+    system = platform.system()
+    if system == 'Windows':
+        return '请安装 LibreOffice: https://www.libreoffice.org/download/'
+    elif system == 'Darwin':
+        return '请安装 LibreOffice: brew install --cask libreoffice'
+    else:
+        return '请安装 LibreOffice: sudo apt install libreoffice  (或 yum/dnf/pacman 等对应命令)'
 
 
 def doc_to_docx(workdir):
-    """将workdir目录下的.doc文件批量转换为.docx格式"""
-    word = client.Dispatch("Word.Application")
-    word.Visible = False
-    for file in os.listdir(workdir):
-        if file.endswith('.doc') and not file.startswith("~$"):
+    """将workdir目录下的.doc文件批量转换为.docx格式（跨平台）"""
+    doc_files = [f for f in os.listdir(workdir)
+                 if f.endswith('.doc') and not f.startswith("~$")]
+    if not doc_files:
+        return
+
+    # 优先尝试 win32com（Windows + Word 已安装时最快）
+    try:
+        from win32com import client
+        word = client.Dispatch("Word.Application")
+        word.Visible = False
+        for file in doc_files:
             print('转化docx：{}'.format(file))
             file_path = os.path.join(workdir, file)
-            doc = word.Documents.Open(file_path) 
-            doc.SaveAs("{}x".format(file_path), 12)  # 12 = docx格式
+            doc = word.Documents.Open(file_path)
+            doc.SaveAs("{}x".format(file_path), 12)
             doc.Close()
             try:
                 os.remove(file_path)
             except:
                 pass
-    word.Quit()
+        word.Quit()
+        return
+    except Exception:
+        pass  # win32com 不可用，回退到 LibreOffice
+
+    # 尝试 LibreOffice
+    lo_cmd = find_libreoffice()
+    if lo_cmd:
+        for file in doc_files:
+            print('转化docx(LibreOffice)：{}'.format(file))
+        cmd = [lo_cmd, '--headless', '--convert-to', 'docx',
+               '--outdir', workdir] + [os.path.join(workdir, f) for f in doc_files]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            # 清理原 .doc 文件
+            for file in doc_files:
+                try:
+                    os.remove(os.path.join(workdir, file))
+                except:
+                    pass
+        except subprocess.CalledProcessError as e:
+            print(f'LibreOffice 转换失败: {e}')
+        return
+
+    # 都不可用
+    print('警告：无法转换 .doc 文件 — 需要 Microsoft Word 或 LibreOffice')
+    print(libreoffice_install_hint())
 
 
 def save_docx(doc, doc_name, workdir=None):

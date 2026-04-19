@@ -1,9 +1,32 @@
 import os,time
 from docx import Document
 from docx.shared import Pt
+from docx.oxml.ns import qn
 
 from mystyle import para_fm,run_fm
 from float_picture import parse_xml, nsdecls, add_float_picture
+
+
+def _apply_font_scaling(file_path, scaling):
+    """对文档第一段应用字体缩放（跨平台）
+    :param scaling: 缩放比例
+    """
+    # python-docx XML 方式：设置 w:w 属性
+    try:
+        doc = Document(file_path)
+        if doc.paragraphs:
+            first_para = doc.paragraphs[0]
+            for run in first_para.runs:
+                rPr = run._r.get_or_add_rPr()
+                for existing in rPr.findall(qn('w:w')):
+                    rPr.remove(existing)
+                w_elem = parse_xml(
+                    '<w:w xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:val="%d"/>' % scaling
+                )
+                rPr.append(w_elem)
+        doc.save(file_path)
+    except Exception as e:
+        print(f'字体缩放失败: {e}')
 
 
 def add_seal(workdir):
@@ -24,13 +47,14 @@ def add_seal(workdir):
         paras=doc.paragraphs
         sign_para_text='未找到署名'
         for para in paras:
-            para_text=para.text.replace(' ','')
+            para_text=''.join(para.text.split())
             if '年' in para_text and '月' in para_text\
-                and '日' in para_text and len(para_text)<12:
+                and '日' in para_text and len(para_text) < 13:
                 sign_para = paras[paras.index(para)-1]   #日期上一段
-                if len(sign_para.text)>3 and len(sign_para.text)<20:
-                    print('第{}段有署名：{}'.format(paras.index(para),sign_para.text))
-                    sign_para_text=sign_para.text.replace(' ','')
+                sign_text = ''.join(sign_para.text.split())
+                if len(sign_text)>3 and len(sign_text) < 25:
+                    print('第{}段有署名：{}'.format(paras.index(para), sign_text))
+                    sign_para_text = sign_text
                 try:
                     picture_name = get_stamp_path(sign_para_text)
                     if picture_name:
@@ -92,20 +116,10 @@ def add_seal(workdir):
         doc.save(save_path)
 
 
-        #应用重新打开，调整字体缩放
-        ssss = 560/(len(sign_para_text)+2)
-        import win32com.client as win32
-        try:
-            word = win32.gencache.EnsureDispatch('Word.Application')
-        except Exception:
-            word = win32.Dispatch('Word.Application') 
-        word.Visible = 0
-        file_path = os.path.normpath(os.path.join(workdir, file))
-        doc = word.Documents.Open(file_path)    #打开新的文档
-        doc.Paragraphs(1).Range.Font.Scaling = ssss
-        doc.Save()
-        doc.Close()
-        print('文档已保存：', file_path, '\n')
+        #应用字体缩放
+        scaling = int(560/(len(sign_para_text)+2))
+        _apply_font_scaling(save_path, scaling)
+        print('文档已保存：', os.path.normpath(save_path), '\n')
 
     
 def get_stamp_path(sign_text):
