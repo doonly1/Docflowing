@@ -697,14 +697,17 @@ def api_load_config_from_path():
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+
     print("=" * 50)
     print("文档处理服务")
-    print("访问地址: http://localhost:5000")
+    print(f"访问地址: http://0.0.0.0:{port}")
     print("=" * 50)
 
-    # 打开浏览器（只在主进程中执行，避免debug模式下重复打开）
-    import webbrowser
-    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        webbrowser.open('http://localhost:5000')
+    # 本地运行时打开浏览器（云端部署时无显示器，跳过）
+    if port == 5000:
+        import webbrowser
+        if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+            webbrowser.open(f'http://localhost:{port}')
 
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=(port == 5000), threaded=True)
