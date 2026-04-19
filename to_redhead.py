@@ -119,8 +119,8 @@ def get_stamp_path(sign_text):
     
     # 遍历配置，查找匹配的公司名称或简称
     for company, info in config.items():
-        if company == 'compare':
-            continue  # 跳过比较配置
+        if not isinstance(info, dict):
+            continue  # 跳过非公司配置（compare、last_workdir 等）
         if company == sign_text or sign_text in info.get('简称', []):
             # 优先使用配置中的印章位置
             stamp_path = info.get('印章位置')
@@ -143,8 +143,8 @@ def get_fawenzihao(sign_text):
     # 遍历配置，查找匹配的公司名称或简称
     if config:
         for company, info in config.items():
-            if company == 'compare':
-                continue  # 跳过比较配置
+            if not isinstance(info, dict):
+                continue  # 跳过非公司配置
             if company == sign_text or sign_text in info.get('简称', []):
                 daizi = info.get('代字')
                 break

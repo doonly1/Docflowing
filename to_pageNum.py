@@ -1,4 +1,4 @@
-import os,time
+import os
 from docx import Document
 
 from mystyle import my_number_style,set_page
@@ -58,7 +58,6 @@ def add_page_numbers(workdir):
         
         set_page_number(file_path)
         print('成功。')
-    print('任务结束。')
     try:
         word.Quit()
     except:

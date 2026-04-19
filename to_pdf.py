@@ -1,5 +1,4 @@
 import os
-import sys
 from docx2pdf import convert
 from doc_process import doc_to_docx
 from concurrent.futures import ProcessPoolExecutor, as_completed

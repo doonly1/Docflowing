@@ -7,7 +7,9 @@
 import os
 from datetime import datetime
 from doc_process import doc_to_docx
-
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 def format_file_size(size_bytes):
     if size_bytes == 0:
@@ -59,10 +61,6 @@ def collect_file_info(root_dir):
 
 
 def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    from openpyxl.utils import get_column_letter
-    
     if not file_info_list:
         print("没有找到任何文件")
         return

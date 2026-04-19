@@ -146,7 +146,6 @@ def generate_docx(text, workdir=None, filename=None):
         workdir: 保存目录，默认为None（当前目录）
         filename: 输出文件名（不含扩展名），默认为None（从文本第一行提取）
     """
-    import re
     from docx import Document
     from doc_process import set_appendix, set_date, save_docx, set_headings
     from mystyle import clear_styles, add_my_styles, my_number_style, set_page
