@@ -73,7 +73,7 @@ def add_seal(workdir):
         run.text = fawenzihao
         run_fm(run,'仿宋')
         para_fm(para,0,0,28.95,0,0,0,'C')
-        print('文号已生成：',run.text)
+        print('文号：',run.text)
         
         #插入红色分割线
         para = paras[0].insert_paragraph_before()
