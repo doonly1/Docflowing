@@ -9,29 +9,9 @@ from float_picture import parse_xml, nsdecls, add_float_picture
 
 def _apply_font_scaling(file_path, scaling):
     """对文档第一段应用字体缩放（跨平台）
-
-    优先级: win32com → LibreOffice → python-docx XML
-    scaling: 百分比值，如 80 表示 80%
+    :param scaling: 缩放比例
     """
-    # 1. 尝试 win32com（Windows + Word，效果最准确）
-    try:
-        import win32com.client as win32
-        try:
-            word = win32.gencache.EnsureDispatch('Word.Application')
-        except Exception:
-            word = win32.Dispatch('Word.Application')
-        word.Visible = 0
-        abs_path = os.path.normpath(os.path.abspath(file_path))
-        doc = word.Documents.Open(abs_path)
-        doc.Paragraphs(1).Range.Font.Scaling = scaling
-        doc.Save()
-        doc.Close()
-        word.Quit()
-        return
-    except Exception:
-        pass
-
-    # 2. python-docx XML 方式：设置 w:w 属性
+    # python-docx XML 方式：设置 w:w 属性
     try:
         doc = Document(file_path)
         if doc.paragraphs:
@@ -46,7 +26,7 @@ def _apply_font_scaling(file_path, scaling):
                 rPr.append(w_elem)
         doc.save(file_path)
     except Exception as e:
-        print(f'警告：字体缩放失败 — 需要 Word 或 LibreOffice: {e}')
+        print(f'字体缩放失败: {e}')
 
 
 def add_seal(workdir):
@@ -67,13 +47,14 @@ def add_seal(workdir):
         paras=doc.paragraphs
         sign_para_text='未找到署名'
         for para in paras:
-            para_text=para.text.replace(' ','')
+            para_text=''.join(para.text.split())
             if '年' in para_text and '月' in para_text\
-                and '日' in para_text and len(para_text)<12:
+                and '日' in para_text and len(para_text) < 13:
                 sign_para = paras[paras.index(para)-1]   #日期上一段
-                if len(sign_para.text)>3 and len(sign_para.text)<20:
-                    print('第{}段有署名：{}'.format(paras.index(para),sign_para.text))
-                    sign_para_text=sign_para.text.replace(' ','')
+                sign_text = ''.join(sign_para.text.split())
+                if len(sign_text)>3 and len(sign_text) < 25:
+                    print('第{}段有署名：{}'.format(paras.index(para), sign_text))
+                    sign_para_text = sign_text
                 try:
                     picture_name = get_stamp_path(sign_para_text)
                     if picture_name:
