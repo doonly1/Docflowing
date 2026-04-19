@@ -469,6 +469,29 @@ def api_clear_session():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+
+@app.route('/destroy_session', methods=['POST'])
+def api_destroy_session():
+    """销毁会话，删除整个临时目录"""
+    import shutil
+    data = request.get_json() if request.is_json else {}
+    session_id = data.get('session_id')
+    
+    if not session_id:
+        return jsonify({'success': False, 'message': '会话ID不存在'})
+    
+    user_dir = get_user_temp_dir(session_id)
+    
+    try:
+        # 删除整个临时目录
+        if os.path.exists(user_dir):
+            shutil.rmtree(user_dir, ignore_errors=True)
+        # 移除会话记录
+        user_sessions.pop(session_id, None)
+        return jsonify({'success': True, 'message': '会话已销毁'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/upload_files', methods=['POST'])
 def api_upload_files():
     """接收用户上传的文件，保存到临时目录"""

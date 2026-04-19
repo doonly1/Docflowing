@@ -600,35 +600,40 @@
             // 1. 默认选中文档比较功能
             selectTool('to_compare');
             
-            // 2. 恢复上次选择的路径（优先从服务器获取，fallback到localStorage）
-            try {
-                // 先尝试从服务器获取保存的路径
-                const pathRes = await fetch('/get_last_workdir');
-                const pathData = await pathRes.json();
-                if (pathData.success && pathData.path && pathData.path.length > 0) {
-                    document.getElementById('workdir').value = pathData.path;
-                    localStorage.setItem('workdir', pathData.path);
-                } else {
-                    // Fallback: 从localStorage恢复
-                    const savedPath = localStorage.getItem('workdir');
-                    if (savedPath) {
-                        document.getElementById('workdir').value = savedPath;
-                    } else {
-                        // 最后fallback到桌面路径
-                        try {
-                            const res = await fetch('/get_desktop', { method: 'POST' });
-                            const data = await res.json();
-                            if (data.success) {
-                                document.getElementById('workdir').value = data.path;
-                            }
-                        } catch (e) {}
-                    }
-                }
-            } catch (e) {
-                // 网络错误时用localStorage
+            // 2. 恢复上次选择的路径
+            if (isLanAccess()) {
+                // 局域网访问：只用 localStorage 恢复，不使用服务端路径
                 const savedPath = localStorage.getItem('workdir');
                 if (savedPath) {
                     document.getElementById('workdir').value = savedPath;
+                }
+            } else {
+                // 本地访问：优先从服务器获取，fallback到localStorage
+                try {
+                    const pathRes = await fetch('/get_last_workdir');
+                    const pathData = await pathRes.json();
+                    if (pathData.success && pathData.path && pathData.path.length > 0) {
+                        document.getElementById('workdir').value = pathData.path;
+                        localStorage.setItem('workdir', pathData.path);
+                    } else {
+                        const savedPath = localStorage.getItem('workdir');
+                        if (savedPath) {
+                            document.getElementById('workdir').value = savedPath;
+                        } else {
+                            try {
+                                const res = await fetch('/get_desktop', { method: 'POST' });
+                                const data = await res.json();
+                                if (data.success) {
+                                    document.getElementById('workdir').value = data.path;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                } catch (e) {
+                    const savedPath = localStorage.getItem('workdir');
+                    if (savedPath) {
+                        document.getElementById('workdir').value = savedPath;
+                    }
                 }
             }
 
@@ -856,6 +861,14 @@
             const hostname = window.location.hostname;
             return hostname !== 'localhost' && hostname !== '127.0.0.1';
         }
+
+        // 用户断开连接时（关闭页面、刷新、切换标签等）销毁会话
+        window.addEventListener('beforeunload', function() {
+            if (currentSessionId) {
+                const blob = new Blob([JSON.stringify({session_id: currentSessionId})], {type: 'application/json'});
+                navigator.sendBeacon('/destroy_session', blob);
+            }
+        });
 
         // 选择文件夹 - 根据访问方式决定使用哪种模式
         window.selectFolder = async function() {
