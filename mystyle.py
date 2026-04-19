@@ -107,8 +107,18 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
     para_f.keep_together = False
 
 
-def run_fm(run, font_type='仿宋', font_size=16, r=0, g=0, b=0, font_name='Times New Roman'):
+# 中文字体名 → ASCII 字体名映射
+ASCII_FONT_MAP = {
+    '宋体': 'SimSun',
+    '黑体': 'SimHei',
+    '仿宋': 'Times New Roman',
+    '楷体': 'KaiTi',
+    '方正小标宋简体': 'FZXiaoBiaoSong-B05S',
+}
+
+def run_fm(run, font_type='仿宋', font_size=16, r=0, g=0, b=0):
     font3 = run.font
+    font_name = ASCII_FONT_MAP.get(font_type, 'Times New Roman')
     font3.name = font_name
     font3.element.rPr.rFonts.set(qn('w:eastAsia'), font_type)
     font3.size = Pt(font_size)
@@ -131,7 +141,7 @@ def my_number_style(doc):
     for src in [doc.styles, doc.styles.latent_styles]:
         try:
             s = src['page number']
-            run_fm(s, '宋体', 14, font_name='SimSun-ExtB')
+            run_fm(s, '宋体', 14)
             style_attr(s, 20 if src is doc.styles else 24)
             done = True
             break
@@ -140,5 +150,5 @@ def my_number_style(doc):
 
     if not done:
         add_style(doc, 'page number', 20)
-        run_fm(doc.styles['page number'], '宋体', 14, font_name='SimSun-ExtB')
+        run_fm(doc.styles['page number'], '宋体', 14)
         para_fm(doc.styles['page number'], 0, 0, 1, 16, 16, 0, 'R')

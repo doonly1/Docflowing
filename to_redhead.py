@@ -71,7 +71,7 @@ def add_seal(workdir):
         run = para.add_run()
         fawenzihao = get_fawenzihao(sign_para_text)
         run.text = fawenzihao
-        run_fm(run,'仿宋_GB2312')
+        run_fm(run,'仿宋')
         para_fm(para,0,0,28.95,0,0,0,'C')
         print('文号已生成：',run.text)
         
