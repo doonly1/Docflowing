@@ -147,8 +147,14 @@ def api_open_folder():
         return jsonify({'success': False, 'message': '目录不存在'})
 
     try:
-        # Windows 系统使用 explorer 打开目录
-        subprocess.Popen(['explorer', path])
+        import platform
+        system = platform.system()
+        if system == 'Windows':
+            subprocess.Popen(['explorer', path])
+        elif system == 'Darwin':
+            subprocess.Popen(['open', path])
+        else:
+            subprocess.Popen(['xdg-open', path])
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})

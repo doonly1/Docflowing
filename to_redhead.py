@@ -1,9 +1,52 @@
 import os,time
 from docx import Document
 from docx.shared import Pt
+from docx.oxml.ns import qn
 
 from mystyle import para_fm,run_fm
 from float_picture import parse_xml, nsdecls, add_float_picture
+
+
+def _apply_font_scaling(file_path, scaling):
+    """对文档第一段应用字体缩放（跨平台）
+
+    优先级: win32com → LibreOffice → python-docx XML
+    scaling: 百分比值，如 80 表示 80%
+    """
+    # 1. 尝试 win32com（Windows + Word，效果最准确）
+    try:
+        import win32com.client as win32
+        try:
+            word = win32.gencache.EnsureDispatch('Word.Application')
+        except Exception:
+            word = win32.Dispatch('Word.Application')
+        word.Visible = 0
+        abs_path = os.path.normpath(os.path.abspath(file_path))
+        doc = word.Documents.Open(abs_path)
+        doc.Paragraphs(1).Range.Font.Scaling = scaling
+        doc.Save()
+        doc.Close()
+        word.Quit()
+        return
+    except Exception:
+        pass
+
+    # 2. python-docx XML 方式：设置 w:w 属性
+    try:
+        doc = Document(file_path)
+        if doc.paragraphs:
+            first_para = doc.paragraphs[0]
+            for run in first_para.runs:
+                rPr = run._r.get_or_add_rPr()
+                for existing in rPr.findall(qn('w:w')):
+                    rPr.remove(existing)
+                w_elem = parse_xml(
+                    '<w:w xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:val="%d"/>' % scaling
+                )
+                rPr.append(w_elem)
+        doc.save(file_path)
+    except Exception as e:
+        print(f'警告：字体缩放失败 — 需要 Word 或 LibreOffice: {e}')
 
 
 def add_seal(workdir):
@@ -92,20 +135,10 @@ def add_seal(workdir):
         doc.save(save_path)
 
 
-        #应用重新打开，调整字体缩放
-        ssss = 560/(len(sign_para_text)+2)
-        import win32com.client as win32
-        try:
-            word = win32.gencache.EnsureDispatch('Word.Application')
-        except Exception:
-            word = win32.Dispatch('Word.Application') 
-        word.Visible = 0
-        file_path = os.path.normpath(os.path.join(workdir, file))
-        doc = word.Documents.Open(file_path)    #打开新的文档
-        doc.Paragraphs(1).Range.Font.Scaling = ssss
-        doc.Save()
-        doc.Close()
-        print('文档已保存：', file_path, '\n')
+        #应用字体缩放
+        scaling = int(560/(len(sign_para_text)+2))
+        _apply_font_scaling(save_path, scaling)
+        print('文档已保存：', os.path.normpath(save_path), '\n')
 
     
 def get_stamp_path(sign_text):
