@@ -13,6 +13,8 @@ def set_page_number(file_path):
     except Exception:
         word = win32.Dispatch('Word.Application')
     word.Visible = 0
+    # Word COM 要求绝对路径
+    file_path = os.path.abspath(file_path)
     doc = word.Documents.Open(file_path)
     
     # 使用动态方式获取常量
