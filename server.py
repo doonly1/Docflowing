@@ -12,6 +12,12 @@ from flask_cors import CORS
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
 
+# 上传限制
+MAX_FILE_SIZE = 50 * 1024 * 1024       # 单文件最大 50MB
+MAX_SESSION_SIZE = 200 * 1024 * 1024    # 单会话总大小最大 200MB
+MAX_FILES_PER_UPLOAD = 99              # 单次最多上传 99 个文件
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE  # Flask 请求体大小限制
 # 工具脚本映射
 TOOL_SCRIPTS = {
     'to_docx': 'to_docx.py',
@@ -26,6 +32,11 @@ TOOL_SCRIPTS = {
 @app.route('/')
 def index():
     return app.send_static_file('index.html')
+
+# 请求体过大处理
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'success': False, 'message': f'上传总大小超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'}), 413
 
 # 添加当前目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -489,14 +500,39 @@ def api_upload_files():
     # 保存上传的文件（保留原有文件）
     saved_files = []
     uploaded_files = request.files.getlist('files')
-    
+
+    # 限制单次上传文件数量
+    if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
+        return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
+
+    # 检查当前会话已用空间
+    session_used = 0
+    if os.path.exists(user_dir):
+        for f in os.listdir(user_dir):
+            fpath = os.path.join(user_dir, f)
+            if os.path.isfile(fpath):
+                session_used += os.path.getsize(fpath)
+
     for file in uploaded_files:
         if file.filename:
             # 安全检查：只保存允许的文件类型
             if file.filename.lower().endswith(extensions):
+                # 读取文件内容并检查大小
+                file_content = file.read()
+                file_size = len(file_content)
+                file.seek(0)  # 重置指针
+
+                if file_size > MAX_FILE_SIZE:
+                    return jsonify({'success': False, 'message': f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制（{file_size // 1024 // 1024}MB）'})
+
+                if session_used + file_size > MAX_SESSION_SIZE:
+                    return jsonify({'success': False, 'message': f'会话总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
+
                 filename = os.path.basename(file.filename)  # 防止路径遍历
                 save_path = os.path.join(user_dir, filename)
-                file.save(save_path)
+                with open(save_path, 'wb') as f:
+                    f.write(file_content)
+                session_used += file_size
                 saved_files.append(filename)
     
     # 保存会话信息，记录上传完成时间
