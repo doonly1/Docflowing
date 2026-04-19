@@ -181,6 +181,9 @@ def api_get_server_config():
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
+        # last_workdir 是服务端路径，对客户端无意义，置空返回
+        if config and 'last_workdir' in config:
+            config['last_workdir'] = ''
         return jsonify({'success': True, 'config': config})
     except Exception as e:
         return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
@@ -725,6 +728,9 @@ def api_load_config_from_path():
             with open(config_path, 'r', encoding='utf-8') as f:
                 import yaml
                 config = yaml.safe_load(f)
+            # last_workdir 是服务端路径，对客户端无意义，置空返回
+            if config and 'last_workdir' in config:
+                config['last_workdir'] = ''
             return jsonify({'success': True, 'config': config, 'path': config_path})
         
         return jsonify({'success': False})

@@ -1392,6 +1392,10 @@
                 
                 if (pathData.success && pathData.config) {
                     userConfig = pathData.config;
+                    // last_workdir 是服务端路径，对客户端无意义，置空
+                    if (userConfig && 'last_workdir' in userConfig) {
+                        userConfig.last_workdir = '';
+                    }
                     isUsingUserConfig = true;
                     localStorage.setItem('userConfig', JSON.stringify(userConfig));
                     console.log('已从本地路径加载配置:', pathData.path);
@@ -1521,6 +1525,10 @@
                 const data = await response.json();
                 if (data.success) {
                     userConfig = data.config;
+                    // last_workdir 是服务端路径，对客户端无意义，置空
+                    if (userConfig && 'last_workdir' in userConfig) {
+                        userConfig.last_workdir = '';
+                    }
                     loadCompanyConfigForm(userConfig);
                     
                     if (userConfig.compare) {
