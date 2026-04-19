@@ -33,36 +33,30 @@ def set_page_number(doc):
     """
     用 python-docx 替代 win32 COM，在所有 section 的 footer 末尾追加
     "- 页 -" 域。
+    只需在第一个 section 的 footer 添加，其余节通过 is_linked_to_previous 自动继承。
     """
-    processed = set()  # 记录已处理的 footer
+    section = doc.sections[0]
+    footer = section.footer
 
-    for section in doc.sections:
-        footer = section.footer
+    # 确保 footer 有段落可承接内容
+    if not footer.paragraphs:
+        footer.add_paragraph()
+    para = footer.paragraphs[0]
 
-        # 跳过已处理的 footer（避免同一节不同页面重复添加）
-        if footer in processed:
-            continue
-        processed.add(footer)
+    # 应用 page number 样式（字体、字号、右对齐等）
+    try:
+        para.style = doc.styles['page number']
+    except Exception:
+        pass
 
-        # 确保 footer 有段落可承接内容
-        if not footer.paragraphs:
-            footer.add_paragraph()
-        para = footer.paragraphs[0]
+    # 如果段落已有内容，先加空格分隔
+    if para.text:
+        para.add_run('  ')
 
-        # 应用 page number 样式（字体、字号、右对齐等）
-        try:
-            para.style = doc.styles['page number']
-        except Exception:
-            pass
-
-        # 如果段落已有内容，先加空格分隔
-        if para.text:
-            para.add_run('  ')
-
-        # "- 1 -" 格式
-        para._p.append(_make_text_run('- '))
-        para._p.append(_make_page_field())
-        para._p.append(_make_text_run(' -'))
+    # "- 1 -" 格式
+    para._p.append(_make_text_run('- '))
+    para._p.append(_make_page_field())
+    para._p.append(_make_text_run(' -'))
 
 
 def add_page_numbers(workdir):
