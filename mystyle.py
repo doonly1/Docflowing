@@ -154,9 +154,15 @@ def my_number_style(doc):
     done = False
     for src in [doc.styles, doc.styles.latent_styles]:
         try:
+<<<<<<< HEAD
             s = src['page number']
             run_fm(s, '宋体', 14)
             style_attr(s, 20)
+=======
+            run_fm(src['page number'], '宋体', 14)
+            para_fm(src['page number'], 0, 0, 1, 14, 14, 0, 'R')
+            style_attr(src['page number'], 20)
+>>>>>>> libreoffice
             done = True
             break
         except Exception:
