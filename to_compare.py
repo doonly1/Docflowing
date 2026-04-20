@@ -301,11 +301,337 @@ def _apply_diff_run(result_para, diffs):
             run.font.color.rgb = RGBColor(255, 0, 0)
 
 
+def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, used_final, SENTENCE_SIM_THRESHOLD, sentence_match=None):
+    """
+    句子级拆分/合并检测。
+    
+    在贪心1:1匹配之后，对仍未匹配的句子尝试分组匹配：
+    - 合并：N个连续原稿句子 → 1个终稿句子
+    - 拆分：1个原稿句子 → N个连续终稿句子
+    - 合并升级：已1:1匹配的连续句子对，拼接后ratio更高时升级为合并组
+    
+    Args:
+        orig_sentences: 原稿句子列表
+        final_sentences: 终稿句子列表
+        used_orig: 已在1:1匹配中占用的原稿句子索引集合
+        used_final: 已在1:1匹配中占用的终稿句子索引集合
+        SENTENCE_SIM_THRESHOLD: 句子相似度阈值
+        sentence_match: 1:1匹配列表 [(orig_idx, final_idx, ratio), ...]，用于合并升级检测
+    
+    Returns:
+        merge_groups: [([o_idx1, o_idx2, ...], f_idx, ratio), ...]  合并组
+        split_groups: [(o_idx, [f_idx1, f_idx2, ...], ratio), ...]  拆分组
+        new_used_orig: 被分组匹配占用的原稿句子索引集合
+        new_used_final: 被分组匹配占用的终稿句子索引集合
+        replaced_match_indices: 被合并组替代的1:1匹配在sentence_match中的索引集合
+    """
+    MAX_GROUP_SIZE = 3  # 最多合并/拆分3句
+    
+    unmatched_orig = sorted(i for i in range(len(orig_sentences)) if i not in used_orig)
+    unmatched_final = sorted(i for i in range(len(final_sentences)) if i not in used_final)
+    
+    all_candidates = []  # (ratio, 'merge'/'split'/'merge_upgrade', group_info)
+    
+    # ---- A. 合并检测（纯未匹配）：N原稿句 → 1终稿句 ----
+    if unmatched_orig and unmatched_final:
+        for f_idx in unmatched_final:
+            f_text = final_sentences[f_idx]
+            if not f_text.strip():
+                continue
+            
+            for seg_start in range(len(unmatched_orig)):
+                for group_size in range(2, MAX_GROUP_SIZE + 1):
+                    seg_end = seg_start + group_size
+                    if seg_end > len(unmatched_orig):
+                        break
+                    
+                    o_indices = unmatched_orig[seg_start:seg_end]
+                    
+                    # 连续性检查：索引必须相邻
+                    if o_indices != list(range(o_indices[0], o_indices[0] + group_size)):
+                        break
+                    
+                    combined_orig = "".join(orig_sentences[oi] for oi in o_indices)
+                    if not combined_orig.strip():
+                        continue
+                    
+                    ratio = difflib.SequenceMatcher(None, combined_orig, f_text).ratio()
+                    
+                    if ratio >= SENTENCE_SIM_THRESHOLD:
+                        best_single_ratio = 0
+                        for oi in o_indices:
+                            single_ratio = difflib.SequenceMatcher(
+                                None, orig_sentences[oi], f_text
+                            ).ratio()
+                            best_single_ratio = max(best_single_ratio, single_ratio)
+                        
+                        if ratio > best_single_ratio:
+                            all_candidates.append((ratio, 'merge', (o_indices, f_idx)))
+    
+    # ---- B. 拆分检测（纯未匹配）：1原稿句 → N终稿句 ----
+    if unmatched_orig and unmatched_final:
+        for o_idx in unmatched_orig:
+            o_text = orig_sentences[o_idx]
+            if not o_text.strip():
+                continue
+            
+            for seg_start in range(len(unmatched_final)):
+                for group_size in range(2, MAX_GROUP_SIZE + 1):
+                    seg_end = seg_start + group_size
+                    if seg_end > len(unmatched_final):
+                        break
+                    
+                    f_indices = unmatched_final[seg_start:seg_end]
+                    
+                    # 连续性检查
+                    if f_indices != list(range(f_indices[0], f_indices[0] + group_size)):
+                        break
+                    
+                    combined_final = "".join(final_sentences[fi] for fi in f_indices)
+                    if not combined_final.strip():
+                        continue
+                    
+                    ratio = difflib.SequenceMatcher(None, o_text, combined_final).ratio()
+                    
+                    if ratio >= SENTENCE_SIM_THRESHOLD:
+                        best_single_ratio = 0
+                        for fi in f_indices:
+                            single_ratio = difflib.SequenceMatcher(
+                                None, o_text, final_sentences[fi]
+                            ).ratio()
+                            best_single_ratio = max(best_single_ratio, single_ratio)
+                        
+                        if ratio > best_single_ratio:
+                            all_candidates.append((ratio, 'split', (o_idx, f_indices)))
+    
+    # ---- C. 合并升级检测：已1:1匹配的连续句子对，拼接后更优时升级 ----
+    # 场景：原稿 "第一条 XX。第二条 YY。" → 终稿 "第一条 XX，YY。"
+    # 1:1匹配: orig[0]↔final[0](0.91), orig[1]↔final[1](0.75)
+    # 合并升级: orig[0]+orig[1] ↔ final[0]+final[1] 拼接后ratio更高
+    if sentence_match and len(sentence_match) >= 2:
+        # 按orig索引排序
+        sorted_matches = sorted(sentence_match, key=lambda m: m[0])
+        
+        # 检查连续的1:1匹配对
+        for i in range(len(sorted_matches)):
+            for group_size in range(2, MAX_GROUP_SIZE + 1):
+                end_i = i + group_size
+                if end_i > len(sorted_matches):
+                    break
+                
+                consecutive_group = sorted_matches[i:end_i]
+                
+                # 检查orig索引连续
+                orig_indices = [m[0] for m in consecutive_group]
+                if orig_indices != list(range(orig_indices[0], orig_indices[0] + group_size)):
+                    break
+                
+                # 检查final索引连续
+                final_indices = [m[1] for m in consecutive_group]
+                if final_indices != list(range(final_indices[0], final_indices[0] + group_size)):
+                    continue
+                
+                # 拼接原稿和终稿
+                combined_orig = "".join(orig_sentences[oi] for oi in orig_indices)
+                combined_final = "".join(final_sentences[fi] for fi in final_indices)
+                
+                if not combined_orig.strip() or not combined_final.strip():
+                    continue
+                
+                combined_ratio = difflib.SequenceMatcher(None, combined_orig, combined_final).ratio()
+                
+                # 1:1匹配的平均ratio
+                avg_single_ratio = sum(m[2] for m in consecutive_group) / len(consecutive_group)
+                
+                # 合并后ratio必须高于1:1匹配的平均ratio，且高于阈值
+                if combined_ratio > avg_single_ratio and combined_ratio >= SENTENCE_SIM_THRESHOLD:
+                    replaced_indices = set()
+                    for m_idx, m in enumerate(sentence_match):
+                        if m[0] in orig_indices:
+                            replaced_indices.add(m_idx)
+                    
+                    all_candidates.append((
+                        combined_ratio, 'merge_upgrade',
+                        (orig_indices, final_indices, replaced_indices)
+                    ))
+    
+    # ---- D. 匹配扩展检测：已1:1匹配 + 相邻未匹配原稿句子 → 合并 ----
+    # 场景：原稿 "加强领导。明确责任。落实到位。" → 终稿 "加强领导、明确责任、落实到位。"
+    # 1:1匹配: orig[0]↔final[0](0.5)，orig[1]和orig[2]未匹配
+    # 扩展：orig[0]+orig[1]+orig[2] ↔ final[0] 拼接后ratio更高
+    if sentence_match and unmatched_orig:
+        # 构建 1:1匹配查找表
+        match_by_orig = {m[0]: (m[1], m[2]) for m in sentence_match}
+        match_by_final = {m[1]: (m[0], m[2]) for m in sentence_match}
+        
+        for o_idx, f_idx, single_ratio in sentence_match:
+            # 向前/向后扫描相邻的未匹配原稿句子
+            for expand_size in range(2, MAX_GROUP_SIZE + 1):
+                # 尝试向两个方向扩展
+                for direction in ['forward', 'backward', 'both']:
+                    if direction == 'forward':
+                        # 向后扩展：o_idx, o_idx+1, ..., o_idx+expand_size-1
+                        expanded_orig = list(range(o_idx, o_idx + expand_size))
+                    elif direction == 'backward':
+                        # 向前扩展：o_idx-expand_size+1, ..., o_idx
+                        expanded_orig = list(range(o_idx - expand_size + 1, o_idx + 1))
+                    else:
+                        # 双向扩展
+                        half = (expand_size - 1) // 2
+                        expanded_orig = list(range(o_idx - half, o_idx + expand_size - half))
+                    
+                    # 边界检查
+                    if expanded_orig[0] < 0 or expanded_orig[-1] >= len(orig_sentences):
+                        continue
+                    
+                    # 检查扩展部分是否都是未匹配的（除了原始o_idx）
+                    expand_part = [oi for oi in expanded_orig if oi != o_idx]
+                    if any(oi in used_orig for oi in expand_part):
+                        continue
+                    
+                    # 连续性检查（已经是连续的 by construction）
+                    
+                    # 终稿句子：用已匹配的f_idx（扩展后整个组对应同一个终稿句子）
+                    combined_orig = "".join(orig_sentences[oi] for oi in expanded_orig)
+                    f_text = final_sentences[f_idx]
+                    
+                    if not combined_orig.strip():
+                        continue
+                    
+                    combined_ratio = difflib.SequenceMatcher(None, combined_orig, f_text).ratio()
+                    
+                    if combined_ratio > single_ratio and combined_ratio >= SENTENCE_SIM_THRESHOLD:
+                        # 记录被替代的1:1匹配
+                        replaced_indices = set()
+                        for m_idx, m in enumerate(sentence_match):
+                            if m[0] in expanded_orig:
+                                replaced_indices.add(m_idx)
+                        
+                        all_candidates.append((
+                            combined_ratio, 'merge_upgrade',
+                            (expanded_orig, [f_idx], replaced_indices)
+                        ))
+                        break  # 一个方向找到一个就够
+    
+    # ---- D. 贪心分配 ----
+    all_candidates.sort(key=lambda x: x[0], reverse=True)
+    
+    allocated_orig = set()
+    allocated_final = set()
+    merge_groups = []
+    split_groups = []
+    replaced_match_indices = set()
+    
+    for ratio, cand_type, group_info in all_candidates:
+        if cand_type == 'merge':
+            o_indices, f_idx = group_info
+            if any(oi in allocated_orig for oi in o_indices):
+                continue
+            if f_idx in allocated_final:
+                continue
+            for oi in o_indices:
+                allocated_orig.add(oi)
+            allocated_final.add(f_idx)
+            merge_groups.append((o_indices, f_idx, ratio))
+        
+        elif cand_type == 'split':
+            o_idx, f_indices = group_info
+            if o_idx in allocated_orig:
+                continue
+            if any(fi in allocated_final for fi in f_indices):
+                continue
+            allocated_orig.add(o_idx)
+            for fi in f_indices:
+                allocated_final.add(fi)
+            split_groups.append((o_idx, f_indices, ratio))
+        
+        elif cand_type == 'merge_upgrade':
+            orig_indices, final_indices, replaced_indices = group_info
+            if any(oi in allocated_orig for oi in orig_indices):
+                continue
+            if any(fi in allocated_final for fi in final_indices):
+                continue
+            # 确认分配
+            for oi in orig_indices:
+                allocated_orig.add(oi)
+            for fi in final_indices:
+                allocated_final.add(fi)
+            # merge_upgrade 记录为合并组（所有终稿句子作为一组）
+            merge_groups.append((orig_indices, final_indices, ratio))
+            replaced_match_indices.update(replaced_indices)
+    
+    return merge_groups, split_groups, allocated_orig, allocated_final, replaced_match_indices
+
+
+def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_indices):
+    """
+    句子级拆分组输出：1原稿句子 → N终稿句子（同一段落内）。
+    
+    将原稿句子文本与合并后的终稿句子文本做字符级 diff，
+    然后按终稿句子边界切割 diff 结果，分别输出到 result_para 的不同 run 区域。
+    
+    与段落级 _output_split_diff 的区别：所有输出在同一 result_para 内，
+    不创建新段落，仅按句子边界分段输出 diff。
+    
+    Args:
+        result_para: 结果段落对象
+        orig_text: 原稿句子文本
+        final_sentences_map: {f_idx: sentence_text} 终稿句子映射
+        f_indices: 终稿句子索引列表（按终稿顺序）
+    """
+    # 合并所有终稿句子文本
+    combined_final_text = "".join(final_sentences_map[fi] for fi in f_indices)
+    
+    # 字符级 diff
+    diffs = char_level_diff(orig_text, combined_final_text)
+    
+    # 构建终稿句子边界表：[(start, end, f_idx), ...]
+    boundaries = []
+    cursor = 0
+    for fi in f_indices:
+        sf_text = final_sentences_map[fi]
+        sf_len = len(sf_text)
+        boundaries.append((cursor, cursor + sf_len, fi))
+        cursor += sf_len
+    
+    # 为每个终稿句子收集其范围内的 diff 片段
+    para_diffs = {fi: [] for fi in f_indices}
+    
+    f_pos = 0
+    for tag, text in diffs:
+        if not text:
+            continue
+        text_len = len(text)
+        
+        if tag == 'delete':
+            target_fi = _find_boundary(boundaries, f_pos)
+            if target_fi is not None:
+                para_diffs[target_fi].append((tag, text))
+        elif tag in ('equal', 'insert'):
+            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
+            f_pos += text_len
+    
+    # 逐终稿句子输出（连续追加到同一个 result_para）
+    for fi in f_indices:
+        sf_diffs = para_diffs[fi]
+        
+        if not sf_diffs:
+            result_para.add_run(final_sentences_map[fi])
+        else:
+            all_equal = all(t == 'equal' for t, _ in sf_diffs)
+            if all_equal:
+                for t, txt in sf_diffs:
+                    result_para.add_run(txt)
+            else:
+                _apply_diff_run(result_para, sf_diffs)
+
+
 def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD):
     """
     句子级别差异比较（改进版）
     - 按终稿句子顺序输出
-    - 使用 LIS 检测句子互换：LIS 内走字符级 diff，LIS 外标记为移动（红增/蓝删）
+    - 贪心1:1匹配 + 句子级拆分/合并检测
+    - 使用逆序对检测句子互换
     - 低于相似度阈值的配对直接标记新增+删除
     """
     orig_sentences = split_into_sentences(orig_text)
@@ -317,7 +643,7 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
         _apply_diff_run(result_para, para_diff)
         return
     
-    # ---- 步骤1: 贪心匹配 ----
+    # ---- 步骤1: 贪心1:1匹配 ----
     used_orig = set()
     used_final = set()
     
@@ -340,24 +666,76 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
             used_orig.add(best_o_idx)
             used_final.add(f_idx)
     
-    # ---- 步骤2: 逆序对检测句子顺序变化 ----
-    # 逆序对：若 orig_i < orig_j 但 final_i > final_j，说明两者发生了交叉重排
-    # - 向后移的句子（orig 较小的那个）：原位蓝删 + 终稿新位红增
-    # - 向前移的句子（orig 较大的那个）：终稿位置直接显示终稿文本，不做字符级diff
-    # 双方都不做字符级diff，避免标点变化（句号↔逗号）被误标为修改
+    # ---- 步骤2: 句子级拆分/合并检测 ----
+    merge_groups, split_groups, group_used_orig, group_used_final, replaced_match_indices = \
+        _detect_sentence_merge_split(
+            orig_sentences, final_sentences, used_orig, used_final, 
+            SENTENCE_SIM_THRESHOLD, sentence_match
+        )
+    
+    # 移除被合并升级替代的1:1匹配
+    if replaced_match_indices:
+        sentence_match = [m for i, m in enumerate(sentence_match) if i not in replaced_match_indices]
+        # 重建 used_orig / used_final
+        used_orig = set(m[0] for m in sentence_match) | group_used_orig
+        used_final = set(m[1] for m in sentence_match) | group_used_final
+    
+    # 将分组占用的索引加入已用集合
+    used_orig.update(group_used_orig)
+    used_final.update(group_used_final)
+    
+    # 构建查找表
+    # merge_map: frozenset(f_indices) -> (o_indices, f_indices, ratio)  合并组（支持多终稿句）
+    merge_map = {}  # f_idx -> (o_indices, f_indices, ratio)
+    merge_final_set = set()  # 被合并组占用的终稿句子索引
+    for o_indices, f_indices, ratio in merge_groups:
+        # 将合并组信息关联到每个参与的终稿句子
+        group_key = (tuple(o_indices), tuple(f_indices), ratio)
+        for fi in f_indices:
+            merge_map[fi] = group_key
+        merge_final_set.update(f_indices)
+    
+    # split_map: o_idx -> (f_indices, ratio)  拆分组
+    split_map = {}
+    for o_idx, f_indices, ratio in split_groups:
+        split_map[o_idx] = (f_indices, ratio)
+    
+    # split_final_set: 被拆分组占用的终稿句子索引
+    split_final_set = set()
+    for o_idx, f_indices, ratio in split_groups:
+        split_final_set.update(f_indices)
+    
+    # ---- 步骤3: 逆序对检测句子顺序变化 ----
+    # 扩展：1:1匹配 + 合并组 + 拆分组都参与逆序对检测
+    # 统一表示为 (orig_key, final_key) 用于排序比较
+    # 合并组: orig_key = max(o_indices), final_key = max(f_indices)
+    # 拆分组: orig_key = o_idx, final_key = max(f_indices)
+    
+    all_pairs = []  # [(orig_key, final_key), ...] 用于逆序对检测
+    
+    for o_idx, f_idx, ratio in sentence_match:
+        all_pairs.append((o_idx, f_idx))
+    
+    for o_indices, f_indices, ratio in merge_groups:
+        all_pairs.append((max(o_indices), max(f_indices)))
+    
+    for o_idx, f_indices, ratio in split_groups:
+        all_pairs.append((o_idx, max(f_indices)))
+    
     moved_orig_set = set()       # 向后移的句子索引（原位蓝删 + 新位红增）
     forward_moved_set = set()    # 向前移的句子索引（终稿位直接显示，不做diff）
-    sentence_match_sorted = sorted(sentence_match, key=lambda m: m[0])
-    for i in range(len(sentence_match_sorted)):
-        for j in range(i + 1, len(sentence_match_sorted)):
-            if sentence_match_sorted[i][1] > sentence_match_sorted[j][1]:
+    
+    all_pairs_sorted = sorted(all_pairs, key=lambda p: p[0])
+    for i in range(len(all_pairs_sorted)):
+        for j in range(i + 1, len(all_pairs_sorted)):
+            if all_pairs_sorted[i][1] > all_pairs_sorted[j][1]:
                 # 交叉：orig_i 在前但 final_i 在后
-                moved_orig_set.add(sentence_match_sorted[i][0])    # 向后移
-                forward_moved_set.add(sentence_match_sorted[j][0]) # 向前移
+                moved_orig_set.add(all_pairs_sorted[i][0])
+                forward_moved_set.add(all_pairs_sorted[j][0])
     
-    # ---- 步骤3: 按终稿句子顺序输出，同时在原稿位置插入蓝色删除 ----
+    # ---- 步骤4: 按终稿句子顺序输出 ----
     
-    # 构建: final_idx -> (orig_idx, ratio)
+    # 构建: final_idx -> (orig_idx, ratio)  1:1匹配
     final_to_match = {}
     for o_idx, f_idx, ratio in sentence_match:
         final_to_match[f_idx] = (o_idx, ratio)
@@ -373,11 +751,12 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     next_orig = 0
     
     # 预计算：每个原稿句子索引之后（含自身）最近的已配对原稿句子索引
-    # 用于确定未匹配终稿句子的蓝删输出上限
+    # 包括1:1匹配 + 分组匹配
+    all_matched_orig_indices = set(orig_to_final.keys()) | group_used_orig
     next_matched_orig_after = [len(orig_sentences)] * len(orig_sentences)
     latest_matched = len(orig_sentences)
     for i in range(len(orig_sentences) - 1, -1, -1):
-        if i in orig_to_final:
+        if i in all_matched_orig_indices:
             latest_matched = i
         next_matched_orig_after[i] = latest_matched
     
@@ -387,38 +766,93 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
         # 确定当前终稿句子匹配的原稿位置（用于推进指针）
         if f_idx in final_to_match:
             current_orig_idx = final_to_match[f_idx][0]
+        elif f_idx in merge_map:
+            current_orig_idx = min(merge_map[f_idx][0])
         else:
             # 未匹配终稿句子：只推进到下一个已配对原稿句子之前
-            # 避免一次性输出所有后续原稿蓝删，导致位置错乱
             if next_orig < len(orig_sentences):
                 current_orig_idx = next_matched_orig_after[next_orig]
             else:
-                current_orig_idx = next_orig  # 已到末尾，不推进
+                current_orig_idx = next_orig
         
         # 输出原稿中"本应在此位置但已移走或已删除"的句子（蓝色删除）
         while next_orig < current_orig_idx:
             if next_orig not in processed_orig:
                 if next_orig in moved_orig_set:
-                    # 向后移动的句子 → 在原位输出蓝色删除
                     run = result_para.add_run(orig_sentences[next_orig])
                     run.font.color.rgb = RGBColor(0, 0, 255)
                     run.font.strike = True
-                elif next_orig not in orig_to_final:
-                    # 未匹配的原稿句子（纯删除）→ 蓝色删除
+                elif next_orig not in orig_to_final and next_orig not in split_map:
+                    # 未匹配且非拆分组原稿句子（纯删除）→ 蓝色删除
                     run = result_para.add_run(orig_sentences[next_orig])
                     run.font.color.rgb = RGBColor(0, 0, 255)
                     run.font.strike = True
-                # 顺序不变的配对句子，会在其终稿位置正常输出字符级diff
             processed_orig.add(next_orig)
             next_orig += 1
         
-        # 输出当前终稿句子
+        # ---- 输出当前终稿句子 ----
+        
+        # 跳过被合并组占用的非首句终稿句子（会在首句时一起处理）
+        if f_idx in merge_final_set:
+            group_key = merge_map[f_idx]
+            o_indices_tuple, f_indices_tuple, ratio = group_key
+            # 只在首句时触发合并组输出
+            if f_indices_tuple[0] == f_idx:
+                # ---- 合并组输出：N原稿句 → M终稿句 ----
+                o_indices = list(o_indices_tuple)
+                f_indices = list(f_indices_tuple)
+                combined_orig = "".join(orig_sentences[oi] for oi in o_indices)
+                
+                if max(o_indices) in moved_orig_set:
+                    # 合并组向后移 → 终稿新位各句红色新增
+                    for fi in f_indices:
+                        run = result_para.add_run(final_sentences[fi])
+                        run.font.color.rgb = RGBColor(255, 0, 0)
+                elif min(o_indices) in forward_moved_set:
+                    # 合并组向前移 → 直接显示终稿文本
+                    for fi in f_indices:
+                        result_para.add_run(final_sentences[fi])
+                else:
+                    # 顺序一致：做字符级diff，按终稿句子边界切割
+                    final_sentences_map = {fi: final_sentences[fi] for fi in f_indices}
+                    _output_sentence_split_diff(
+                        result_para, combined_orig, final_sentences_map, f_indices
+                    )
+                
+                for oi in o_indices:
+                    processed_orig.add(oi)
+                    if oi >= next_orig:
+                        next_orig = oi + 1
+            # 非首句，跳过（已在首句时输出）
+            continue
+        
+        # 跳过被拆分组占用的终稿句子（会在拆分组首句时一起处理）
+        if f_idx in split_final_set:
+            is_split_head = False
+            for o_idx, (f_indices, ratio) in split_map.items():
+                if f_indices[0] == f_idx and o_idx not in processed_orig:
+                    is_split_head = True
+                    combined_orig = orig_sentences[o_idx]
+                    final_sentences_map = {fi: final_sentences[fi] for fi in f_indices}
+                    _output_sentence_split_diff(
+                        result_para, combined_orig, final_sentences_map, f_indices
+                    )
+                    processed_orig.add(o_idx)
+                    if o_idx >= next_orig:
+                        next_orig = o_idx + 1
+                    break
+            
+            if is_split_head:
+                continue
+            else:
+                continue
+        
         if f_idx not in final_to_match:
             # 未匹配的终稿句子 → 红色新增
             run = result_para.add_run(f_sent)
             run.font.color.rgb = RGBColor(255, 0, 0)
         else:
-            
+            # ---- 1:1匹配输出 ----
             o_idx, ratio = final_to_match[f_idx]
             o_sent = orig_sentences[o_idx]
             processed_orig.add(o_idx)
@@ -433,12 +867,11 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
                 run2.font.color.rgb = RGBColor(0, 0, 255)
                 run2.font.strike = True
             elif o_idx in moved_orig_set:
-                # 向后移动的句子 → 在终稿新位输出红色新增（蓝色删除已在原位输出）
+                # 向后移动的句子 → 在终稿新位输出红色新增
                 run = result_para.add_run(f_sent)
                 run.font.color.rgb = RGBColor(255, 0, 0)
             elif o_idx in forward_moved_set:
                 # 向前移动的句子 → 直接显示终稿文本，不做字符级diff
-                # 避免标点变化（句号↔逗号）被误标为修改
                 result_para.add_run(f_sent)
             else:
                 # 顺序一致，走字符级 diff
@@ -710,6 +1143,68 @@ def compare_with_python(original_path, final_path, output_path):
                         position_score = 1.0 / (abs(o_idx - f_idx) + 1)
                         total_score = ratio * 0.7 + position_score * 0.3
                         split_candidates.append((total_score, ratio, o_idx, f_idx))
+            
+            # ---- 拆分升级检测：短段落单句ratio低，但拼接后ratio高 ----
+            # 场景：原稿"华南乳业…仪式致辞" → 终稿段落1"华南乳业…投产" + 终稿段落2"仪式致辞"
+            # 终稿段落2单句ratio=0.32 < 阈值，但与段落1拼接后ratio=1.0 > 当前1:1匹配ratio
+            split_upgrade_candidates = []
+            for f_idx in final_unmatched_after_step2:
+                if f_idx in split_matched_final:
+                    continue
+                f_text = final_paras[f_idx]['text']
+                if not f_text:
+                    continue
+                
+                # 检查此终稿段落是否与某个已1:1匹配的终稿段落相邻
+                for adjacent_f in [f_idx - 1, f_idx + 1]:
+                    if adjacent_f < 0 or adjacent_f >= len(final_paras):
+                        continue
+                    
+                    o_i = f_match[adjacent_f]
+                    if o_i == -1 or isinstance(o_i, list):
+                        continue
+                    
+                    # 相邻终稿段落已1:1匹配到原稿段落 o_i
+                    o_text = orig_paras[o_i]['text']
+                    if not o_text:
+                        continue
+                    
+                    # 拼接终稿文本
+                    if adjacent_f < f_idx:
+                        combined_final = final_paras[adjacent_f]['text'] + f_text
+                    else:
+                        combined_final = f_text + final_paras[adjacent_f]['text']
+                    
+                    combined_ratio = difflib.SequenceMatcher(None, o_text, combined_final).ratio()
+                    
+                    # 当前1:1匹配的ratio
+                    current_ratio = difflib.SequenceMatcher(
+                        None, o_text, final_paras[adjacent_f]['text']
+                    ).ratio()
+                    
+                    # 拼接ratio必须高于当前1:1匹配ratio，且高于阈值
+                    if combined_ratio > current_ratio and combined_ratio >= PARA_SIM_THRESHOLD:
+                        improvement = combined_ratio - current_ratio
+                        split_upgrade_candidates.append((improvement, combined_ratio, o_i, adjacent_f, f_idx))
+            
+            # 按改进程度排序
+            split_upgrade_candidates.sort(reverse=True, key=lambda x: x[0])
+            
+            for improvement, combined_ratio, o_i, adjacent_f, f_idx in split_upgrade_candidates:
+                # 再次检查：原稿段落和终稿段落是否仍可用
+                if o_i in o_match:
+                    continue
+                if f_idx in split_matched_final:
+                    continue
+                if isinstance(f_match[adjacent_f], list) and f_idx in f_match[adjacent_f]:
+                    continue
+                
+                # 将已1:1匹配的终稿段落 adjacent_f 和未匹配终稿段落 f_idx 合并为拆分组
+                # 在 o_match 中记录：原稿段落 o_i 拆分为 [adjacent_f, f_idx]
+                o_match[o_i] = [adjacent_f, f_idx]
+                split_matched_final.add(f_idx)
+                # 注意：adjacent_f 已经在 f_match 中匹配了，它的匹配关系保持不变
+                # 输出时会在 o_match 分支中处理拆分组
             
             # 按总分排序
             split_candidates.sort(reverse=True, key=lambda x: x[0])
