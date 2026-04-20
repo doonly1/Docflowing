@@ -602,41 +602,10 @@
             // 1. 默认选中文档比较功能
             selectTool('to_compare');
             
-            // 2. 恢复上次选择的路径
-            if (isLanAccess()) {
-                // 局域网访问：只用 localStorage 恢复，不使用服务端路径
-                const savedPath = localStorage.getItem('workdir');
-                if (savedPath) {
-                    document.getElementById('workdir').value = savedPath;
-                }
-            } else {
-                // 本地访问：优先从服务器获取，fallback到localStorage
-                try {
-                    const pathRes = await fetch('/get_last_workdir');
-                    const pathData = await pathRes.json();
-                    if (pathData.success && pathData.path && pathData.path.length > 0) {
-                        document.getElementById('workdir').value = pathData.path;
-                        localStorage.setItem('workdir', pathData.path);
-                    } else {
-                        const savedPath = localStorage.getItem('workdir');
-                        if (savedPath) {
-                            document.getElementById('workdir').value = savedPath;
-                        } else {
-                            try {
-                                const res = await fetch('/get_last_workdir');
-                                const data = await res.json();
-                                if (data.success && data.path) {
-                                    document.getElementById('workdir').value = data.path;
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                } catch (e) {
-                    const savedPath = localStorage.getItem('workdir');
-                    if (savedPath) {
-                        document.getElementById('workdir').value = savedPath;
-                    }
-                }
+            // 2. 恢复上次选择的路径（统一从 localStorage 读取）
+            const savedPath = localStorage.getItem('workdir');
+            if (savedPath) {
+                document.getElementById('workdir').value = savedPath;
             }
 
             // 3. 路径恢复后，如果当前工具是文档比较，加载原稿/终稿列表
@@ -916,9 +885,6 @@
                     document.getElementById('workdir').value = workdir;
                     localStorage.setItem('workdir', workdir);
                     
-                    // 同时保存到服务器config.yaml
-                    saveLastWorkdir(workdir);
-                    
                     fileListCache = [];
                     isRemoteMode = false;
                     isMetadataMode = false;
@@ -941,19 +907,6 @@
                 }
             } catch (error) {
                 console.error('选择文件夹失败:', error);
-            }
-        }
-        
-        // 保存最近使用的文件夹路径到服务器config.yaml
-        async function saveLastWorkdir(path) {
-            try {
-                await fetch('/save_last_workdir', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path: path})
-                });
-            } catch (e) {
-                console.log('保存路径到服务器失败:', e);
             }
         }
 
@@ -1551,7 +1504,7 @@
                 const data = await response.json();
                 if (data.success) {
                     userConfig = data.config;
-                    // last_workdir 由服务端 /save_last_workdir 单独管理，不混入前端配置
+                    // last_workdir 不属于用户配置，删除
                     delete userConfig.last_workdir;
                     loadCompanyConfigForm(userConfig);
                     

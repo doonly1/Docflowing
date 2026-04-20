@@ -8,7 +8,7 @@ import sys
 import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from user_config import load_user_config, save_user_config
+
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
@@ -198,34 +198,6 @@ def api_get_server_config():
         return jsonify({'success': True, 'config': config})
     except Exception as e:
         return jsonify({'success': False, 'message': f'读取配置模板失败: {str(e)}'})
-
-
-@app.route('/get_last_workdir', methods=['GET'])
-def api_get_last_workdir():
-    """获取最近使用的文件夹路径（从用户配置文件读取）"""
-
-    try:
-        config = load_user_config()
-        last_workdir = config.get('last_workdir', '') if config else ''
-        return jsonify({'success': True, 'path': last_workdir})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/save_last_workdir', methods=['POST'])
-def api_save_last_workdir():
-    """保存最近使用的文件夹路径到用户配置"""
-
-    data = request.get_json()
-    workdir = data.get('path', '')
-
-    try:
-        config = load_user_config() or {}
-        config['last_workdir'] = workdir
-        save_user_config(config)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
 
 
 @app.route('/run_tool_with_config', methods=['POST'])
