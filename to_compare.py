@@ -513,7 +513,62 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
                         ))
                         break  # 一个方向找到一个就够
     
-    # ---- D. 贪心分配 ----
+    # ---- E. 拆分升级检测：已1:1匹配 + 相邻未匹配终稿句子 → 拆分 ----
+    # 场景：原稿 "江门是…节点城市、中国侨都。" → 终稿 "江门是…节点城市，" + "中国侨都。"
+    # 1:1匹配: orig[0]↔final[0](0.89)，final[1]未匹配
+    # 拆分升级: orig[0] ↔ final[0]+final[1] 拼接后ratio更高
+    if sentence_match and unmatched_final:
+        for o_idx, f_idx, single_ratio in sentence_match:
+            # 向前/向后扫描相邻的未匹配终稿句子
+            for expand_size in range(2, MAX_GROUP_SIZE + 1):
+                found = False
+                for direction in ['forward', 'backward', 'both']:
+                    if direction == 'forward':
+                        # 向后扩展：f_idx, f_idx+1, ..., f_idx+expand_size-1
+                        expanded_final = list(range(f_idx, f_idx + expand_size))
+                    elif direction == 'backward':
+                        # 向前扩展：f_idx-expand_size+1, ..., f_idx
+                        expanded_final = list(range(f_idx - expand_size + 1, f_idx + 1))
+                    else:
+                        # 双向扩展
+                        half = (expand_size - 1) // 2
+                        expanded_final = list(range(f_idx - half, f_idx + expand_size - half))
+                    
+                    # 边界检查
+                    if expanded_final[0] < 0 or expanded_final[-1] >= len(final_sentences):
+                        continue
+                    
+                    # 检查扩展部分是否都是未匹配的（除了原始f_idx）
+                    expand_part = [fi for fi in expanded_final if fi != f_idx]
+                    if any(fi in used_final for fi in expand_part):
+                        continue
+                    
+                    # 拼接终稿句子
+                    combined_final = "".join(final_sentences[fi] for fi in expanded_final)
+                    o_text = orig_sentences[o_idx]
+                    
+                    if not combined_final.strip():
+                        continue
+                    
+                    combined_ratio = difflib.SequenceMatcher(None, o_text, combined_final).ratio()
+                    
+                    if combined_ratio > single_ratio and combined_ratio >= SENTENCE_SIM_THRESHOLD:
+                        # 记录被替代的1:1匹配
+                        replaced_indices = set()
+                        for m_idx, m in enumerate(sentence_match):
+                            if m[0] == o_idx:
+                                replaced_indices.add(m_idx)
+                        
+                        all_candidates.append((
+                            combined_ratio, 'split_upgrade',
+                            (o_idx, expanded_final, replaced_indices)
+                        ))
+                        found = True
+                        break  # 一个方向找到一个就够
+                if found:
+                    break  # 一个expand_size找到一个就够
+    
+    # ---- 贪心分配 ----
     all_candidates.sort(key=lambda x: x[0], reverse=True)
     
     allocated_orig = set()
@@ -558,6 +613,19 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
                 allocated_final.add(fi)
             # merge_upgrade 记录为合并组（所有终稿句子作为一组）
             merge_groups.append((orig_indices, final_indices, ratio))
+            replaced_match_indices.update(replaced_indices)
+        
+        elif cand_type == 'split_upgrade':
+            o_idx, f_indices, replaced_indices = group_info
+            if o_idx in allocated_orig:
+                continue
+            if any(fi in allocated_final for fi in f_indices):
+                continue
+            allocated_orig.add(o_idx)
+            for fi in f_indices:
+                allocated_final.add(fi)
+            # split_upgrade 记录为拆分组
+            split_groups.append((o_idx, f_indices, ratio))
             replaced_match_indices.update(replaced_indices)
     
     return merge_groups, split_groups, allocated_orig, allocated_final, replaced_match_indices
