@@ -11,12 +11,13 @@ import yaml
 from docx import Document
 from docx.shared import RGBColor
 from doc_process import doc_to_docx
+from user_config import load_user_config
 from mystyle import clear_styles, add_my_styles, my_number_style, set_page, change_origin_styles
 
 
 def load_compare_config():
     """从yaml配置文件加载比较参数（支持用户自定义配置）"""
-    config = _load_config()
+    config = load_user_config()
     
     if config:
         compare_config = config.get('compare', {})
@@ -25,27 +26,6 @@ def load_compare_config():
         return sentence_threshold, para_threshold
     
     return 0.40, 0.40  # 默认值
-
-
-def _load_config():
-    """加载配置文件（用户自定义或默认）"""
-    import os
-    
-    # 优先使用用户自定义配置
-    user_config_path = os.environ.get('USER_CONFIG_PATH')
-    
-    if user_config_path and os.path.exists(user_config_path):
-        config_path = user_config_path
-    else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, "config", "config.yaml")
-    
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"警告：读取配置失败: {e}")
-        return None
 
 
 def find_docx_files(workdir):

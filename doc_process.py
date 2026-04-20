@@ -66,7 +66,7 @@ def libreoffice_install_hint():
 def doc_to_docx(workdir):
     """将workdir目录下的.doc文件批量转换为.docx格式（跨平台）"""
     doc_files = [f for f in os.listdir(workdir)
-                 if f.endswith('.doc') and not f.startswith("~$")]
+                 if f.lower().endswith('.doc') and not f.startswith("~$")]
     if not doc_files:
         return
 
@@ -142,7 +142,7 @@ def save_docx(doc, doc_name, workdir=None):
     doc_name = re.sub(r'[\\/:*?"<>|]', '_', doc_name)
     
     # 确保扩展名正确
-    if not doc_name.endswith('.docx'):
+    if not doc_name.lower().endswith('.docx'):
         doc_name += '.docx'
     
     # 生成目标文件名哈希前缀（4位纯数字）
@@ -222,7 +222,7 @@ def set_appendix(doc):
             para_fm(paras[dx_s[0]],0,0,28.95,80,0,-48,'L')   #段落格式
 			
         n=len(dx_n_strs)  #有n个附件
-#        print('有{}个附件'.format(n))
+        # print('有{}个附件'.format(n))
     
     if len(dx_s) != 0 and n>0:    #如果有附件
         for i in range(n):
@@ -242,7 +242,7 @@ def set_appendix(doc):
     if len(dx_s) != 0:
         for para in paras[dx_s[0]:len(paras)-1]:
             if '附' in para.text and '件' in para.text and len(para.text)<5:   #找到顶格'附件'
-#                print('第{}段有|附件|：{}'.format(ps[-1]+1,para.text.strip('\n')))
+                # print('第{}段有|附件|：{}'.format(paras.index(para)+1,para.text.strip('\n')))
                 if '：' in para.text[-1]:
                     para.text=para.text[:-1]
                 para.style=doc.styles['Blackbody']	#设置顶格附件样式

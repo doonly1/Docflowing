@@ -521,7 +521,7 @@
                     ✓ 使用自定义配置
                 </label>
                 <span class="config-info" style="margin-left: 10px; font-size: 11px; color: #666;">
-                    保存后自动同步到 ~/.config/doc_tool/config.yaml
+                    配置保存在浏览器本地，可导出为文件备份
                 </span>
             </div>
 
@@ -589,6 +589,8 @@
 
             <div class="config-actions" style="flex-shrink: 0;">
                 <button class="btn" onclick="loadServerConfig()" style="background: #6c757d; width: auto;">重置为默认</button>
+                <button class="btn" onclick="exportConfig()" style="background: #17a2b8; width: auto;">📥 导出配置</button>
+                <button class="btn" onclick="importConfig()" style="background: #17a2b8; width: auto;">📤 导入配置</button>
                 <button class="btn" onclick="saveUserConfig()" style="width: auto;">保存配置</button>
             </div>
         </div>
@@ -621,9 +623,9 @@
                             document.getElementById('workdir').value = savedPath;
                         } else {
                             try {
-                                const res = await fetch('/get_desktop', { method: 'POST' });
+                                const res = await fetch('/get_last_workdir');
                                 const data = await res.json();
-                                if (data.success) {
+                                if (data.success && data.path) {
                                     document.getElementById('workdir').value = data.path;
                                 }
                             } catch (e) {}
@@ -1421,27 +1423,7 @@
             // 默认勾选"使用自定义配置"
             document.getElementById('useUserConfig').checked = true;
             
-            // 1. 优先从用户本地保存的路径加载
-            try {
-                const pathRes = await fetch('/load_config_from_path');
-                const pathData = await pathRes.json();
-                
-                if (pathData.success && pathData.config) {
-                    userConfig = pathData.config;
-                    // last_workdir 是服务端路径，对客户端无意义，置空
-                    if (userConfig && 'last_workdir' in userConfig) {
-                        userConfig.last_workdir = '';
-                    }
-                    isUsingUserConfig = true;
-                    localStorage.setItem('userConfig', JSON.stringify(userConfig));
-                    console.log('已从本地路径加载配置:', pathData.path);
-                    return;
-                }
-            } catch (e) {
-                console.log('从本地路径加载失败');
-            }
-            
-            // 2. Fallback: 从localStorage加载
+            // 1. 优先从 localStorage 加载
             const savedConfig = localStorage.getItem('userConfig');
             if (savedConfig) {
                 try {
@@ -1451,16 +1433,24 @@
                     userConfig = {};
                     isUsingUserConfig = true;
                 }
-            } else {
-                isUsingUserConfig = true;
-                userConfig = {};
             }
             
-            // 如果没有有效的用户配置，加载服务器默认配置
+            // 2. 如果 localStorage 为空，从服务端获取初始配置（仅首次）
             if (!userConfig || Object.keys(userConfig).length === 0) {
-                setTimeout(async () => {
-                    await loadServerConfig();
-                }, 100);
+                try {
+                    const response = await fetch('/get_server_config');
+                    const data = await response.json();
+                    if (data.success && data.config) {
+                        userConfig = data.config;
+                        delete userConfig.last_workdir;
+                        isUsingUserConfig = true;
+                        localStorage.setItem('userConfig', JSON.stringify(userConfig));
+                    }
+                } catch (e) {
+                    console.log('从服务器加载初始配置失败');
+                    userConfig = {};
+                    isUsingUserConfig = true;
+                }
             }
         });
 
@@ -1561,10 +1551,8 @@
                 const data = await response.json();
                 if (data.success) {
                     userConfig = data.config;
-                    // last_workdir 是服务端路径，对客户端无意义，置空
-                    if (userConfig && 'last_workdir' in userConfig) {
-                        userConfig.last_workdir = '';
-                    }
+                    // last_workdir 由服务端 /save_last_workdir 单独管理，不混入前端配置
+                    delete userConfig.last_workdir;
                     loadCompanyConfigForm(userConfig);
                     
                     if (userConfig.compare) {
@@ -1699,11 +1687,6 @@
                     para_similarity_threshold: parseFloat(document.getElementById('paragraphThreshold').value) || 0.40
                 };
                 
-                // 保留 last_workdir
-                if (userConfig && userConfig.last_workdir) {
-                    updatedConfig.last_workdir = userConfig.last_workdir;
-                }
-                
                 // 验证配置
                 if (Object.keys(updatedConfig).length === 0) {
                     throw new Error('配置不能为空');
@@ -1713,15 +1696,8 @@
                 isUsingUserConfig = true;
                 document.getElementById('useUserConfig').checked = true;
                 
-                // 同时保存到 localStorage 和用户电脑 ~/.config/
+                // 保存到 localStorage
                 localStorage.setItem('userConfig', JSON.stringify(userConfig));
-                
-                // 后台自动保存到 ~/.config/doc_tool/config.yaml
-                fetch('/auto_save_config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({userConfig: userConfig})
-                }).catch(() => {});
                 
                 // 更新YAML源码显示
                 document.getElementById('rawYamlText').value = objectToYaml(userConfig);
@@ -1731,6 +1707,59 @@
             } catch (error) {
                 alert('保存配置失败: ' + error.message);
             }
+        };
+
+        // 导出配置为 YAML 文件下载
+        window.exportConfig = function() {
+            if (!userConfig || Object.keys(userConfig).length === 0) {
+                alert('当前没有可导出的配置');
+                return;
+            }
+            const yamlStr = objectToYaml(userConfig);
+            const blob = new Blob([yamlStr], { type: 'text/yaml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        // 导入配置从 YAML 文件
+        window.importConfig = function() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.yaml,.yml';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                    const text = await file.text();
+                    const imported = yamlToObject(text);
+                    if (!imported || Object.keys(imported).length === 0) {
+                        alert('导入失败：配置文件为空或格式不正确');
+                        return;
+                    }
+                    if (!confirm('导入将覆盖当前配置，是否继续？')) return;
+                    userConfig = imported;
+                    isUsingUserConfig = true;
+                    document.getElementById('useUserConfig').checked = true;
+                    localStorage.setItem('userConfig', JSON.stringify(userConfig));
+                    // 刷新表单
+                    loadCompanyConfigForm(userConfig);
+                    if (userConfig.compare) {
+                        document.getElementById('sentenceThreshold').value = userConfig.compare.sentence_similarity_threshold || 0.40;
+                        document.getElementById('paragraphThreshold').value = userConfig.compare.para_similarity_threshold || 0.40;
+                    }
+                    document.getElementById('rawYamlText').value = objectToYaml(userConfig);
+                    alert('配置导入成功');
+                } catch (err) {
+                    alert('导入失败：' + err.message);
+                }
+            };
+            input.click();
         };
 
         // 对象转换为YAML字符串
@@ -1743,9 +1772,6 @@
                     for (const subKey in obj[key]) {
                         yaml += `  ${subKey}: ${obj[key][subKey]}\n`;
                     }
-                } else if (key === 'last_workdir') {
-                    // last_workdir 是普通字符串字段
-                    yaml += `${key}: "${obj[key] || ''}"\n`;
                 } else {
                     // 公司配置
                     yaml += `${key}:\n`;
@@ -1766,6 +1792,84 @@
             }
             
             return yaml.trim();
+        }
+
+        // YAML字符串解析为对象（轻量实现，覆盖项目配置格式）
+        function yamlToObject(yamlStr) {
+            const result = {};
+            let currentKey = null;
+            let currentSubKey = null;
+            let listKey = null;
+
+            for (const rawLine of yamlStr.split('\n')) {
+                const line = rawLine.replace(/#.*$/, ''); // 去注释
+                if (!line.trim()) continue;
+
+                const indent = line.search(/\S/);
+
+                if (indent === 0) {
+                    // 顶层 key
+                    const match = line.match(/^(\S[\s\S]*?):\s*$/);
+                    if (match) {
+                        currentKey = match[1].trim();
+                        result[currentKey] = {};
+                        currentSubKey = null;
+                        listKey = null;
+                    } else {
+                        // 顶层 key: value（不常见但兼容）
+                        const kv = line.match(/^(\S[\s\S]*?):\s*(.+)$/);
+                        if (kv) {
+                            currentKey = kv[1].trim();
+                            result[currentKey] = parseValue(kv[2].trim());
+                            currentSubKey = null;
+                            listKey = null;
+                        }
+                    }
+                } else if (indent >= 2 && currentKey) {
+                    const trimmed = line.trim();
+                    // 列表项 "- value"
+                    if (trimmed.startsWith('- ')) {
+                        if (listKey && result[currentKey][listKey]) {
+                            result[currentKey][listKey].push(trimmed.substring(2).trim());
+                        }
+                        continue;
+                    }
+                    // 子 key: value
+                    const kv = trimmed.match(/^(\S[\s\S]*?):\s*(.*)$/);
+                    if (kv) {
+                        currentSubKey = kv[1].trim();
+                        const val = kv[2].trim();
+                        if (val === '') {
+                            // 值为空，可能是列表或空对象
+                            if (currentSubKey === '简称') {
+                                result[currentKey][currentSubKey] = [];
+                                listKey = currentSubKey;
+                            } else {
+                                result[currentKey][currentSubKey] = '';
+                                listKey = null;
+                            }
+                        } else {
+                            result[currentKey][currentSubKey] = parseValue(val);
+                            listKey = null;
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        function parseValue(val) {
+            if (val === 'true') return true;
+            if (val === 'false') return false;
+            if (val === 'null' || val === '') return '';
+            const num = Number(val);
+            if (!isNaN(num) && val !== '') return num;
+            // 去引号
+            if ((val.startsWith('"') && val.endsWith('"')) ||
+                (val.startsWith("'") && val.endsWith("'"))) {
+                return val.slice(1, -1);
+            }
+            return val;
         }
 
         // 获取用户配置（用于工具执行）

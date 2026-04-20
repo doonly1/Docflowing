@@ -8,6 +8,7 @@ import sys
 import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from user_config import load_user_config, save_user_config
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
@@ -119,29 +120,39 @@ def api_list_dir():
 
 @app.route('/select_folder', methods=['POST'])
 def api_select_folder():
-    """打开文件夹选择对话框"""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()  # 隐藏主窗口
-    root.attributes('-topmost', True)  # 窗口置顶
-    folder = filedialog.askdirectory()
-    root.destroy()
-
-    if folder:
-        return jsonify({'success': True, 'path': folder})
-    else:
-        return jsonify({'success': False, 'message': '取消选择'})
-
-
-@app.route('/get_desktop', methods=['POST'])
-def api_get_desktop():
-    """获取用户桌面路径"""
+    """打开文件夹选择对话框（跨平台兼容版本）"""
+    import platform
     import os
-    home = os.path.expanduser('~')
-    desktop = os.path.join(home, 'Desktop')
-    return jsonify({'success': True, 'path': desktop})
+    
+    system = platform.system()
+    
+    # 检查是否在无图形界面的 Linux 服务器环境
+    if system == 'Linux' and 'DISPLAY' not in os.environ:
+        # 无图形环境，返回当前工作目录作为默认路径
+        current_dir = os.getcwd()
+        return jsonify({'success': True, 'path': current_dir, 'message': '无图形界面，使用当前目录'})
+    
+    # 有图形环境，尝试使用 tkinter
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        root = tk.Tk()
+        root.withdraw()  # 隐藏主窗口
+        root.attributes('-topmost', True)  # 窗口置顶
+        folder = filedialog.askdirectory()
+        root.destroy()
+        
+        if folder:
+            return jsonify({'success': True, 'path': folder})
+        else:
+            return jsonify({'success': False, 'message': '取消选择'})
+    except ImportError:
+        # tkinter 不可用（如某些 Linux 发行版未安装）
+        return jsonify({'success': False, 'message': '图形界面不可用，请通过其他方式指定路径'})
+    except Exception as e:
+        # 其他错误
+        return jsonify({'success': False, 'message': f'文件夹选择失败: {str(e)}'})
 
 
 @app.route('/open_folder', methods=['POST'])
@@ -173,71 +184,45 @@ def api_open_folder():
 
 @app.route('/get_server_config', methods=['GET'])
 def api_get_server_config():
-    """获取服务器默认配置"""
-    import yaml
-    
-    config_path = os.path.join(os.path.dirname(__file__), 'config', 'config.yaml')
-    
+    """获取默认配置模板（首次访问时提供初始值）"""
+
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        import yaml
+        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     'config', 'config.yaml')
+        with open(template_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        # last_workdir 是服务端路径，对客户端无意义，置空返回
+        # 模板不含 last_workdir，但防御性移除
         if config and 'last_workdir' in config:
-            config['last_workdir'] = ''
+            del config['last_workdir']
         return jsonify({'success': True, 'config': config})
     except Exception as e:
-        return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
+        return jsonify({'success': False, 'message': f'读取配置模板失败: {str(e)}'})
 
 
 @app.route('/get_last_workdir', methods=['GET'])
 def api_get_last_workdir():
-    """获取最近使用的文件夹路径（从用户独立的配置文件读取）"""
-    import yaml
-    
-    # 用户配置文件路径：~/.config/doc_tool/config.yaml
-    user_config_dir = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool')
-    config_path = os.path.join(user_config_dir, 'config.yaml')
-    
+    """获取最近使用的文件夹路径（从用户配置文件读取）"""
+
     try:
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            last_workdir = config.get('last_workdir', '') if config else ''
-            return jsonify({'success': True, 'path': last_workdir})
-        return jsonify({'success': True, 'path': ''})
+        config = load_user_config()
+        last_workdir = config.get('last_workdir', '') if config else ''
+        return jsonify({'success': True, 'path': last_workdir})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
 
 @app.route('/save_last_workdir', methods=['POST'])
 def api_save_last_workdir():
-    """保存最近使用的文件夹路径到用户独立的config.yaml"""
-    import yaml
-    
+    """保存最近使用的文件夹路径到用户配置"""
+
     data = request.get_json()
     workdir = data.get('path', '')
-    
-    # 用户配置文件路径：~/.config/doc_tool/config.yaml
-    user_config_dir = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool')
-    config_path = os.path.join(user_config_dir, 'config.yaml')
-    
+
     try:
-        # 读取现有配置（保留其他配置字段）
-        config = {}
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
-        
-        # 只更新 last_workdir，保留其他字段
+        config = load_user_config() or {}
         config['last_workdir'] = workdir
-        
-        # 确保目录存在
-        os.makedirs(user_config_dir, exist_ok=True)
-        
-        # 写回配置文件
-        with open(config_path, 'w', encoding='utf-8') as f:
-            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-        
+        save_user_config(config)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -359,41 +344,6 @@ def api_run_tool_with_config():
     
     return Response(generate(), mimetype='text/event-stream')
 
-
-@app.route('/auto_save_config', methods=['POST'])
-def api_auto_save_config():
-    """自动保存配置到用户 ~/.config/ 目录"""
-    import yaml
-    
-    data = request.get_json()
-    user_config = data.get('userConfig')
-    
-    if not user_config:
-        return jsonify({'success': False})
-    
-    try:
-        # 保存到 ~/.config/doc_tool/
-        config_dir = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool')
-        os.makedirs(config_dir, exist_ok=True)
-        
-        save_path = os.path.join(config_dir, 'config.yaml')
-        
-        # 读取现有配置，保留 last_workdir
-        existing_config = {}
-        if os.path.exists(save_path):
-            with open(save_path, 'r', encoding='utf-8') as f:
-                existing_config = yaml.safe_load(f) or {}
-        
-        # 合并配置：保留 last_workdir，只更新其他配置
-        last_workdir = existing_config.get('last_workdir', '')
-        user_config['last_workdir'] = last_workdir
-        
-        with open(save_path, 'w', encoding='utf-8') as f:
-            yaml.dump(user_config, f, allow_unicode=True, default_flow_style=False)
-        
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False})
 
 
 # ==================== 文件上传处理功能 ====================
@@ -755,25 +705,6 @@ def api_build_index_from_metadata():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-
-@app.route('/load_config_from_path', methods=['GET'])
-def api_load_config_from_path():
-    """从 ~/.config/ 目录加载配置"""
-    try:
-        config_path = os.path.join(os.path.expanduser('~'), '.config', 'doc_tool', 'config.yaml')
-        
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                import yaml
-                config = yaml.safe_load(f)
-            # last_workdir 是服务端路径，对客户端无意义，置空返回
-            if config and 'last_workdir' in config:
-                config['last_workdir'] = ''
-            return jsonify({'success': True, 'config': config, 'path': config_path})
-        
-        return jsonify({'success': False})
-    except Exception as e:
-        return jsonify({'success': False})
 
 
 if __name__ == '__main__':

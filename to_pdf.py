@@ -31,7 +31,7 @@ def convert_to_pdf(workdir):
     docx_files = [
         os.path.join(workdir, f)
         for f in os.listdir(workdir)
-        if f.endswith('.docx') and not f.startswith("~$")
+        if f.lower().endswith('.docx') and not f.startswith("~$")
     ]
 
     if not docx_files:

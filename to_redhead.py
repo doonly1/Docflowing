@@ -5,6 +5,7 @@ from docx.oxml.ns import qn
 
 from mystyle import para_fm,run_fm
 from float_picture import parse_xml, nsdecls, add_float_picture
+from user_config import load_user_config
 
 
 def _apply_font_scaling(file_path, scaling):
@@ -34,7 +35,7 @@ def add_seal(workdir):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 先检查是否有可处理的文件
-    files_to_process = [f for f in os.listdir(workdir) if f.endswith('.docx') and f[:4].isdigit()]
+    files_to_process = [f for f in os.listdir(workdir) if f.lower().endswith('.docx') and f[:4].isdigit()]
     if not files_to_process:
         print('没有可处理的文件，请先添加页码')
         return
@@ -151,7 +152,7 @@ def get_stamp_path(sign_text):
 
 def get_fawenzihao(sign_text):
     """获取发文字号"""
-    config = _load_config()
+    config = load_user_config()
     
     daizi = None
     # 遍历配置，查找匹配的公司名称或简称
@@ -169,26 +170,6 @@ def get_fawenzihao(sign_text):
     year = time.strftime("%Y", time.localtime())
     fawenzihao = daizi + '〔' + year + '〕' + '1号'
     return fawenzihao
-
-
-def _load_config():
-    """加载配置文件（用户自定义或默认）"""
-    import yaml
-    import os
-    
-    # 优先使用用户自定义配置
-    user_config_path = os.environ.get('USER_CONFIG_PATH')
-    if user_config_path and os.path.exists(user_config_path):
-        config_path = user_config_path
-    else:
-        config_path = os.path.join(os.path.dirname(__file__), 'config', 'config.yaml')
-    
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"警告：读取配置文件失败: {e}")
-        return None
 
 
 if __name__ == "__main__":

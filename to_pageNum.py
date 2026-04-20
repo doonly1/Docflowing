@@ -63,14 +63,14 @@ def add_page_numbers(workdir):
     print('当前工作目录：', workdir)
     doc_to_docx(workdir)
     files = [f for f in os.listdir(workdir)
-            if f.endswith('.docx') and not f.startswith("~$")
+            if f.lower().endswith('.docx') and not f.startswith("~$")
             and not re.match(r'^\d{4}_', f)]
 
     for file in files:
         doc = Document(os.path.join(workdir, file))
         save_docx(doc, file, workdir)
     digit_files = [f for f in os.listdir(workdir)
-                   if f.endswith('.docx') and f[:4].isdigit()]
+                   if f.lower().endswith('.docx') and f[:4].isdigit()]
 
     # 对数字前缀文件添加页码
     for file in digit_files:
