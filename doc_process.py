@@ -245,7 +245,7 @@ def set_appendix(doc):
                 # print('第{}段有|附件|：{}'.format(paras.index(para)+1,para.text.strip('\n')))
                 if '：' in para.text[-1]:
                     para.text=para.text[:-1]
-                para.style=doc.styles['Blackbody']	#设置顶格附件样式
+                para.style=doc.styles['SimHei']	#设置顶格附件样式
                 para_fm(para,0,0,28.95,0,0,0,'L')
                 for run in para.runs:
                     run_fm(run,'黑体',16,0,0,0,0)	#设置顶格附件格式

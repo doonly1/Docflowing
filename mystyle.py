@@ -16,22 +16,21 @@ ALIGN_MAP = {
 # 样式定义表：(样式名, priority, base_style, next_style, 字体, 字号, 加粗, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
 # None 表示继承 base_style，不显式设置
 STYLE_DEFS = [
-    ('Norm',      2,  'Normal', 'Norm',     '仿宋',             16, None,    0,    0,  28.95,    0,    0,   32, 'J'),
-    ('Title',     3,  'Norm',   'Norm',     '方正小标宋简体',    22, None,    0,    0,      0,    0,    0,    0, 'C'),
-    ('unindent',  1,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None,    0, 'L'),
-    ('H1',        4,  'Norm',   'Norm',     '黑体',           None, None, None, None,   None, None, None, None, None),
-    ('H2',        5,  'Norm',   'Norm',     '楷体',           None, None, None, None,   None, None, None, None, None),
-    ('H3',        6,  'Norm',   'Norm',     None,             None, True, None, None,   None, None, None, None, None),
-    ('H4',        7,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None, None, None),
-    ('Apdix',     9,  'Norm',   'Norm',     None,             None, None, None, None,   None,   80, None,  -48, None),
-    ('Apdix 1',  10,  'Norm',   'Norm',     None,             None, None, None, None,   None,   96, None,  -64, None),
-    ('Apdix 2',  11,  'Norm',   'Norm',     None,             None, None, None, None,   None,   96, None,  -16, None),
-    ('dater',    12,  'Norm',   'Norm',     None,             None, None, None, None,   None, None,   64,    0,  'R'),
-    ('Sign',     13,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None,    0,  'R'),
-    ('SimHei',   14,  'Norm',   'Norm',     '黑体',           None, None, None, None,   None, None, None,    0, None),
-    ('KaiTi',    15,  'Norm',   'Norm',     '楷体',           None, None, None, None,   None, None, None,    0, None),
-    ('heder',    16,  'Norm',   'heder',    '楷体',             14, None,    0,    0,      1,   16,   16,    0,  'C'),
-    ('foter',    17,  'Norm',   'foter',    '宋体',             14, None,    0,    0,      1,   16,   16,    0,  'L')
+    ('Title',     3,  'Normal', 'Normal',   '方正小标宋简体',    22, None,    0,    0,  28.95,    0,    0,    0, 'C'),
+    ('unindent',  1,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0, 'L'),
+    ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None),
+    ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None),
+    ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None),
+    ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None),
+    ('Apdix',     9,  'Normal', 'Normal',   None,             None, None, None, None,   None,   80, None,  -48, None),
+    ('Apdix 1',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -64, None),
+    ('Apdix 2',  11,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
+    ('dater',    12,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,   64,    0,  'R'),
+    ('Sign',     13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
+    ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
+    ('KaiTi',    15,  'Normal', 'Normal',   '楷体',           None, None, None, None,   None, None, None,    0, None),
+    ('heder',    16,  'Normal', 'heder',    '楷体',             14, None,    0,    0,      1,   16,   16,    0,  'C'),
+    ('foter',    17,  'Normal', 'foter',    '宋体',             14, None,    0,    0,      1,   16,   16,    0,  'L')
 ]
 
 
@@ -65,24 +64,24 @@ def set_page(doc):
 def clear_styles(doc):
     #删除原有样式
     keep = {'Normal', 'Default Paragraph Font', 'page number'}
+    styles_elem = doc.styles.element
     to_remove = []
-    for style in itertools.chain(doc.styles, doc.styles.latent_styles):
-        if style.name in keep:
+    for style_elem in styles_elem.findall(qn('w:style')):
+        name_elem = style_elem.find(qn('w:name'))
+        name = name_elem.get(qn('w:val')) if name_elem is not None else ''
+        if name in keep:
             continue
-        style.quick_style = False
-        to_remove.append(style.element)
+        to_remove.append(style_elem)
     for elem in to_remove:
-        try:
-            elem.getparent().remove(elem)
-        except Exception:
-            pass  
+        styles_elem.remove(elem)
+    #删除潜藏样式（latentStyles）
+    ls = styles_elem.find(qn('w:latentStyles'))
+    if ls is not None:
+        styles_elem.remove(ls)
     #改变Normal
-    try:
-        style_attr(doc.styles['Normal'], 2)
-        run_fm(doc.styles['Normal'], '仿宋', 16, False)
-        para_fm(doc.styles['Normal'], 0,  0, 28.95, 0, 0, 32, 'J')
-    except Exception:
-        pass
+    style_attr(doc.styles['Normal'], 2)
+    run_fm(doc.styles['Normal'], '仿宋', 16, False)
+    para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
 
 def add_my_styles(doc):
     for name, priority, base, next_st, *_ in STYLE_DEFS:
