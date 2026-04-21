@@ -12,35 +12,28 @@ ALIGN_MAP = {
     'J': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
 }
 
-# 样式定义表：(样式名, priority, 字体, 字号, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
+
+# 样式定义表：(样式名, priority, base_style, next_style, 字体, 字号, 加粗, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
+# None 表示继承 base_style，不显式设置
 STYLE_DEFS = [
-    ('Norm',      2,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('unindent',  1,  '仿宋',           16, 0, 0, 28.95,  0, 0,   0, 'L'),
-    ('Tit',       3,  '方正小标宋简体',  22, 0, 0, 28.95,  0, 0,   0, 'C'),
-    ('H1',        4,  '黑体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('H2',        5,  '楷体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('H3',        6,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('H4',       21,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('Apdix',     9,  '仿宋',           16, 0, 0, 28.95, 80, 0, -48, 'J'),
-    ('Apdix 1',  10,  '仿宋',           16, 0, 0, 28.95, 96, 0, -64, 'J'),
-    ('Apdix 2',  11,  '仿宋',           16, 0, 0, 28.95, 96, 0, -16, 'J'),
-    ('Blackbody',12,  '黑体',           16, 0, 0, 28.95,  0, 0,   0, 'J'),
-    ('Regular',  17,  '楷体',           16, 0, 0, 28.95,  0, 0,   0, 'J'),
-    ('heder',    15,  '楷体',           14, 0, 0,     1, 16, 16,   0, 'C'),
-    ('foter',    16,  '宋体',           14, 0, 0,     1, 16, 16,   0, 'L'),
-    ('dater',    13,  '仿宋',           16, 0, 0, 28.95,  0, 64,   0, 'R'),
-    ('Sign',     14,  '仿宋',           16, 0, 0, 28.95,  0, 0,    0, 'R'),
+    ('Norm',      2,  'Normal', 'Norm',     '仿宋',             16, None,    0,    0,  28.95,    0,    0,   32, 'J'),
+    ('Title',     3,  'Norm',   'Norm',     '方正小标宋简体',    22, None,    0,    0,      0,    0,    0,    0, 'C'),
+    ('unindent',  1,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None,    0, 'L'),
+    ('H1',        4,  'Norm',   'Norm',     '黑体',           None, None, None, None,   None, None, None, None, None),
+    ('H2',        5,  'Norm',   'Norm',     '楷体',           None, None, None, None,   None, None, None, None, None),
+    ('H3',        6,  'Norm',   'Norm',     None,             None, True, None, None,   None, None, None, None, None),
+    ('H4',        7,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None, None, None),
+    ('Apdix',     9,  'Norm',   'Norm',     None,             None, None, None, None,   None,   80, None,  -48, None),
+    ('Apdix 1',  10,  'Norm',   'Norm',     None,             None, None, None, None,   None,   96, None,  -64, None),
+    ('Apdix 2',  11,  'Norm',   'Norm',     None,             None, None, None, None,   None,   96, None,  -16, None),
+    ('dater',    12,  'Norm',   'Norm',     None,             None, None, None, None,   None, None,   64,    0,  'R'),
+    ('Sign',     13,  'Norm',   'Norm',     None,             None, None, None, None,   None, None, None,    0,  'R'),
+    ('SimHei',   14,  'Norm',   'Norm',     '黑体',           None, None, None, None,   None, None, None,    0, None),
+    ('KaiTi',    15,  'Norm',   'Norm',     '楷体',           None, None, None, None,   None, None, None,    0, None),
+    ('heder',    16,  'Norm',   'heder',    '楷体',             14, None,    0,    0,      1,   16,   16,    0,  'C'),
+    ('foter',    17,  'Norm',   'foter',    '宋体',             14, None,    0,    0,      1,   16,   16,    0,  'L')
 ]
 
-# 固有样式
-ORIGIN_STYLES = [
-    ('Normal',    2,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('Title',     3,  '方正小标宋简体',  22, 0, 0, 28.95,  0, 0,   0, 'C'),
-    ('Heading 1', 4,  '黑体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('Heading 2', 5,  '楷体',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('Heading 3', 6,  '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J'),
-    ('Heading 4', 21, '仿宋',           16, 0, 0, 28.95,  0, 0,  32, 'J')    
-]
 
 # 中文字体名 → ASCII 字体名映射
 ASCII_FONT_MAP = {
@@ -70,41 +63,49 @@ def set_page(doc):
 
 
 def clear_styles(doc):
-    #删除冗余样式
+    #删除原有样式
+    keep = {'Normal', 'Default Paragraph Font', 'page number'}
+    to_remove = []
     for style in itertools.chain(doc.styles, doc.styles.latent_styles):
-        style_attr(style, style.priority)
-        if style.name not in ['Normal', 'page number']:
-            try:
-                style.quick_style = False
-                style.delete()
-            except Exception:
-                print('未删除：', style.name)
-
-def change_origin_styles(doc):
-    #改变原始样式
-    for name, priority, font, size, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align in ORIGIN_STYLES:
-        for styles in [doc.styles, doc.styles.latent_styles]:
-            try:
-                run_fm(styles[name], font, size)
-                para_fm(styles[name],
-                        spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align)
-            except Exception:
-                pass
+        if style.name in keep:
+            continue
+        style.quick_style = False
+        to_remove.append(style.element)
+    for elem in to_remove:
+        try:
+            elem.getparent().remove(elem)
+        except Exception:
+            pass  
+    #改变Normal
+    try:
+        style_attr(doc.styles['Normal'], 2)
+        run_fm(doc.styles['Normal'], '仿宋', 16, False)
+        para_fm(doc.styles['Normal'], 0,  0, 28.95, 0, 0, 32, 'J')
+    except Exception:
+        pass
 
 def add_my_styles(doc):
-    for name, priority, *_ in STYLE_DEFS:
+    for name, priority, base, next_st, *_ in STYLE_DEFS:
         try:
-            add_style(doc, name, priority)
+            add_style(doc, name, priority, base_style_name=base, next_style_name=next_st)
         except Exception:
             pass
 
-    for name, priority, font, size, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align in STYLE_DEFS:
+    for name, priority, base, next_st, font, size, bold, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align in STYLE_DEFS:
         try:
-            run_fm(doc.styles[name], font, size)
+            run_fm(doc.styles[name], font, size, bold)
             para_fm(doc.styles[name],
                     spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align)
         except Exception:
             pass
+
+
+def add_style(doc, style_name, priority, hidden=True, quick=True, base_style_name='Normal', next_style_name='Normal'):
+    styles = doc.styles
+    style = styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+    style_attr(style, priority)
+    style.base_style = styles[base_style_name]
+    style.next_paragraph_style = styles[next_style_name]
 
 
 def style_attr(style, priority):
@@ -117,37 +118,39 @@ def style_attr(style, priority):
 
 def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_ind, align):
     para_f = getattr(para_name, 'paragraph_format', para_name)
-    para_f.space_before = Pt(spc_bef)
-    para_f.space_after = Pt(spc_af)
-    para_f.line_spacing = Pt(line_spc) if line_spc > 3 else line_spc
-    para_f.left_indent = Pt(left_ind)
-    para_f.right_indent = Pt(right_ind)
-    para_f.first_line_indent = Pt(first_l_ind)
-    para_f.alignment = ALIGN_MAP[align]
+    if spc_bef is not None:
+        para_f.space_before = Pt(spc_bef)
+    if spc_af is not None:
+        para_f.space_after = Pt(spc_af)
+    if line_spc is not None:
+        para_f.line_spacing = Pt(line_spc) if line_spc > 3 else line_spc
+    if left_ind is not None:
+        para_f.left_indent = Pt(left_ind)
+    if right_ind is not None:
+        para_f.right_indent = Pt(right_ind)
+    if first_l_ind is not None:
+        para_f.first_line_indent = Pt(first_l_ind)
+    if align is not None:
+        para_f.alignment = ALIGN_MAP[align]
     para_f.widow_control = False
     para_f.keep_with_next = False
     para_f.page_break_before = False
     para_f.keep_together = False
 
 
-def run_fm(run, font_type='仿宋', font_size=16, r=0, g=0, b=0):
+def run_fm(run, font_type=None, font_size=None, bold=None, r=None, g=None, b=None):
     font3 = run.font
-    font_name = ASCII_FONT_MAP.get(font_type, 'Times New Roman')
-    font3.name = font_name
-    font3.element.rPr.rFonts.set(qn('w:eastAsia'), font_type)
-    font3.size = Pt(font_size)
-    font3.color.rgb = RGBColor(r, g, b)
+    if font_type is not None:
+        font_name = ASCII_FONT_MAP.get(font_type, 'Times New Roman')
+        font3.name = font_name
+        font3.element.rPr.rFonts.set(qn('w:eastAsia'), font_type)
+    if font_size is not None:
+        font3.size = Pt(font_size)
+    if bold is not None:
+        font3.bold = bold
+    if r is not None and g is not None and b is not None:
+        font3.color.rgb = RGBColor(r, g, b)
     font3.snap_to_grid = False
-
-
-def add_style(doc, style_name, priority, hidden=True, quick=True):
-    styles = doc.styles
-    style = styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
-    style.hidden = hidden
-    style.unhide_when_used = False
-    style.quick_style = quick
-    style.priority = priority
-    style.base_style = styles['Normal']
 
 
 def my_number_style(doc):
