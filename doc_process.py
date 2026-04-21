@@ -173,27 +173,27 @@ def set_headings(doc):
               '（六）','（七）','（八）','（九）','（十）']
     for para in paras:                          
         if paras.index(para)<3 and len(para.text)<60 and para.text.strip(" ")[-2:] in title:  #标题识别
-            para.style = doc.styles['Tit']
+            para.style = doc.styles['Title']
             para_fm(para,0,0,28.95,0,0,0,'C')
             for run in para.runs:
-                run_fm(run,'方正小标宋简体',22,0,0,0)
+                run_fm(run,'方正小标宋简体',22,0,0,0,0)
 
         if 1<len(para.text)<30 and '：' in para.text[-1] \
            and len(paras[paras.index(para)-1].text)==0:  #主送识别
             para.style = doc.styles['unindent']
             para_fm(para,0,0,28.95,0,0,0,'J')
             for run in para.runs:
-                run_fm(run,'仿宋',16,0,0,0)
+                run_fm(run,'仿宋',16,0,0,0,0)
 
         if para.text.strip(" ")[:2] in heading1 and len(para.text)<60 and '：' not in para.text:  #一级标题识别
             para.style = doc.styles['H1']
             for run in para.runs:
-                run_fm(run,'黑体',16,0,0,0)
+                run_fm(run,'黑体',16,0,0,0,0)
 
         if para.text.strip(" ")[:3] in heading2 and len(para.text)<60 and '：' not in para.text:   #二级标题识别
             para.style = doc.styles['H2']
             for run in para.runs:
-                run_fm(run,'楷体',16,0,0,0)
+                run_fm(run,'楷体',16,0,0,0,0)
 
 
 def set_appendix(doc):
@@ -248,7 +248,7 @@ def set_appendix(doc):
                 para.style=doc.styles['Blackbody']	#设置顶格附件样式
                 para_fm(para,0,0,28.95,0,0,0,'L')
                 for run in para.runs:
-                    run_fm(run,'黑体',16,0,0,0)	#设置顶格附件格式
+                    run_fm(run,'黑体',16,0,0,0,0)	#设置顶格附件格式
                                       
 
 def set_date(doc):

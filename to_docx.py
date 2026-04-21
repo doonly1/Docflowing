@@ -148,14 +148,13 @@ def generate_docx(text, workdir=None, filename=None):
     """
     from docx import Document
     from doc_process import set_appendix, set_date, save_docx, set_headings
-    from mystyle import clear_styles, add_my_styles, my_number_style, set_page, change_origin_styles
+    from mystyle import clear_styles, add_my_styles, my_number_style, set_page
     
     if workdir is None:
         workdir = os.getcwd()
     
     doc = Document()
     clear_styles(doc)
-    change_origin_styles(doc)
     add_my_styles(doc)
     my_number_style(doc)
     set_page(doc)

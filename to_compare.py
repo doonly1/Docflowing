@@ -12,7 +12,7 @@ from docx import Document
 from docx.shared import RGBColor
 from doc_process import doc_to_docx
 from user_config import load_user_config
-from mystyle import clear_styles, add_my_styles, my_number_style, set_page, change_origin_styles
+from mystyle import clear_styles, add_my_styles, my_number_style, set_page
 
 
 def load_compare_config():
@@ -974,7 +974,6 @@ def compare_with_python(original_path, final_path, output_path):
         result_doc = Document()
         clear_styles(result_doc)
         add_my_styles(result_doc)
-        change_origin_styles(result_doc)
         my_number_style(result_doc)
         set_page(result_doc)
         
