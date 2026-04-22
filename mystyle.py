@@ -16,8 +16,8 @@ ALIGN_MAP = {
 # 样式定义表：(样式名, priority, base_style, next_style, 字体, 字号, 加粗, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
 # None 表示继承 base_style，不显式设置
 STYLE_DEFS = [
-    ('Title',     3,  'Normal', 'Normal',   '方正小标宋简体',    22, None,    0,    0,  28.95,    0,    0,    0, 'C'),
-    ('unindent',  1,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0, 'L'),
+    ('H0',        3,  'Normal', 'Normal',   '方正小标宋简体',   22, None,    0,    0,  28.95,    0,    0,    0,  'C'),
+    ('unindent',  1,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
     ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None),
     ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None),
     ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None),
@@ -34,13 +34,13 @@ STYLE_DEFS = [
 ]
 
 
-# 中文字体名 → ASCII 字体名映射
+# 中文字体 → 西文用
 ASCII_FONT_MAP = {
-    '宋体': 'SimSun',
-    '黑体': 'SimHei',
+    '宋体': '宋体',
+    '黑体': '黑体',
     '仿宋': 'Times New Roman',
-    '楷体': 'KaiTi',
-    '方正小标宋简体': 'FZXiaoBiaoSong-B05S',
+    '楷体': '楷体',
+    '方正小标宋简体': '方正小标宋简体',
 }
 
 

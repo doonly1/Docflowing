@@ -173,7 +173,7 @@ def set_headings(doc):
               '（六）','（七）','（八）','（九）','（十）']
     for para in paras:                          
         if paras.index(para)<3 and len(para.text)<60 and para.text.strip(" ")[-2:] in title:  #标题识别
-            para.style = doc.styles['Title']
+            para.style = doc.styles['H0']
             para_fm(para,0,0,28.95,0,0,0,'C')
             for run in para.runs:
                 run_fm(run,'方正小标宋简体',22,0,0,0,0)
