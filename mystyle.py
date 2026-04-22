@@ -29,8 +29,6 @@ STYLE_DEFS = [
     ('Sign',     13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
     ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
     ('KaiTi',    15,  'Normal', 'Normal',   '楷体',           None, None, None, None,   None, None, None,    0, None),
-    ('heder',    16,  'Normal', 'heder',    '楷体',             14, None,    0,    0,      1,   16,   16,    0,  'C'),
-    ('foter',    17,  'Normal', 'foter',    '宋体',             14, None,    0,    0,      1,   16,   16,    0,  'L')
 ]
 
 
@@ -63,7 +61,15 @@ def set_page(doc):
 
 def clear_styles(doc):
     #删除原有样式
-    keep = {'Normal', 'Default Paragraph Font', 'page number'}
+    # 先具现化 Header/Footer（它们来自 latentStyles，删除 latentStyles 后会消失）
+    # 访问属性即可触发 python-docx 将其 XML 写入 styles 元素
+    for name in ('Header', 'Footer'):
+        try:
+            _s = doc.styles[name]
+        except KeyError:
+            pass
+    # 保留的样式：注意 w:name 值 header/footer 是小写
+    keep = {'Normal', 'Default Paragraph Font', 'page number', 'header', 'footer'}
     styles_elem = doc.styles.element
     to_remove = []
     for style_elem in styles_elem.findall(qn('w:style')):
@@ -78,10 +84,20 @@ def clear_styles(doc):
     ls = styles_elem.find(qn('w:latentStyles'))
     if ls is not None:
         styles_elem.remove(ls)
+
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
     para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
+    #改变Header（页眉）：楷体14号，居中，左右缩进16磅
+    style_attr(doc.styles['Header'], 16)
+    run_fm(doc.styles['Header'], '楷体', 14, None)
+    para_fm(doc.styles['Header'], 0, 0, 1, 16, 16, 0, 'C')
+    #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
+    style_attr(doc.styles['Footer'], 17)
+    run_fm(doc.styles['Footer'], '宋体', 14, None)
+    para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'L')
+    
 
 def add_my_styles(doc):
     for name, priority, base, next_st, *_ in STYLE_DEFS:
