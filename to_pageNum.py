@@ -79,8 +79,8 @@ def add_page_numbers(workdir):
 
         doc = Document(file_path)
         set_page(doc)
-        set_some_styles(doc)
         set_page_number(doc)
+        set_some_styles(doc)
         doc.save(file_path)
         print('成功。')
 

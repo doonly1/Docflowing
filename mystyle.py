@@ -27,7 +27,7 @@ STYLE_DEFS = [
     ('Apdix 2',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
     ('dater',    11,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,   64,    0,  'R'),
     ('Sign',     12,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
-    ('FangSong', 13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
+    ('Fangsong', 13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
     ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
     ('KaiTi',    15,  'Normal', 'Normal',   '楷体',           None, None, None, None,   None, None, None,    0, None),
 ]
@@ -62,6 +62,14 @@ def set_page(doc):
 
 def clear_styles(doc):
     #删除原有样式
+    # 先具现化 Header/Footer（它们来自 latentStyles，删除 latentStyles 后会消失）
+    # 访问属性即可触发 python-docx 将其 XML 写入 styles 元素
+    for name in ('Header', 'Footer'):
+        try:
+            _s = doc.styles[name]
+        except Exception as e:
+            print(f"Style {name} not found: {e}")
+            pass
     # 保留的样式：注意 w:name 值 header/footer/heading 是小写，Title/Normal 是首字母大写
     keep = {'Normal', 'Default Paragraph Font', 'header', 'footer'}
     styles_elem = doc.styles.element
@@ -74,6 +82,10 @@ def clear_styles(doc):
         to_remove.append(style_elem)
     for elem in to_remove:
         styles_elem.remove(elem)
+    #删除潜藏样式（latentStyles）
+    ls = styles_elem.find(qn('w:latentStyles'))
+    if ls is not None:
+        styles_elem.remove(ls)
 
     # Default Paragraph Font 设为隐藏
     try:
@@ -82,22 +94,24 @@ def clear_styles(doc):
         dpf.unhide_when_used = False
     except Exception:
         pass
-
     set_some_styles(doc)
 
-    #删除潜藏样式（latentStyles）
-    ls = styles_elem.find(qn('w:latentStyles'))
-    if ls is not None:
-        styles_elem.remove(ls)
+
+def _ensure_style(doc, name, priority):
+    """确保样式存在，不存在则创建。Header/Footer 可能只在 latentStyles 中。"""
+    try:
+        return doc.styles[name]
+    except KeyError:
+        style = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        style_attr(style, priority)
+        style.base_style = doc.styles['Normal']
+        style.next_paragraph_style = doc.styles[name]
+        return style
 
 
 def set_some_styles(doc):
-    # 确保 Header/Footer 样式存在（来自 latentStyles 则具现化，否则手动创建）
-    for name in ('Header', 'Footer'):
-        try:
-            doc.styles[name]
-        except KeyError:
-            doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+    _ensure_style(doc, 'Header', 16)
+    _ensure_style(doc, 'Footer', 17)
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
@@ -110,7 +124,7 @@ def set_some_styles(doc):
     style_attr(doc.styles['Footer'], 17)
     run_fm(doc.styles['Footer'], '宋体', 14, None)
     para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'R')
-    
+
     # #改变Title（标题）：方正小标宋简体22号，居中，不加粗（覆盖内置默认bold）
     # style_attr(doc.styles['Title'], 3)
     # run_fm(doc.styles['Title'], '方正小标宋简体', 22, False)
