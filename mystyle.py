@@ -2,6 +2,7 @@ from docx.shared import Cm, Pt, RGBColor
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 import itertools
 
 # 对齐方式映射
@@ -16,17 +17,17 @@ ALIGN_MAP = {
 # 样式定义表：(样式名, priority, base_style, next_style, 字体, 字号, 加粗, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
 # None 表示继承 base_style，不显式设置
 STYLE_DEFS = [
-    ('H0',        3,  'Normal', 'Normal',   '方正小标宋简体',   22, None,    0,    0,  28.95,    0,    0,    0,  'C'),
-    ('unindent',  1,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
-    ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None),
-    ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None),
-    ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None),
-    ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None),
-    ('Apdix',     9,  'Normal', 'Normal',   None,             None, None, None, None,   None,   80, None,  -48, None),
-    ('Apdix 1',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -64, None),
-    ('Apdix 2',  11,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
-    ('dater',    12,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,   64,    0,  'R'),
-    ('Sign',     13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
+    ('H0',        3,  'Normal', 'Normal',   '方正小标宋简体',   22, None,    0,    0,  28.95,    0,    0,    0,  'C'),  # 已改用内置 Title
+    ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 1
+    ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 2
+    ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None),  # 已改用内置 Heading 3
+    ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 4
+    ('Apdix',     8,  'Normal', 'Normal',   None,             None, None, None, None,   None,   80, None,  -48, None),
+    ('Apdix 1',   9,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -64, None),
+    ('Apdix 2',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
+    ('dater',    11,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,   64,    0,  'R'),
+    ('Sign',     12,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
+    ('FangSong', 13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
     ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
     ('KaiTi',    15,  'Normal', 'Normal',   '楷体',           None, None, None, None,   None, None, None,    0, None),
 ]
@@ -61,15 +62,8 @@ def set_page(doc):
 
 def clear_styles(doc):
     #删除原有样式
-    # 先具现化 Header/Footer（它们来自 latentStyles，删除 latentStyles 后会消失）
-    # 访问属性即可触发 python-docx 将其 XML 写入 styles 元素
-    for name in ('Header', 'Footer'):
-        try:
-            _s = doc.styles[name]
-        except KeyError:
-            pass
-    # 保留的样式：注意 w:name 值 header/footer 是小写
-    keep = {'Normal', 'Default Paragraph Font', 'page number', 'header', 'footer'}
+    # 保留的样式：注意 w:name 值 header/footer/heading 是小写，Title/Normal 是首字母大写
+    keep = {'Normal', 'Default Paragraph Font', 'header', 'footer'}
     styles_elem = doc.styles.element
     to_remove = []
     for style_elem in styles_elem.findall(qn('w:style')):
@@ -80,11 +74,30 @@ def clear_styles(doc):
         to_remove.append(style_elem)
     for elem in to_remove:
         styles_elem.remove(elem)
+
+    # Default Paragraph Font 设为隐藏
+    try:
+        dpf = doc.styles['Default Paragraph Font']
+        dpf.hidden = True
+        dpf.unhide_when_used = False
+    except Exception:
+        pass
+
+    set_some_styles(doc)
+
     #删除潜藏样式（latentStyles）
     ls = styles_elem.find(qn('w:latentStyles'))
     if ls is not None:
         styles_elem.remove(ls)
 
+
+def set_some_styles(doc):
+    # 确保 Header/Footer 样式存在（来自 latentStyles 则具现化，否则手动创建）
+    for name in ('Header', 'Footer'):
+        try:
+            doc.styles[name]
+        except KeyError:
+            doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
@@ -96,7 +109,28 @@ def clear_styles(doc):
     #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
     style_attr(doc.styles['Footer'], 17)
     run_fm(doc.styles['Footer'], '宋体', 14, None)
-    para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'L')
+    para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'R')
+    
+    # #改变Title（标题）：方正小标宋简体22号，居中，不加粗（覆盖内置默认bold）
+    # style_attr(doc.styles['Title'], 3)
+    # run_fm(doc.styles['Title'], '方正小标宋简体', 22, False)
+    # para_fm(doc.styles['Title'], 0, 0, 28.95, 0, 0, 0, 'C')
+    # #改变Heading 1（一级标题）：黑体16号，不加粗（覆盖内置默认bold）
+    # style_attr(doc.styles['Heading 1'], 4)
+    # run_fm(doc.styles['Heading 1'], '黑体', 16, False)
+    # para_fm(doc.styles['Heading 1'], None, None, None, None, None, None, None)
+    # #改变Heading 2（二级标题）：楷体16号，不加粗（覆盖内置默认bold）
+    # style_attr(doc.styles['Heading 2'], 5)
+    # run_fm(doc.styles['Heading 2'], '楷体', 16, False)
+    # para_fm(doc.styles['Heading 2'], None, None, None, None, None, None, None)
+    # #改变Heading 3（三级标题）：16号加粗
+    # style_attr(doc.styles['Heading 3'], 6)
+    # run_fm(doc.styles['Heading 3'], None, 16, True)
+    # para_fm(doc.styles['Heading 3'], None, None, None, None, None, None, None)
+    # #改变Heading 4（四级标题）：16号，不加粗（覆盖内置默认bold）
+    # style_attr(doc.styles['Heading 4'], 7)
+    # run_fm(doc.styles['Heading 4'], None, 16, False)
+    # para_fm(doc.styles['Heading 4'], None, None, None, None, None, None, None)
     
 
 def add_my_styles(doc):
@@ -151,6 +185,25 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
     para_f.keep_with_next = False
     para_f.page_break_before = False
     para_f.keep_together = False
+    # 取消"对齐到网格"
+    # para_f._element 对样式来说是 w:style，对段落来说是 w:p，都需要在内部找/创建 w:pPr
+    elem = para_f._element
+    if elem is not None:
+        pPr = elem.find(qn('w:pPr'))
+        if pPr is None:
+            pPr = OxmlElement('w:pPr')
+            elem.append(pPr)
+        snap = pPr.find(qn('w:snapToGrid'))
+        if snap is None:
+            snap = OxmlElement('w:snapToGrid')
+            pPr.append(snap)
+        snap.set(qn('w:val'), '0')
+        # 取消"如果定义了文档网格，则自动调整右缩进"
+        adj = pPr.find(qn('w:adjustRightInd'))
+        if adj is None:
+            adj = OxmlElement('w:adjustRightInd')
+            pPr.append(adj)
+        adj.set(qn('w:val'), '0')
 
 
 def run_fm(run, font_type=None, font_size=None, bold=None, r=None, g=None, b=None):
@@ -165,22 +218,3 @@ def run_fm(run, font_type=None, font_size=None, bold=None, r=None, g=None, b=Non
         font3.bold = bold
     if r is not None and g is not None and b is not None:
         font3.color.rgb = RGBColor(r, g, b)
-    font3.snap_to_grid = False
-
-
-def my_number_style(doc):
-    done = False
-    for src in [doc.styles, doc.styles.latent_styles]:
-        try:
-            run_fm(src['page number'], '宋体', 14)
-            para_fm(src['page number'], 0, 0, 1, 14, 14, 0, 'R')
-            style_attr(src['page number'], 20)
-            done = True
-            break
-        except Exception:
-            continue
-
-    if not done:
-        add_style(doc, 'page number', 20)
-        run_fm(doc.styles['page number'], '宋体', 14)
-        para_fm(doc.styles['page number'], 0, 0, 1, 14, 14, 0, 'R')

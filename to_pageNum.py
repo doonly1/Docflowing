@@ -5,7 +5,7 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
-from mystyle import my_number_style, set_page
+from mystyle import set_page, set_some_styles
 from doc_process import doc_to_docx, save_docx
 
 
@@ -45,7 +45,7 @@ def set_page_number(doc):
 
     # 应用 page number 样式（字体、字号、右对齐等）
     try:
-        para.style = doc.styles['page number']
+        para.style = doc.styles['Footer']
     except Exception:
         pass
 
@@ -79,7 +79,7 @@ def add_page_numbers(workdir):
 
         doc = Document(file_path)
         set_page(doc)
-        my_number_style(doc)
+        set_some_styles(doc)
         set_page_number(doc)
         doc.save(file_path)
         print('成功。')
