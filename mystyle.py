@@ -17,11 +17,11 @@ ALIGN_MAP = {
 # 样式定义表：(样式名, priority, base_style, next_style, 字体, 字号, 加粗, 段前, 段后, 行距, 左缩进, 右缩进, 首行缩进, 对齐)
 # None 表示继承 base_style，不显式设置
 STYLE_DEFS = [
-    ('H0',        3,  'Normal', 'Normal',   '方正小标宋简体',   22, None,    0,    0,  28.95,    0,    0,    0,  'C'),  # 已改用内置 Title
-    ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 1
-    ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 2
-    ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None),  # 已改用内置 Heading 3
-    ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None),  # 已改用内置 Heading 4
+    ('H0',        3,  'Normal', 'Normal',   '方正小标宋简体',   22, None,    0,    0,  28.95,    0,    0,    0,  'C'), 
+    ('H1',        4,  'Normal', 'Normal',   '黑体',             16, None, None, None,   None, None, None, None, None), 
+    ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None), 
+    ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None), 
+    ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None), 
     ('Apdix',     8,  'Normal', 'Normal',   None,             None, None, None, None,   None,   80, None,  -48, None),
     ('Apdix 1',   9,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -64, None),
     ('Apdix 2',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
@@ -30,8 +30,9 @@ STYLE_DEFS = [
     ('Fangsong', 13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
     ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
     ('KaiTi',    15,  'Normal', 'Normal',   '楷体',           None, None, None, None,   None, None, None,    0, None),
+    ('Heder',    16,  'Normal', 'Heder',    '楷体',             14, None,    0,    0,      1,   16,   16,    0,  'C'),
+    ('Foter',    17,  'Normal', 'Foter',    '宋体',             14, None,    0,    0,      1,   16,   16,    0,  'R'),
 ]
-
 
 # 中文字体 → 西文用
 ASCII_FONT_MAP = {
@@ -62,16 +63,7 @@ def set_page(doc):
 
 def clear_styles(doc):
     #删除原有样式
-    # 先具现化 Header/Footer（它们来自 latentStyles，删除 latentStyles 后会消失）
-    # 访问属性即可触发 python-docx 将其 XML 写入 styles 元素
-    for name in ('Header', 'Footer'):
-        try:
-            _s = doc.styles[name]
-        except Exception as e:
-            print(f"Style {name} not found: {e}")
-            pass
-    # 保留的样式：注意 w:name 值 header/footer/heading 是小写，Title/Normal 是首字母大写
-    keep = {'Normal', 'Default Paragraph Font', 'header', 'footer'}
+    keep = {'Normal', 'Default Paragraph Font'}
     styles_elem = doc.styles.element
     to_remove = []
     for style_elem in styles_elem.findall(qn('w:style')):
@@ -82,48 +74,27 @@ def clear_styles(doc):
         to_remove.append(style_elem)
     for elem in to_remove:
         styles_elem.remove(elem)
+
     #删除潜藏样式（latentStyles）
     ls = styles_elem.find(qn('w:latentStyles'))
     if ls is not None:
         styles_elem.remove(ls)
-
-    # Default Paragraph Font 设为隐藏
-    try:
-        dpf = doc.styles['Default Paragraph Font']
-        dpf.hidden = True
-        dpf.unhide_when_used = False
-    except Exception:
-        pass
     set_some_styles(doc)
-
-
-def _ensure_style(doc, name, priority):
-    """确保样式存在，不存在则创建。Header/Footer 可能只在 latentStyles 中。"""
-    try:
-        return doc.styles[name]
-    except KeyError:
-        style = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-        style_attr(style, priority)
-        style.base_style = doc.styles['Normal']
-        style.next_paragraph_style = doc.styles[name]
-        return style
-
-
-def set_some_styles(doc):
-    _ensure_style(doc, 'Header', 16)
-    _ensure_style(doc, 'Footer', 17)
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
     para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
-    #改变Header（页眉）：楷体14号，居中，左右缩进16磅
-    style_attr(doc.styles['Header'], 16)
-    run_fm(doc.styles['Header'], '楷体', 14, None)
-    para_fm(doc.styles['Header'], 0, 0, 1, 16, 16, 0, 'C')
-    #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
-    style_attr(doc.styles['Footer'], 17)
-    run_fm(doc.styles['Footer'], '宋体', 14, None)
-    para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'R')
+
+
+# def set_some_styles(doc):
+#     #改变Header（页眉）：楷体14号，居中，左右缩进16磅
+#     style_attr(doc.styles['Heder'], 16)
+#     run_fm(doc.styles['Heder'], '楷体', 14, None)
+#     para_fm(doc.styles['Heder'], 0, 0, 1, 16, 16, 0, 'C')
+#     #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
+#     style_attr(doc.styles['Foter'], 17)
+#     run_fm(doc.styles['Foter'], '宋体', 14, None)
+#     para_fm(doc.styles['Foter'], 0, 0, 1, 16, 16, 0, 'R')
 
     # #改变Title（标题）：方正小标宋简体22号，居中，不加粗（覆盖内置默认bold）
     # style_attr(doc.styles['Title'], 3)
