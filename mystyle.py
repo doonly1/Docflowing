@@ -62,39 +62,75 @@ def set_page(doc):
 
 
 def clear_styles(doc):
-    #删除原有样式
-    keep = {'Normal', 'Default Paragraph Font'}
-    styles_elem = doc.styles.element
-    to_remove = []
-    for style_elem in styles_elem.findall(qn('w:style')):
-        name_elem = style_elem.find(qn('w:name'))
-        name = name_elem.get(qn('w:val')) if name_elem is not None else ''
-        if name in keep:
-            continue
-        to_remove.append(style_elem)
-    for elem in to_remove:
-        styles_elem.remove(elem)
+    """
+    清空样式框（删除路线）：
+    1. 直接从 styles.xml 中移除不需要的显式样式节点（保留 Normal 和字符/表格/列表类型的必要样式）。
+    2. latentStyles 设 count=0 + defLockedState=1 + defSemiHidden=1 + defQFormat=0，
+       并清空所有 lsdException。count=0 明确告诉 Word "本文档无潜在样式"，
+    """
+    # ── 1. 删除 styles.xml 中不需要的显式样式节点 ──
+    # 必须保留的样式（删掉会导致 docx 损坏或功能异常）
+    KEEP_STYLE_IDS = {
+        'Normal',                  # 基础正文，必须保留
+        'DefaultParagraphFont',    # 字符样式基础，必须保留
+        'TableNormal',             # 表格基础样式，必须保留
+        'NoList',                  # 列表基础样式，必须保留
+    }
+    # 同时按 w:name val 保留
+    KEEP_NAMES = {
+        'Normal',
+        'Default Paragraph Font',
+        'Normal Table',
+        'No List',
+    }
 
-    #删除潜藏样式（latentStyles）
+    styles_elem = doc.styles.element
+    for style_elem in list(styles_elem.findall(qn('w:style'))):
+        # 按 styleId 属性判断
+        style_id = style_elem.get(qn('w:styleId'), '')
+        if style_id in KEEP_STYLE_IDS:
+            continue
+        # 按 w:name val 判断
+        name_elem = style_elem.find(qn('w:name'))
+        name = name_elem.get(qn('w:val'), '') if name_elem is not None else ''
+        if name in KEEP_NAMES:
+            continue
+        styles_elem.remove(style_elem)
+
+    # ── 2. 处理 latentStyles：count=0 + 全局隐藏/锁定 + 清空所有 lsdException ──
+    # count=0 明确告诉 Word "本文档声明 0 个潜在样式"，
     ls = styles_elem.find(qn('w:latentStyles'))
-    if ls is not None:
-        styles_elem.remove(ls)
-    set_some_styles(doc)
+    if ls is None:
+        ls = OxmlElement('w:latentStyles')
+        styles_elem.append(ls)
+
+    ls.set(qn('w:defLockedState'), '1')
+    ls.set(qn('w:defSemiHidden'), '1')
+    ls.set(qn('w:defUnhideWhenUsed'), '0')
+    ls.set(qn('w:defQFormat'), '0')
+    ls.set(qn('w:count'), '0')
+
+    # 清空所有 lsdException，不留任何例外条目
+    for exc in ls.findall(qn('w:lsdException')):
+        ls.remove(exc)
+
+    set_oringin_styles(doc)
+
+
+def set_oringin_styles(doc):
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
     para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
 
-
-# def set_some_styles(doc):
-#     #改变Header（页眉）：楷体14号，居中，左右缩进16磅
-#     style_attr(doc.styles['Heder'], 16)
-#     run_fm(doc.styles['Heder'], '楷体', 14, None)
-#     para_fm(doc.styles['Heder'], 0, 0, 1, 16, 16, 0, 'C')
-#     #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
-#     style_attr(doc.styles['Foter'], 17)
-#     run_fm(doc.styles['Foter'], '宋体', 14, None)
-#     para_fm(doc.styles['Foter'], 0, 0, 1, 16, 16, 0, 'R')
+    # #改变Header（页眉）：楷体14号，居中，左右缩进16磅
+    # style_attr(doc.styles['Header'], 16)
+    # run_fm(doc.styles['Header'], '楷体', 14, None)
+    # para_fm(doc.styles['Header'], 0, 0, 1, 16, 16, 0, 'C')
+    # #改变Footer（页脚）：宋体14号，左对齐，左右缩进16磅
+    # style_attr(doc.styles['Footer'], 17)
+    # run_fm(doc.styles['Footer'], '宋体', 14, None)
+    # para_fm(doc.styles['Footer'], 0, 0, 1, 16, 16, 0, 'R')
 
     # #改变Title（标题）：方正小标宋简体22号，居中，不加粗（覆盖内置默认bold）
     # style_attr(doc.styles['Title'], 3)

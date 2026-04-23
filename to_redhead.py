@@ -80,24 +80,21 @@ def add_seal(workdir):
                 
         #套红机关名
         para = paras[0].insert_paragraph_before()   #最前段插入发文机关
-        para._p.get_or_add_pPr().insert(0,parse_xml('<w:snapToGrid {}  w:val="0"/>'.format(nsdecls('w')))) #取消设置对齐到网格
+        para_fm(para,0,0,1,0,0,0,'C')
         run=para.add_run()
         run = para.add_run(sign_para_text+'文件')
-        run_fm(run,'方正小标宋简体',72,255,0,0)
-        para_fm(para,0,0,1,0,0,0,'C')
+        run_fm(run,'方正小标宋简体',72,True,255,0,0)
         
         para = paras[0].insert_paragraph_before()   #插入空行
-        para._p.get_or_add_pPr().insert(0,parse_xml('<w:snapToGrid {}  w:val="0"/>'.format(nsdecls('w')))) #取消设置对齐到网格
         para_fm(para,0,0,28.95,0,0,0,'C')
         
         #插入文号
         para = paras[0].insert_paragraph_before()
-        para._p.get_or_add_pPr().insert(0,parse_xml('<w:snapToGrid {}  w:val="0"/>'.format(nsdecls('w')))) #取消设置对齐到网格
+        para_fm(para,0,0,28.95,0,0,0,'C')
         run = para.add_run()
         fawenzihao = get_fawenzihao(sign_para_text)
         run.text = fawenzihao
         run_fm(run,'仿宋')
-        para_fm(para,0,0,28.95,0,0,0,'C')
         print('文号：',run.text)
         
         #插入红色分割线
@@ -125,7 +122,7 @@ def add_seal(workdir):
     
 def get_stamp_path(sign_text):
     """获取印章图片路径"""
-    config = _load_config()
+    config = load_user_config()
     if not config:
         return None
     
