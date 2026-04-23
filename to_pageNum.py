@@ -43,7 +43,7 @@ def set_page_number(doc):
         footer.add_paragraph()
     para = footer.paragraphs[0]
 
-    # 应用 page number 样式（字体、字号、右对齐等）
+    # 应用 foter 样式（字体、字号、右对齐等）
     try:
         para.style = doc.styles['Foter']
     except Exception:

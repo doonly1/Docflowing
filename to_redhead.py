@@ -3,29 +3,27 @@ from docx import Document
 from docx.shared import Pt
 from docx.oxml.ns import qn
 
-from mystyle import para_fm,run_fm
+from mystyle import add_my_styles, para_fm, run_fm
 from float_picture import parse_xml, nsdecls, add_float_picture
 from user_config import load_user_config
 
 
-def _apply_font_scaling(file_path, scaling):
-    """对文档第一段应用字体缩放（跨平台）
+def apply_font_scaling(run, scaling):
+    """对 run 内的所有文字应用字体横向缩放
+
+    :param run: python-docx 的 Run 对象
     :param scaling: 缩放比例
     """
-    # python-docx XML 方式：设置 w:w 属性
     try:
-        doc = Document(file_path)
-        if doc.paragraphs:
-            first_para = doc.paragraphs[0]
-            for run in first_para.runs:
-                rPr = run._r.get_or_add_rPr()
-                for existing in rPr.findall(qn('w:w')):
-                    rPr.remove(existing)
-                w_elem = parse_xml(
-                    '<w:w xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:val="%d"/>' % scaling
-                )
-                rPr.append(w_elem)
-        doc.save(file_path)
+        if not run.text:
+            return
+        rPr = run._r.get_or_add_rPr()
+        # 先一次性移除所有旧的 w:w 元素，避免循环中反复 append
+        for existing in rPr.findall(qn('w:w')):
+            rPr.remove(existing)
+        # 再添加新的 w:w，namespace 由 parse_xml 自动处理，无需手动写 xmlns
+        w_elem = parse_xml('<w:w {} w:val="%d"/>'.format(nsdecls('w')) % scaling)
+        rPr.append(w_elem)
     except Exception as e:
         print(f'字体缩放失败: {e}')
 
@@ -45,12 +43,13 @@ def add_seal(workdir):
         print('正在添加印章：',file)
         file_path = os.path.join(workdir, file)
         doc=Document(file_path)
+        add_my_styles(doc)
         paras=doc.paragraphs
         sign_para_text='未找到署名'
         for para in paras:
             para_text=''.join(para.text.split())
             if '年' in para_text and '月' in para_text\
-                and '日' in para_text and len(para_text) < 13:
+                and '日' in para_text and len(para_text) < 12:
                 sign_para = paras[paras.index(para)-1]   #日期上一段
                 sign_text = ''.join(sign_para.text.split())
                 if len(sign_text)>3 and len(sign_text) < 25:
@@ -78,45 +77,42 @@ def add_seal(workdir):
                     print(f'印章添加失败：{e}')
                 break
                 
-        #套红机关名
+        #套红并缩放
         para = paras[0].insert_paragraph_before()   #最前段插入发文机关
+        para.style = doc.styles['H0']
         para_fm(para,0,0,1,0,0,0,'C')
-        run=para.add_run()
-        run = para.add_run(sign_para_text+'文件')
-        run_fm(run,'方正小标宋简体',72,True,255,0,0)
+        run0 = para.add_run(sign_para_text+'文件')
+        run_fm(run0,'方正小标宋简体',72,0,255,0,0)
+        apply_font_scaling(run0, int(560/(len(sign_para_text)+2)))
         
         para = paras[0].insert_paragraph_before()   #插入空行
+        para.style = doc.styles['Fangsong']
         para_fm(para,0,0,28.95,0,0,0,'C')
-        
-        #插入文号
-        para = paras[0].insert_paragraph_before()
-        para_fm(para,0,0,28.95,0,0,0,'C')
-        run = para.add_run()
-        fawenzihao = get_fawenzihao(sign_para_text)
-        run.text = fawenzihao
-        run_fm(run,'仿宋')
-        print('文号：',run.text)
-        
-        #插入红色分割线
-        para = paras[0].insert_paragraph_before()
-        para._p.get_or_add_pPr().insert(0,parse_xml('<w:snapToGrid {}  w:val="0"/>'.format(nsdecls('w')))) #取消设置对齐到网格
-        para_fm(para,0,0,28.95,0,0,0,'C')
-        
-        line_name = os.path.join(script_dir, 'config', '红色分割线.png')
-        run_fm(run,'仿宋',16)
-        add_float_picture(para, line_name , pos_x=Pt(2.8*28.35), pos_y=Pt(10*28.35))
-        
+        run_fm(para.add_run(''),'仿宋', 16,0,0,0,0)
 
+        #插入文号及分割线
+        para = paras[0].insert_paragraph_before()
+        para.style = doc.styles['Fangsong']
+        para_fm(para,0,0,28.95,0,0,0,'C')
+        wenhao = get_fawenzihao(sign_para_text)
+        run_fm(para.add_run(wenhao),'仿宋', 16,0,0,0,0)
+        pPr = para._p.get_or_add_pPr()
+        # 底边框：红色 FF0000、单实线、粗细 12（=1.5pt）、间距 3
+        pPr.insert(1, parse_xml(
+            '<w:pBdr {}>'.format(nsdecls('w')) +
+            '<w:bottom w:val="single" w:sz="12" w:space="3" w:color="FF0000"/>' +
+            '</w:pBdr>'
+        ))
+        print('文号：',wenhao)
+
+        para = paras[0].insert_paragraph_before()   #插入空行
+        para_fm(para,0,0,28.95,0,0,0,'C')
+        run_fm(para.add_run(''),'仿宋', 16,0,0,0,0)
 
         #文档保存docx
-        file = str(fawenzihao)+file[4:]
+        file = str(wenhao)+file[4:]
         save_path = os.path.join(workdir, file)
         doc.save(save_path)
-
-
-        #应用字体缩放
-        scaling = int(560/(len(sign_para_text)+2))
-        _apply_font_scaling(save_path, scaling)
         print('文档已保存：', os.path.normpath(save_path), '\n')
 
     
@@ -149,24 +145,18 @@ def get_stamp_path(sign_text):
 
 def get_fawenzihao(sign_text):
     """获取发文字号"""
-    config = load_user_config()
-    
-    daizi = None
-    # 遍历配置，查找匹配的公司名称或简称
+    config = load_user_config()  
+    daizi = '未找到'
     if config:
         for company, info in config.items():
             if not isinstance(info, dict):
                 continue  # 跳过非公司配置
             if company == sign_text or sign_text in info.get('简称', []):
                 daizi = info.get('代字')
-                break
-    
-    if daizi is None:
-        daizi = '未找到'
-        
+                break  
     year = time.strftime("%Y", time.localtime())
-    fawenzihao = daizi + '〔' + year + '〕' + '1号'
-    return fawenzihao
+    wenhao = daizi + '〔' + year + '〕' + '1号'
+    return wenhao
 
 
 if __name__ == "__main__":
