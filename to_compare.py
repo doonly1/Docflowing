@@ -15,6 +15,66 @@ from load_config import load_user_config
 from mystyle import clear_styles, add_my_styles, set_page
 
 
+# 中文引号 Unicode 编码
+# " " 左双引号 U+201C，右双引号 U+201D
+# ' ' 左单引号 U+2018，右单引号 U+2019
+CHINESE_LEFT_DOUBLE_QUOTE = "\u201c"
+CHINESE_RIGHT_DOUBLE_QUOTE = "\u201d"
+CHINESE_LEFT_SINGLE_QUOTE = "\u2018"
+CHINESE_RIGHT_SINGLE_QUOTE = "\u2019"
+
+ENGLISH_DOUBLE_QUOTE = '"'
+ENGLISH_SINGLE_QUOTE = "'"
+
+
+def _convert_english_to_chinese_quotes(text):
+    """将英文字符串中的英文引号转换为中文引号（仅限中文语境）"""
+    if not text:
+        return text
+    result = []
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == ENGLISH_DOUBLE_QUOTE:
+            prev_char = text[i - 1] if i > 0 else ""
+            next_char = text[i + 1] if i < len(text) - 1 else ""
+            should_convert = (
+                (prev_char and ("\u4e00" <= prev_char <= "\u9fff" or prev_char.isdigit())) or
+                (next_char and ("\u4e00" <= next_char <= "\u9fff" or next_char.isdigit()))
+            )
+            if should_convert:
+                if prev_char and ("\u4e00" <= prev_char <= "\u9fff" or prev_char.isdigit()):
+                    result.append(CHINESE_RIGHT_DOUBLE_QUOTE)
+                else:
+                    result.append(CHINESE_LEFT_DOUBLE_QUOTE)
+            else:
+                result.append(char)
+        elif char == ENGLISH_SINGLE_QUOTE:
+            prev_char = text[i - 1] if i > 0 else ""
+            next_char = text[i + 1] if i < len(text) - 1 else ""
+            should_convert = (
+                (prev_char and ("\u4e00" <= prev_char <= "\u9fff" or prev_char.isdigit())) or
+                (next_char and ("\u4e00" <= next_char <= "\u9fff" or next_char.isdigit()))
+            )
+            if should_convert:
+                if prev_char and ("\u4e00" <= prev_char <= "\u9fff" or prev_char.isdigit()):
+                    result.append(CHINESE_RIGHT_SINGLE_QUOTE)
+                else:
+                    result.append(CHINESE_LEFT_SINGLE_QUOTE)
+            else:
+                result.append(char)
+        else:
+            result.append(char)
+        i += 1
+    return "".join(result)
+
+
+def _get_paragraph_text(para):
+    """获取段落文本，同时修复可能被错误转换的中文引号"""
+    text = para.text
+    return _convert_english_to_chinese_quotes(text)
+
+
 def load_compare_config():
     """从yaml配置文件加载比较参数（支持用户自定义配置）"""
     config = load_user_config()
@@ -79,7 +139,7 @@ def get_paragraphs_with_style(doc):
     """获取文档所有段落及样式信息"""
     paragraphs = []
     for para in doc.paragraphs:
-        text = para.text
+        text = _get_paragraph_text(para)  # 使用修复后的函数获取文本
         paragraphs.append({
             'text': text,
             'style': para.style.name if para.style else 'Normal'
