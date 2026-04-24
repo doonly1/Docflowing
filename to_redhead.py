@@ -5,7 +5,7 @@ from docx.oxml.ns import qn
 
 from mystyle import add_my_styles, para_fm, run_fm
 from float_picture import parse_xml, nsdecls, add_float_picture
-from user_config import load_user_config
+from load_config import load_user_config
 
 
 def apply_font_scaling(run, scaling):
@@ -145,7 +145,7 @@ def get_stamp_path(sign_text):
 
 def get_fawenzihao(sign_text):
     """获取发文字号"""
-    config = load_user_config()  
+    config = load_user_config()
     daizi = '未找到'
     if config:
         for company, info in config.items():

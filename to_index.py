@@ -73,12 +73,7 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
     # 写入表头
     columns = ['序号', '文件名']
     for i in range(max_depth):
-        if i == 0:
-            columns.append('子目录')
-        elif i == 1:
-            columns.append('孙目录')
-        else:
-            columns.append(f'目录层级{i+1}')
+        columns.append(f'目录层{i+1}')
     columns.extend(['修改日期', '文件大小'])
     
     for col, header in enumerate(columns, 1):
@@ -90,7 +85,7 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
         # 超链接（文件名可点击）
         cell = ws.cell(row=row_idx, column=2, value=info['filename'])
         cell.hyperlink = info['rel_path']
-        cell.font = Font(color='0563C1', underline='single')
+        cell.font = Font()
         # 目录层级
         for col_idx, level in enumerate(info['dir_levels'], start=3):
             ws.cell(row=row_idx, column=col_idx, value=level)

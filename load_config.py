@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-用户配置管理模块
+"""用户配置加载器
 
-统一配置读取入口：
-  - 优先级：USER_CONFIG_PATH 环境变量（服务端临时配置）→ ./config/config.yaml（模板）
-  - 配置由浏览器 localStorage 持久化
-"""
+优先级：USER_CONFIG_PATH 环境变量（服务端临时配置）→ ./config/config.yaml（模板）"""
 
 import os
 

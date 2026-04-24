@@ -11,7 +11,7 @@ import yaml
 from docx import Document
 from docx.shared import RGBColor
 from doc_process import doc_to_docx
-from user_config import load_user_config
+from load_config import load_user_config
 from mystyle import clear_styles, add_my_styles, set_page
 
 
