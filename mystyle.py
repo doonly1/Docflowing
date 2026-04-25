@@ -199,7 +199,24 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
     if right_ind is not None:
         para_f.right_indent = Pt(right_ind)
     if first_l_ind is not None:
-        para_f.first_line_indent = Pt(first_l_ind)
+        # 直接写 XML：确保段落级别的 <w:ind w:firstLine> 覆盖任何样式继承值，
+        # 避免 python-docx 1.2.0 中 style-level 属性未及时同步导致的残留缩进
+        elem = para_f._element
+        pPr = elem.find(qn('w:pPr'))
+        if pPr is None:
+            pPr = OxmlElement('w:pPr')
+            elem.append(pPr)
+        ind = pPr.find(qn('w:ind'))
+        if ind is None:
+            ind = OxmlElement('w:ind')
+            pPr.append(ind)
+        # first_l_ind 单位为 Pt，OOXML 用 twips（1pt=20twips）
+        ind.set(qn('w:firstLine'), str(int(first_l_ind * 20)))
+        # 清除 firstLineChars：OOXML 规定同级别 firstLineChars 优先于 firstLine，
+        # 必须同时清除才能让 firstLine="0" 真正生效（应对继承自 base style 的 firstLineChars）
+        for attr in (qn('w:firstLineChars'), qn('w:hangingChars')):
+            if attr in ind.attrib:
+                del ind.attrib[attr]
     if align is not None:
         para_f.alignment = ALIGN_MAP[align]
     para_f.widow_control = False

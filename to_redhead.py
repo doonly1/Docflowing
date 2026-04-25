@@ -1,6 +1,6 @@
 import os,time
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
 
 from mystyle import add_my_styles, para_fm, run_fm
@@ -28,62 +28,76 @@ def apply_font_scaling(run, scaling):
         print(f'字体缩放失败: {e}')
 
 
+def find_signature(paras):
+    """在段落列表中查找署名文本和日期段落。
+
+    Returns:
+        tuple: (sign_text, date_para)
+            - sign_text: 署名文本，未找到时为 '未找到署名'
+            - date_para: 日期段落对象，未找到时为 None
+    """
+    for para in paras:
+        para_text = ''.join(para.text.split())
+        if '年' in para_text and '月' in para_text \
+                and '日' in para_text and len(para_text) < 12:
+            sign_para = paras[paras.index(para) - 1]  # 日期上一段
+            sign_text = ''.join(sign_para.text.split())
+            if len(sign_text) > 3 and len(sign_text) < 25 and sign_text.isalpha():
+                return sign_text, para
+            return '未找到署名', para
+    return '未找到署名', None
+
+
 def add_seal(workdir):
-    # 获取脚本所在目录（用于读取config）
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 先检查是否有可处理的文件
+    """在文档中添加印章"""
+
+    # 检查是否有可处理的文件
     files_to_process = [f for f in os.listdir(workdir) if f.lower().endswith('.docx') and f[:4].isdigit()]
     if not files_to_process:
         print('没有可处理的文件，请先添加页码')
         return
-    
-    #3署名及日期设置
+
     for file in files_to_process:
-        print('正在添加印章：',file)
-        file_path = os.path.join(workdir, file)
-        doc=Document(file_path)
+        doc = Document(os.path.join(workdir, file))
+        paras = doc.paragraphs
         add_my_styles(doc)
-        paras=doc.paragraphs
-        sign_para_text='未找到署名'
-        for para in paras:
-            para_text=''.join(para.text.split())
-            if '年' in para_text and '月' in para_text\
-                and '日' in para_text and len(para_text) < 12:
-                sign_para = paras[paras.index(para)-1]   #日期上一段
-                sign_text = ''.join(sign_para.text.split())
-                if len(sign_text)>3 and len(sign_text) < 25:
-                    print('第{}段有署名：{}'.format(paras.index(para), sign_text))
-                    sign_para_text = sign_text
-                try:
-                    picture_name = get_stamp_path(sign_para_text)
-                    if picture_name:
-                        n=len(para_text)
-                        if n == 9:
-                            x0=(21-2.6)*28.35-64-7*16/2       #x0是日期的中心坐标
-                        elif n ==10:
-                            x0=(21-2.6)*28.35-64-7.5*16/2
-                        elif n ==11:
-                            x0=(21-2.6)*28.35-64-8*16/2
-                        else:
-                            pass
-                        y0 = 28.95*10.5+3.7*28.35
-                        x1 = x0-5.7/2*28.35 ; y1 = y0-5.24/2*28.35   #x0是图片中心坐标
-                        add_float_picture(para, picture_name , pos_x=Pt(x1), pos_y=Pt(y1-40))  ## 测试插入浮动图片2022.1.9
-                        print('印章添加成功。')
-                    else:
-                        print('未找到印章配置。')
-                except Exception as e:
-                    print(f'印章添加失败：{e}')
-                break
+
+        # 添加印章
+        print(f'▼添加印章：{file}')
+        signature, date_para = find_signature(paras)
+        picture_name = get_stamp_path(signature)
+        if date_para and picture_name:
+            try:
+                # 读取页面实际尺寸（带默认值：A4纸，左右边距2.8cm/2.6cm）
+                section = doc.sections[0]
+                left_margin = section.left_margin if section.left_margin is not None else Cm(2.8)
+                right_margin = section.right_margin if section.right_margin is not None else Cm(2.6)
+                page_width = section.page_width if section.page_width is not None else Cm(21)
+                text_area_width_pt = (page_width - left_margin - right_margin) / 12700  # EMU转pt
+    
+                n = len(''.join(date_para.text.split()))
+                seal_cm = 3.8
+                seal_pt = seal_cm * 28.35
+
+                date_text_width_pt = n * 16
+                seal_x = text_area_width_pt - date_text_width_pt / 2 - seal_pt / 2 - 40
+                seal_y = -seal_pt / 1.41
+
+                add_float_picture(date_para, picture_name,
+                                    width=Pt(seal_pt), height=Pt(seal_pt),
+                                    pos_x=Pt(seal_x), pos_y=Pt(seal_y),
+                                    pos_h_relative='margin', pos_v_relative='paragraph')
+            except Exception as e:
+                print(f'失败：{e}')
                 
         #套红并缩放
-        para = paras[0].insert_paragraph_before()   #最前段插入发文机关
+        para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 0, 'J')
+        para = paras[0].insert_paragraph_before()   #最前段插入发文单位
         para.style = doc.styles['H0']
         para_fm(para,0,0,1,0,0,0,'C')
-        run0 = para.add_run(sign_para_text+'文件')
+        run0 = para.add_run(signature+'文件')
         run_fm(run0,'方正小标宋简体',72,0,255,0,0)
-        apply_font_scaling(run0, int(560/(len(sign_para_text)+2)))
+        apply_font_scaling(run0, int(560/(len(signature)+2)))
         
         para = paras[0].insert_paragraph_before()   #插入空行
         para.style = doc.styles['Fangsong']
@@ -94,7 +108,7 @@ def add_seal(workdir):
         para = paras[0].insert_paragraph_before()
         para.style = doc.styles['Fangsong']
         para_fm(para,0,0,28.95,0,0,0,'C')
-        wenhao = get_fawenzihao(sign_para_text)
+        wenhao = get_fawenzihao(signature)
         run_fm(para.add_run(wenhao),'仿宋', 16,0,0,0,0)
         pPr = para._p.get_or_add_pPr()
         # 底边框：红色 FF0000、单实线、粗细 12（=1.5pt）、间距 3
@@ -103,17 +117,17 @@ def add_seal(workdir):
             '<w:bottom w:val="single" w:sz="12" w:space="3" w:color="FF0000"/>' +
             '</w:pBdr>'
         ))
-        print('文号：',wenhao)
+        print(f'文号：{wenhao}')
 
         para = paras[0].insert_paragraph_before()   #插入空行
         para_fm(para,0,0,28.95,0,0,0,'C')
         run_fm(para.add_run(''),'仿宋', 16,0,0,0,0)
 
         #文档保存docx
-        file = str(wenhao)+file[4:]
-        save_path = os.path.join(workdir, file)
+        para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
+        save_path = os.path.join(workdir, str(wenhao)+file[4:])
         doc.save(save_path)
-        print('文档已保存：', os.path.normpath(save_path), '\n')
+        print('文档已保存：', os.path.normpath(save_path))
 
     
 def get_stamp_path(sign_text):

@@ -60,7 +60,6 @@ def set_page_number(doc):
 
 
 def add_page_numbers(workdir):
-    print('当前工作目录：', workdir)
     doc_to_docx(workdir)
     files = [f for f in os.listdir(workdir)
             if f.lower().endswith('.docx') and not f.startswith("~$")
