@@ -1,9 +1,8 @@
 FROM python:3.11-slim
 
-# 安装 LibreOffice（无头模式）+ 中文字体
+# 安装 LibreOffice（无头模式 -nogui，不依赖 X11）+ 中文字体
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-writer \
-    libreoffice-core \
+    libreoffice-writer-nogui \
     fonts-wqy-zenhei \
     fonts-wqy-microhei \
     fonts-noto-cjk \
@@ -19,4 +18,5 @@ COPY . .
 
 EXPOSE 5000
 
+# Railway 会自动注入 PORT 环境变量覆盖默认 5000
 CMD ["python", "server.py"]
