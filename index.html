@@ -474,9 +474,6 @@
         <div class="card" id="toolPanel" style="display: none;">
             <h2 id="toolTitle">功能名称</h2>
 
-            <!-- 模式指示器 -->
-            <div id="modeIndicator" style="display: none; font-size: 11px; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px;"></div>
-
             <!-- 目录选择 / 上传区域 -->
             <div class="form-group" id="folderSelectGroup">
                 <div style="display: flex; gap: 8px;">
@@ -485,13 +482,15 @@
                 </div>
             </div>
 
-            <!-- 远程模式：上传（浏览器文件夹选择，隐藏） -->
+            <!-- 远程模式：上传（浏览器文件多选，无信任提示） -->
             <div id="remoteUploadGroup" style="display: none;">
                 <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleRemoteUpload(event)">
                 <div id="uploadProgress" style="display: none; margin-top: 8px; padding: 8px; background: #e8f4fd; border-radius: 4px; font-size: 12px;">
                     <span>正在上传文件...</span>
                 </div>
             </div>
+
+
 
             <!-- 文件选择列表（统一双列面板） -->
             <div id="filePanel" style="display: none;">
@@ -506,15 +505,10 @@
 
             <!-- 按钮区域 -->
             <div style="display: flex; gap: 8px; align-items: center;">
-                <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📂 查看</button>
+                <button class="btn" id="clearBtn" onclick="clearWorkspace()" style="width: auto; padding: 10px 16px; white-space: nowrap;">🗑️ 清理</button>
                 <button class="btn" id="openDirBtn" onclick="openWorkdir()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📁 打开</button>
                 <button class="btn" id="downloadBtn" onclick="downloadResults()" style="width: auto; padding: 10px 16px; white-space: nowrap; display: none;">📥 下载</button>
                 <button class="btn" onclick="runTool()" style="flex: 1;">执行</button>
-            </div>
-
-            <!-- 文件列表展示（紧凑） -->
-            <div id="fileListPanel" style="display: none; margin-top: 8px;">
-                <div id="fileList" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
             </div>
 
             <p class="intro" id="toolIntro" style="margin-top: 10px;"></p>
@@ -625,11 +619,36 @@
             console.error('[UNHANDLED REJECTION]', e.reason);
         });
 
-        // ==================== client_id 管理 ====================
+        // ==================== client_id 管理（浏览器指纹 + localStorage 缓存） ====================
+        function hashCode(str) {
+            // 简单哈希：将字符串转为 32 位整数，再转 8 位十六进制
+            var hash = 0;
+            for (var i = 0; i < str.length; i++) {
+                var ch = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + ch;
+                hash |= 0;
+            }
+            return Math.abs(hash).toString(16).padStart(8, '0');
+        }
+
+        function generateFingerprint() {
+            // 用稳定的浏览器特征组合成指纹
+            var parts = [
+                navigator.language || '',
+                screen.width + 'x' + screen.height,
+                screen.colorDepth || '',
+                new Date().getTimezoneOffset() || '',
+                navigator.hardwareConcurrency || ''
+            ];
+            return hashCode(parts.join('||'));
+        }
+
         function getClientId() {
-            let cid = localStorage.getItem('docproc_client_id');
+            // 优先 localStorage 缓存（同浏览器同设备一致）
+            var cid = localStorage.getItem('docproc_client_id');
             if (!cid) {
-                cid = crypto.randomUUID();
+                // 无缓存时用指纹生成（清缓存后也能恢复同一 ID）
+                cid = generateFingerprint();
                 localStorage.setItem('docproc_client_id', cid);
             }
             return cid;
@@ -643,26 +662,17 @@
 
         function updateModeUI() {
             const remote = isRemoteMode();
-            const modeEl = document.getElementById('modeIndicator');
             const selectBtn = document.getElementById('selectFolderBtn');
             const remoteGroup = document.getElementById('remoteUploadGroup');
             const openBtn = document.getElementById('openDirBtn');
             const downloadBtn = document.getElementById('downloadBtn');
 
             if (remote) {
-                modeEl.style.display = 'block';
-                modeEl.style.background = '#fff3cd';
-                modeEl.style.color = '#856404';
-                modeEl.textContent = '🌐 远程模式：通过浏览器上传文件，处理后可下载结果';
-                selectBtn.textContent = '📤 上传文件夹';
+                selectBtn.textContent = '选择文件夹';
                 remoteGroup.style.display = 'block';
                 openBtn.style.display = 'none';
                 downloadBtn.style.display = 'inline-block';
             } else {
-                modeEl.style.display = 'block';
-                modeEl.style.background = '#d4edda';
-                modeEl.style.color = '#155724';
-                modeEl.textContent = '🖥️ 本地模式：直接操作服务器文件系统';
                 selectBtn.textContent = '选择文件夹';
                 remoteGroup.style.display = 'none';
                 openBtn.style.display = 'inline-block';
@@ -755,8 +765,6 @@
 
                 document.getElementById('toolPanel').style.display = 'block';
                 document.getElementById('result').style.display = 'none';
-                document.getElementById('fileListPanel').style.display = 'none';
-                document.getElementById('showFileListBtn').style.display = 'inline-block';
 
                 const workdir = document.getElementById('workdir').value.trim();
                 if (workdir) loadFileList(workdir, tool);
@@ -845,40 +853,30 @@
                         .map(t => t.dataset.filename);
         }
 
-        // 查看文件列表
-        window.toggleFileList = async function() {
-            const panel = document.getElementById('fileListPanel');
-            const fileList = document.getElementById('fileList');
-            const workdir = document.getElementById('workdir').value.trim();
-
-            // 远程模式用 client_id，本地模式需有 workdir
-            const body = isRemoteMode()
-                ? {client_id: getClientId(), tool: currentTool, show_all: true}
-                : {workdir, tool: currentTool, show_all: true};
-
-            if (!isRemoteMode() && !workdir) return;
-
-            if (panel.style.display === 'none') {
-                const filesRes = await fetch('/list_files', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(body)
-                });
-                const filesData = await filesRes.json();
-                if (filesData.success && filesData.files) {
-                    if (filesData.files.length > 0) {
-                        fileList.innerHTML = filesData.files.map(f =>
-                            `<span style="padding:2px 6px;background:#f0f0f0;border-radius:3px;font-size:12px;">📄 ${f.name}</span>`
-                        ).join('');
+        // 清理工作区文件
+        window.clearWorkspace = async function() {
+            if (isRemoteMode()) {
+                if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
+                try {
+                    const res = await fetch('/clear_workspace', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({client_id: getClientId()})
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        // 刷新文件列表
+                        await loadFileList(null, currentTool);
                     } else {
-                        fileList.innerHTML = '<span style="color:#999;font-size:12px;">目录为空</span>';
+                        alert('清理失败: ' + (data.message || ''));
                     }
-                } else {
-                    fileList.innerHTML = '<span style="color:#999;font-size:12px;">获取文件列表失败</span>';
+                } catch (e) {
+                    alert('清理失败: ' + e.message);
                 }
-                panel.style.display = 'block';
             } else {
-                panel.style.display = 'none';
+                // 本地模式确认提示
+                if (!confirm('确定要清空当前目录中的输出文件吗？原始文件不受影响。')) return;
+                alert('本地模式请手动删除文件。');
             }
         };
 
@@ -937,7 +935,7 @@
 
             const progress = document.getElementById('uploadProgress');
             progress.style.display = 'block';
-            progress.innerHTML = '<span class="loading-dots">正在上传文件...</span>';
+            progress.innerHTML = '正在上传 <span id="uploadCount">0</span> 个文件...';
 
             const extensions = {
                 'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
@@ -968,41 +966,58 @@
             formData.append('tool', currentTool);
             formData.append('client_id', getClientId());
 
+            // 带超时的 fetch（60 秒）
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
             try {
-                const response = await fetch('/upload_files', { method: 'POST', body: formData });
+                const response = await fetch('/upload_files', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error('服务器返回状态码: ' + response.status);
+                }
                 const data = await response.json();
                 if (data.success) {
                     progress.innerHTML = `<span style="color: #28a745;">✓ 上传完成 ${data.file_count} 个文件</span>`;
-                    // 加载文件列表
                     await loadFileList(null, currentTool);
                     setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
                     throw new Error(data.message || '上传失败');
                 }
             } catch (error) {
-                progress.innerHTML = `<span style="color: #dc3545;">✗ 上传失败: ${error.message}</span>`;
+                clearTimeout(timeoutId);
+                let msg = error.message;
+                if (error.name === 'AbortError') {
+                    msg = '上传超时（60秒），文件太多或太大，请分批上传';
+                }
+                progress.innerHTML = `<span style="color: #dc3545;">✗ 上传失败: ${msg}</span>`;
+                console.error('Upload error:', error);
             }
         }
 
-        // 远程模式：下载结果
+        // 下载结果（打包 ZIP）
         window.downloadResults = async function() {
-            const folderName = document.getElementById('workdir').value.trim() || 'results';
+            var folderName = document.getElementById('workdir').value.trim() || 'results';
             try {
-                const response = await fetch('/download_results', {
+                var response = await fetch('/download_results', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({client_id: getClientId(), folder_name: folderName})
                 });
                 if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
+                    var blob = await response.blob();
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
                     a.download = folderName + '_处理结果.zip';
                     document.body.appendChild(a);
                     a.click();
-                    window.URL.revokeObjectURL(url);
                     document.body.removeChild(a);
+                    URL.revokeObjectURL(blob);
                 }
             } catch (error) {
                 console.error('下载失败:', error);
@@ -1627,7 +1642,7 @@
 
             // 远程模式：工作目录显示 client_id
             if (isRemoteMode()) {
-                document.getElementById('workdir').value = '📁 远程工作区 (' + getClientId().slice(0, 8) + '...)';
+                document.getElementById('workdir').value = getClientId().slice(0, 8) + '/workdir';
             }
         });
     </script>

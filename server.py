@@ -138,7 +138,7 @@ def _get_tool_extensions(tool):
     """获取工具支持的文件扩展名"""
     ext_map = {
         'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': (),  # 不过滤
+        'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),  # 不过滤
         'to_compare': ('.docx', '.doc'),
         'to_pdf': ('.docx', '.doc'),
         'to_pageNum': ('.docx', '.doc'),
@@ -493,9 +493,13 @@ def api_run_tool_with_config():
 
 # ==================== Workspace 文件上传/下载/清理 ====================
 
-@app.route('/upload_files', methods=['POST'])
+@app.route('/upload_files', methods=['POST', 'OPTIONS'])
 def api_upload_files():
     """接收用户上传的文件，保存到 workspace workdir"""
+    # OPTIONS 预检直接返回
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True})
+
     _cleanup_expired_workspaces()
 
     client_id = request.form.get('client_id')
@@ -505,7 +509,6 @@ def api_upload_files():
     _update_workspace_activity(client_id)
     workdir = _get_workspace_workdir(client_id)
 
-    # 获取该工具支持的文件扩展名
     tool = request.form.get('tool', 'to_docx')
     extensions = _get_tool_extensions(tool)
 
@@ -515,7 +518,6 @@ def api_upload_files():
     if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
         return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
 
-    # 检查当前工作区已用空间
     workspace_used = 0
     if os.path.exists(workdir):
         for f in os.listdir(workdir):
@@ -526,7 +528,6 @@ def api_upload_files():
     for file in uploaded_files:
         if not file.filename:
             continue
-        # 安全检查：只保存允许的文件类型
         fname_lower = file.filename.lower()
         if extensions and not fname_lower.endswith(extensions):
             continue
