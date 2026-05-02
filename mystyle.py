@@ -46,6 +46,8 @@ ASCII_FONT_MAP = {
 
 def set_page(doc):
     for sec in doc.sections:
+        sec.page_width = Cm(21)    # A4 宽度
+        sec.page_height = Cm(29.7)  # A4 高度
         sec.left_margin = Cm(2.8)
         sec.right_margin = Cm(2.6)
         sec.top_margin = Cm(3.7)
@@ -242,6 +244,12 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
             adj = OxmlElement('w:adjustRightInd')
             pPr.append(adj)
         adj.set(qn('w:val'), '0')
+        # 不允许标点溢出界外
+        ovf = pPr.find(qn('w:overflowPunct'))
+        if ovf is None:
+            ovf = OxmlElement('w:overflowPunct')
+            pPr.append(ovf)
+        ovf.set(qn('w:val'), '0')
 
 
 def run_fm(run, font_type=None, font_size=None, bold=None, r=None, g=None, b=None):

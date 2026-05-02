@@ -6,6 +6,10 @@
 import os
 import sys
 import time
+import json
+import uuid
+import yaml
+import shutil
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -17,8 +21,10 @@ CORS(app)
 MAX_FILE_SIZE = 50 * 1024 * 1024       # 单文件最大 50MB
 MAX_SESSION_SIZE = 200 * 1024 * 1024    # 单会话总大小最大 200MB
 MAX_FILES_PER_UPLOAD = 99              # 单次最多上传 99 个文件
+WORKSPACE_EXPIRE_DAYS = 7              # workspace 无人访问自动清理天数
 
 app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE  # Flask 请求体大小限制
+
 # 工具脚本映射
 TOOL_SCRIPTS = {
     'to_docx': 'to_docx.py',
@@ -28,6 +34,118 @@ TOOL_SCRIPTS = {
     'to_pageNum': 'to_pageNum.py',
     'to_redhead': 'to_redhead.py'
 }
+
+# ==================== 用户配置持久化（client_id 方案） ====================
+
+def _get_config_base_dir():
+    """获取用户配置根目录"""
+    config_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc')
+    os.makedirs(config_dir, exist_ok=True)
+    return config_dir
+
+
+def _get_client_config_dir():
+    """获取客户端配置目录"""
+    clients_dir = os.path.join(_get_config_base_dir(), 'clients')
+    os.makedirs(clients_dir, exist_ok=True)
+    return clients_dir
+
+
+def _get_client_config_path(client_id):
+    """获取指定 client_id 的配置文件路径"""
+    return os.path.join(_get_client_config_dir(), f'{client_id}.yaml')
+
+
+def _ensure_client_config(client_id):
+    """确保 client_id 对应的配置存在，不存在则从模板创建"""
+    config_path = _get_client_config_path(client_id)
+    if not os.path.exists(config_path):
+        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     'config', 'config.yaml')
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f) or {}
+            if 'last_workdir' in config:
+                del config['last_workdir']
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        except Exception:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump({}, f, allow_unicode=True, default_flow_style=False)
+    return config_path
+
+
+# ==================== Workspace 管理（client_id 隔离） ====================
+
+def _get_workspace_dir(client_id):
+    """获取 client_id 对应的 workspace 根目录"""
+    ws_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'workspaces', client_id)
+    return ws_dir
+
+
+def _get_workspace_workdir(client_id):
+    """获取 workspace 的统一工作目录（上传原始文件 + 处理结果混在一起）"""
+    workdir = os.path.join(_get_workspace_dir(client_id), 'workdir')
+    os.makedirs(workdir, exist_ok=True)
+    return workdir
+
+
+def _get_workspace_resources_dir(client_id):
+    """获取 workspace 的资源目录（印章等用户资源）"""
+    res_dir = os.path.join(_get_workspace_dir(client_id), 'resources', 'stamps')
+    os.makedirs(res_dir, exist_ok=True)
+    return res_dir
+
+
+def _update_workspace_activity(client_id):
+    """更新 workspace 的活动时间戳"""
+    ws_dir = _get_workspace_dir(client_id)
+    touch_file = os.path.join(ws_dir, '.last_active')
+    try:
+        os.makedirs(ws_dir, exist_ok=True)
+        with open(touch_file, 'w') as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
+
+def _cleanup_expired_workspaces():
+    """清理过期 workspace（超过 WORKSPACE_EXPIRE_DAYS 天未访问）"""
+    ws_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'workspaces')
+    if not os.path.exists(ws_root):
+        return
+    now = time.time()
+    expire_sec = WORKSPACE_EXPIRE_DAYS * 86400
+    for cid in os.listdir(ws_root):
+        ws_dir = os.path.join(ws_root, cid)
+        if not os.path.isdir(ws_dir):
+            continue
+        touch_file = os.path.join(ws_dir, '.last_active')
+        try:
+            if os.path.exists(touch_file):
+                with open(touch_file, 'r') as f:
+                    last_active = float(f.read().strip())
+            else:
+                last_active = os.path.getmtime(ws_dir)
+            if now - last_active > expire_sec:
+                shutil.rmtree(ws_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _get_tool_extensions(tool):
+    """获取工具支持的文件扩展名"""
+    ext_map = {
+        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
+        'to_index': (),  # 不过滤
+        'to_compare': ('.docx', '.doc'),
+        'to_pdf': ('.docx', '.doc'),
+        'to_pageNum': ('.docx', '.doc'),
+        'to_redhead': ('.docx',)
+    }
+    return ext_map.get(tool, ('.docx',))
+
 
 # 首页路由
 @app.route('/')
@@ -45,36 +163,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 @app.route('/list_files', methods=['POST'])
 def api_list_files():
-    """列出目录中的文档文件"""
+    """列出目录中的文档文件
+
+    支持本地模式和远程模式：
+    - 本地模式：workdir 为服务端本地路径
+    - 远程模式：client_id 映射到 workspace workdir
+    """
     data = request.get_json()
     workdir = data.get('workdir')
     tool = data.get('tool', 'to_docx')
-    session_id = data.get('session_id')  # 支持会话ID
-    show_all = data.get('show_all', False)  # 是否显示所有文件（包含上传的原始文件）
+    client_id = data.get('client_id')
+    show_all = data.get('show_all', False)
 
-    # 支持临时目录路径格式
-    if workdir and workdir.startswith('/temp_workdirs/'):
-        session_id = workdir.replace('/temp_workdirs/', '')
-        workdir = None
-
-    # 如果有session_id，获取会话目录
-    if session_id:
-        workdir = get_user_temp_dir(session_id)
+    # 远程模式：用 client_id 获取 workspace 工作目录
+    if client_id:
+        _update_workspace_activity(client_id)
+        workdir = _get_workspace_workdir(client_id)
 
     if not workdir or not os.path.isdir(workdir):
         return jsonify({'success': False, 'message': '目录不存在'})
 
-    # 各工具支持的文件类型
-    tool_extensions = {
-        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': ('.docx', '.doc'),
-        'to_compare': ('.docx', '.doc'),
-        'to_pdf': ('.docx', '.doc'),
-        'to_pageNum': ('.docx', '.doc'),
-        'to_redhead': ('.docx',)
-    }
-
-    extensions = tool_extensions.get(tool, ('.docx',))
+    extensions = _get_tool_extensions(tool)
 
     try:
         files = []
@@ -182,47 +291,109 @@ def api_open_folder():
         return jsonify({'success': False, 'message': str(e)})
 
 
-@app.route('/get_server_config', methods=['GET'])
-def api_get_server_config():
-    """获取默认配置模板（首次访问时提供初始值）"""
+# ==================== 配置管理（client_id 持久化） ====================
 
+@app.route('/get_config', methods=['POST'])
+def api_get_config():
+    """读取用户配置（按 client_id 隔离）
+
+    请求体：
+        { "client_id": "xxx" }
+
+    响应：
+        { "success": true, "config": {...}, "client_id": "xxx" }
+    """
+    import yaml
+    data = request.get_json() if request.is_json else {}
+    client_id = data.get('client_id') if data else None
+
+    # 无 client_id 时自动生成
+    if not client_id:
+        client_id = str(uuid.uuid4())
+
+    config_path = _ensure_client_config(client_id)
     try:
-        import yaml
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     'config', 'config.yaml')
-        with open(template_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        # 模板不含 last_workdir，但防御性移除
-        if config and 'last_workdir' in config:
-            del config['last_workdir']
-        return jsonify({'success': True, 'config': config})
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        return jsonify({'success': True, 'config': config, 'client_id': client_id})
     except Exception as e:
-        return jsonify({'success': False, 'message': f'读取配置模板失败: {str(e)}'})
+        return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
+
+
+@app.route('/save_config', methods=['POST'])
+def api_save_config():
+    """保存用户配置（按 client_id 隔离）
+
+    请求体：
+        { "client_id": "xxx", "config": {...} }
+    """
+    data = request.get_json()
+    client_id = data.get('client_id')
+    config = data.get('config')
+
+    if not client_id:
+        client_id = str(uuid.uuid4())
+
+    if not config:
+        return jsonify({'success': False, 'message': '配置不能为空'})
+
+    config_path = _ensure_client_config(client_id)
+    try:
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        return jsonify({'success': True, 'client_id': client_id})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'保存配置失败: {str(e)}'})
+
+
+@app.route('/save_workdir', methods=['POST'])
+def api_save_workdir():
+    """保存最近工作目录到用户配置（按 client_id 隔离）"""
+    data = request.get_json()
+    client_id = data.get('client_id')
+    workdir = data.get('workdir')
+
+    if not client_id:
+        client_id = str(uuid.uuid4())
+
+    config_path = _ensure_client_config(client_id)
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        config['last_workdir'] = workdir
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        return jsonify({'success': True, 'client_id': client_id})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
 
 
 @app.route('/run_tool_with_config', methods=['POST'])
 def api_run_tool_with_config():
-    """执行工具（支持自定义配置）"""
+    """执行工具（支持自定义配置）
+
+    支持本地和远程模式：
+    - 本地模式：workdir 为服务端本地路径
+    - 远程模式：client_id 映射到 workspace workdir
+    """
     data = request.get_json()
     
     tool = data.get('tool')
     workdir = data.get('workdir')
     files = data.get('files')
     user_config = data.get('userConfig')
+    client_id = data.get('client_id')
     
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
+    
+    # 远程模式：用 client_id 获取 workspace 工作目录
+    if client_id:
+        _update_workspace_activity(client_id)
+        workdir = _get_workspace_workdir(client_id)
+    
     if not workdir:
         return jsonify({'success': False, 'message': '未指定工作目录'})
-    
-    # 支持临时目录路径格式 /temp_workdirs/xxx
-    session_id = None
-    if workdir.startswith('/temp_workdirs/'):
-        session_id = workdir.replace('/temp_workdirs/', '')
-        workdir = get_user_temp_dir(session_id)
-        # 更新会话活动时间
-        update_session_activity(session_id)
-    
     if not os.path.isdir(workdir):
         return jsonify({'success': False, 'message': f'目录不存在: {workdir}'})
     
@@ -266,14 +437,14 @@ def api_run_tool_with_config():
             # 构建命令行参数
             cmd_args = [sys.executable, "-u", script_path]
             
-            # 对to_compare，如果提供了文件，将文件完整路径传递给脚本
-            if files and tool == 'to_compare' and len(files) >= 2:
-                # 添加原稿和终稿文件的完整路径
-                for f in files[:2]:  # 只取前两个文件
-                    full_path = os.path.join(workdir, f)
+            # 如果提供了文件列表，逐个传递文件路径
+            # 所有工具脚本现在都支持单文件处理
+            if files:
+                for f in files:
+                    full_path = os.path.join(workdir, f) if not os.path.isabs(f) else f
                     cmd_args.append(full_path)
             else:
-                # 其他情况只传递工作目录
+                # 未选文件时传递工作目录（工具会处理目录下所有匹配文件）
                 cmd_args.append(workdir)
 
             process = subprocess.Popen(
@@ -318,316 +489,174 @@ def api_run_tool_with_config():
 
 
 
-# ==================== 文件上传处理功能 ====================
-
-# 存储用户会话的临时目录
-user_sessions = {}
-
-def get_user_temp_dir(session_id):
-    """获取用户的临时工作目录"""
-    temp_base = os.path.join(os.path.dirname(__file__), 'temp_workdirs')
-    user_dir = os.path.join(temp_base, session_id)
-    os.makedirs(user_dir, exist_ok=True)
-    return user_dir
-
-def cleanup_old_sessions():
-    """清理超时未活动的临时目录（2分钟无心跳则清理）"""
-    temp_base = os.path.join(os.path.dirname(__file__), 'temp_workdirs')
-    if not os.path.exists(temp_base):
-        return
-    
-    current_time = time.time()
-    for session_id in os.listdir(temp_base):
-        session_dir = os.path.join(temp_base, session_id)
-        if os.path.isdir(session_dir):
-            try:
-                # 检查会话是否活跃
-                session_info = user_sessions.get(session_id, {})
-                last_active = session_info.get('last_active', 0)
-                
-                # 如果没有会话记录，使用目录修改时间
-                if last_active == 0:
-                    last_active = os.path.getmtime(session_dir)
-                
-                # 2分钟无心跳则清理
-                if current_time - last_active > 120:
-                    shutil.rmtree(session_dir, ignore_errors=True)
-                    user_sessions.pop(session_id, None)
-            except:
-                pass
-
-def update_session_activity(session_id):
-    """更新会话活动时间"""
-    if session_id in user_sessions:
-        user_sessions[session_id]['last_active'] = time.time()
 
 
-@app.route('/heartbeat', methods=['POST'])
-def api_heartbeat():
-    """客户端心跳，保持会话活跃"""
-    data = request.get_json() if request.is_json else {}
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        return jsonify({'success': False})
-    
-    if session_id in user_sessions:
-        user_sessions[session_id]['last_active'] = time.time()
-    
-    return jsonify({'success': True})
-
-@app.route('/clear_session', methods=['POST'])
-def api_clear_session():
-    """清理会话目录中的所有文件"""
-    import shutil
-    data = request.get_json() if request.is_json else {}
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        return jsonify({'success': False, 'message': '会话ID不存在'})
-    
-    user_dir = get_user_temp_dir(session_id)
-    if not os.path.exists(user_dir):
-        return jsonify({'success': True, 'message': '目录不存在'})
-    
-    try:
-        # 删除目录中的所有文件
-        for f in os.listdir(user_dir):
-            fpath = os.path.join(user_dir, f)
-            try:
-                if os.path.isfile(fpath):
-                    os.remove(fpath)
-                elif os.path.isdir(fpath):
-                    shutil.rmtree(fpath)
-            except:
-                pass
-        
-        return jsonify({'success': True, 'message': '清理完成'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/destroy_session', methods=['POST'])
-def api_destroy_session():
-    """销毁会话，删除整个临时目录"""
-    import shutil
-    data = request.get_json() if request.is_json else {}
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        return jsonify({'success': False, 'message': '会话ID不存在'})
-    
-    user_dir = get_user_temp_dir(session_id)
-    
-    try:
-        # 删除整个临时目录
-        if os.path.exists(user_dir):
-            shutil.rmtree(user_dir, ignore_errors=True)
-        # 移除会话记录
-        user_sessions.pop(session_id, None)
-        return jsonify({'success': True, 'message': '会话已销毁'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+# ==================== Workspace 文件上传/下载/清理 ====================
 
 @app.route('/upload_files', methods=['POST'])
 def api_upload_files():
-    """接收用户上传的文件，保存到临时目录"""
-    import uuid
-    
-    # 清理旧会话
-    cleanup_old_sessions()
-    
-    # 获取或创建会话ID
-    session_id = request.form.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    
-    # 获取用户原始路径（用于显示）
-    original_path = request.form.get('original_path', '未知路径')
-    
+    """接收用户上传的文件，保存到 workspace workdir"""
+    _cleanup_expired_workspaces()
+
+    client_id = request.form.get('client_id')
+    if not client_id:
+        return jsonify({'success': False, 'message': 'client_id 不能为空'})
+
+    _update_workspace_activity(client_id)
+    workdir = _get_workspace_workdir(client_id)
+
     # 获取该工具支持的文件扩展名
     tool = request.form.get('tool', 'to_docx')
-    tool_extensions = {
-        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': ('.docx', '.doc'),
-        'to_compare': ('.docx', '.doc'),
-        'to_pdf': ('.docx', '.doc'),
-        'to_pageNum': ('.docx', '.doc'),
-        'to_redhead': ('.docx',)
-    }
-    extensions = tool_extensions.get(tool, ('.docx',))
-    
-    # 创建用户临时目录
-    user_dir = get_user_temp_dir(session_id)
-    
-    # 保存上传的文件（保留原有文件）
+    extensions = _get_tool_extensions(tool)
+
     saved_files = []
     uploaded_files = request.files.getlist('files')
 
-    # 限制单次上传文件数量
     if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
         return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
 
-    # 检查当前会话已用空间
-    session_used = 0
-    if os.path.exists(user_dir):
-        for f in os.listdir(user_dir):
-            fpath = os.path.join(user_dir, f)
+    # 检查当前工作区已用空间
+    workspace_used = 0
+    if os.path.exists(workdir):
+        for f in os.listdir(workdir):
+            fpath = os.path.join(workdir, f)
             if os.path.isfile(fpath):
-                session_used += os.path.getsize(fpath)
+                workspace_used += os.path.getsize(fpath)
 
     for file in uploaded_files:
-        if file.filename:
-            # 安全检查：只保存允许的文件类型
-            if file.filename.lower().endswith(extensions):
-                # 读取文件内容并检查大小
-                file_content = file.read()
-                file_size = len(file_content)
-                file.seek(0)  # 重置指针
+        if not file.filename:
+            continue
+        # 安全检查：只保存允许的文件类型
+        fname_lower = file.filename.lower()
+        if extensions and not fname_lower.endswith(extensions):
+            continue
 
-                if file_size > MAX_FILE_SIZE:
-                    return jsonify({'success': False, 'message': f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制（{file_size // 1024 // 1024}MB）'})
+        file_content = file.read()
+        file_size = len(file_content)
+        file.seek(0)
 
-                if session_used + file_size > MAX_SESSION_SIZE:
-                    return jsonify({'success': False, 'message': f'会话总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({'success': False, 'message':
+                f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制'})
 
-                filename = os.path.basename(file.filename)  # 防止路径遍历
-                save_path = os.path.join(user_dir, filename)
-                with open(save_path, 'wb') as f:
-                    f.write(file_content)
-                session_used += file_size
-                saved_files.append(filename)
-    
-    # 保存会话信息，记录上传完成时间
-    user_sessions[session_id] = {
-        'original_path': original_path,
-        'created_at': time.time(),
-        'last_active': time.time(),
-        'upload_finished': time.time(),  # 记录上传完成时间，用于过滤原始文件
-        'files': saved_files,
-        'ip': request.remote_addr  # 记录用户IP
-    }
-    
+        if workspace_used + file_size > MAX_SESSION_SIZE:
+            return jsonify({'success': False, 'message':
+                f'工作区总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
+
+        filename = os.path.basename(file.filename)
+        save_path = os.path.join(workdir, filename)
+        with open(save_path, 'wb') as f:
+            f.write(file_content)
+        workspace_used += file_size
+        saved_files.append(filename)
+
     return jsonify({
         'success': True,
-        'session_id': session_id,
-        'server_path': user_dir,
+        'client_id': client_id,
         'files': saved_files,
-        'original_path': original_path
+        'file_count': len(saved_files)
     })
+
+
+@app.route('/check_results', methods=['POST'])
+def api_check_results():
+    """检查 workspace 中的文件列表"""
+    data = request.get_json()
+    client_id = data.get('client_id')
+
+    if not client_id:
+        return jsonify({'success': False, 'message': 'client_id 不能为空'})
+
+    _update_workspace_activity(client_id)
+    workdir = _get_workspace_workdir(client_id)
+
+    if not os.path.exists(workdir):
+        return jsonify({'success': True, 'files': [], 'count': 0})
+
+    try:
+        result_files = []
+        for f in os.listdir(workdir):
+            file_path = os.path.join(workdir, f)
+            if os.path.isfile(file_path) and not f.startswith('~$'):
+                result_files.append({
+                    'name': f,
+                    'size': os.path.getsize(file_path)
+                })
+
+        return jsonify({
+            'success': True,
+            'files': result_files,
+            'count': len(result_files)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
 
 
 @app.route('/download_results', methods=['POST'])
 def api_download_results():
-    """将处理结果打包返回给用户"""
+    """将 workspace 中所有文件打包下载"""
     import zipfile
     import io
-    
+
     data = request.get_json()
-    session_id = data.get('session_id')
-    original_path = data.get('original_path', 'results')
-    
-    if not session_id:
-        return jsonify({'success': False, 'message': '会话ID不存在'})
-    
-    # 更新会话活动时间
-    update_session_activity(session_id)
-    
-    user_dir = get_user_temp_dir(session_id)
-    if not os.path.exists(user_dir):
-        return jsonify({'success': False, 'message': '工作目录不存在'})
-    
+    client_id = data.get('client_id')
+    folder_name = data.get('folder_name', 'results')
+
+    if not client_id:
+        return jsonify({'success': False, 'message': 'client_id 不能为空'})
+
+    _update_workspace_activity(client_id)
+    workdir = _get_workspace_workdir(client_id)
+
+    if not os.path.exists(workdir) or not os.listdir(workdir):
+        return jsonify({'success': False, 'message': '无文件可供下载'})
+
     try:
-        # 获取上传完成时间，用于过滤原始文件
-        session_info = user_sessions.get(session_id, {})
-        upload_time = session_info.get('upload_finished', 0)
-        metadata_only = session_info.get('metadata_only', False)
-        
-        # 创建内存中的ZIP文件
         memory_file = io.BytesIO()
-        
         with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for root, dirs, files in os.walk(user_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    # 元信息模式：打包所有文件；普通模式：只打包处理结果
-                    if metadata_only or os.path.getmtime(file_path) > upload_time:
-                        arcname = os.path.relpath(file_path, user_dir)
-                        zf.write(file_path, arcname)
-        
+            for f in os.listdir(workdir):
+                file_path = os.path.join(workdir, f)
+                if os.path.isfile(file_path) and not f.startswith('~$'):
+                    zf.write(file_path, f)
+
         memory_file.seek(0)
-        
-        # 生成下载文件名
-        folder_name = os.path.basename(original_path) if original_path else 'results'
         download_name = f"{folder_name}_处理结果.zip"
-        
+
         from flask import send_file
-        response = send_file(
+        return send_file(
             memory_file,
             mimetype='application/zip',
             as_attachment=True,
             download_name=download_name
         )
-        
-        # 下载完成后清理会话目录
-        @response.call_on_close
-        def cleanup_after_download():
-            if session_id and session_id in user_sessions:
-                del user_sessions[session_id]
-            if os.path.exists(user_dir):
-                shutil.rmtree(user_dir, ignore_errors=True)
-        
-        return response
-        
     except Exception as e:
         return jsonify({'success': False, 'message': f'打包失败: {str(e)}'})
 
 
-@app.route('/check_results', methods=['POST'])
-def api_check_results():
-    """检查处理结果文件"""
+@app.route('/clear_workspace', methods=['POST'])
+def api_clear_workspace():
+    """清空 workspace workdir 中的所有文件（保留 workdir 目录自身）"""
     data = request.get_json()
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        return jsonify({'success': False, 'message': '会话ID不存在'})
-    
-    # 更新会话活动时间
-    update_session_activity(session_id)
-    
-    user_dir = get_user_temp_dir(session_id)
-    if not os.path.exists(user_dir):
-        return jsonify({'success': False, 'message': '工作目录不存在'})
-    
+    client_id = data.get('client_id')
+
+    if not client_id:
+        return jsonify({'success': False, 'message': 'client_id 不能为空'})
+
+    workdir = _get_workspace_workdir(client_id)
+    if not os.path.exists(workdir):
+        return jsonify({'success': True, 'message': '目录为空'})
+
     try:
-        # 获取上传完成时间，用于过滤处理结果文件
-        session_info = user_sessions.get(session_id, {})
-        upload_time = session_info.get('upload_finished', 0)
-        metadata_only = session_info.get('metadata_only', False)
-        
-        # 获取所有生成的文件
-        result_files = []
-        for f in os.listdir(user_dir):
-            file_path = os.path.join(user_dir, f)
-            if os.path.isfile(file_path):
-                # 跳过临时文件
-                if f.startswith('~$'):
-                    continue
-                # 元信息模式：没有上传原始文件，返回所有文件
-                # 普通模式：只返回上传完成后修改的文件（处理结果）
-                if metadata_only or os.path.getmtime(file_path) > upload_time:
-                    result_files.append({
-                        'name': f,
-                        'size': os.path.getsize(file_path)
-                    })
-        
-        return jsonify({
-            'success': True,
-            'files': result_files,
-            'count': len(result_files),
-            'server_path': user_dir
-        })
-        
+        for f in os.listdir(workdir):
+            fpath = os.path.join(workdir, f)
+            try:
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+                elif os.path.isdir(fpath):
+                    shutil.rmtree(fpath)
+            except Exception:
+                pass
+        return jsonify({'success': True, 'message': '清理完成'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
@@ -635,42 +664,31 @@ def api_check_results():
 @app.route('/build_index_from_metadata', methods=['POST'])
 def api_build_index_from_metadata():
     """从前端上传的文件元信息直接构建索引（无需上传文件内容）"""
-    import uuid
     from to_index import build_index_from_metadata
 
     data = request.get_json()
     metadata_list = data.get('metadata', [])
     folder_name = data.get('folder_name', 'unknown')
-    session_id = data.get('session_id')
+    client_id = data.get('client_id')
 
     if not metadata_list:
         return jsonify({'success': False, 'message': '没有文件元信息'})
 
-    # 创建或复用临时目录
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    output_dir = get_user_temp_dir(session_id)
+    if not client_id:
+        client_id = str(uuid.uuid4())
+
+    _update_workspace_activity(client_id)
+    output_dir = _get_workspace_workdir(client_id)
 
     try:
         output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)
         if not output_path:
             return jsonify({'success': False, 'message': '生成索引失败：无有效文件'})
 
-        # 记录会话信息
-        user_sessions[session_id] = {
-            'original_path': folder_name,
-            'created_at': time.time(),
-            'last_active': time.time(),
-            'upload_finished': time.time(),
-            'files': ['file_index.xlsx'],
-            'ip': request.remote_addr,
-            'metadata_only': True  # 标记为纯元信息模式
-        }
-
         file_count = len(metadata_list)
         return jsonify({
             'success': True,
-            'session_id': session_id,
+            'client_id': client_id,
             'file_count': file_count,
             'message': f'已索引 {file_count} 个文件'
         })

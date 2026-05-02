@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocProc</title>
+    <title>文枢</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e94560'/><text x='16' y='23' font-size='20' font-family='serif' font-weight='bold' fill='white' text-anchor='middle'>文</text></svg>" type="image/svg+xml">
     <style>
         * {
             margin: 0;
@@ -13,7 +14,7 @@
 
         body {
             font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #f0f2f5 0%, #e4e8ed 100%);
             min-height: 100vh;
             padding: 20px;
         }
@@ -23,25 +24,48 @@
             margin: 0 auto;
         }
 
-        h1 {
-            text-align: center;
-            color: #fff;
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 4px;
             margin-bottom: 10px;
-            font-size: 1.2rem;
-            font-weight: 500;
-            letter-spacing: 1px;
+        }
+
+        .topbar-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .topbar-btn {
+            background: none;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #5a6a7a;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .topbar-btn:hover {
+            background: rgba(255, 255, 255, 0.6);
+            color: #2c3e50;
         }
 
         .card {
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
             border-radius: 10px;
             padding: 12px;
             margin-bottom: 10px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.5);
         }
 
         .card h2 {
-            color: #1a1a2e;
+            color: #2c3e50;
             font-size: 0.95rem;
             margin-bottom: 10px;
             padding-bottom: 6px;
@@ -49,7 +73,7 @@
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
 
         label {
@@ -62,7 +86,7 @@
         input[type="text"],
         select {
             width: 100%;
-            padding: 12px;
+            padding: 10px 12px;
             border: 2px solid #ddd;
             border-radius: 8px;
             font-size: 14px;
@@ -163,19 +187,6 @@
             gap: 10px;
         }
 
-        .file-item {
-            padding: 6px 8px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .file-item:last-child {
-            border-bottom: none;
-        }
-
         .file-tag {
             padding: 4px 10px;
             background: #f0f0f0;
@@ -192,22 +203,12 @@
         }
 
         .file-tag.selected {
-            background: #e94560;
+            background: #4a90d9;
             color: white;
         }
 
-        .file-item:hover {
-            background: #f5f5f5;
-        }
-
-        .file-item.selected {
-            background: #e94560;
-            color: white;
-        }
-
-        .file-item input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
+        .file-tag:last-child {
+            margin-bottom: 0;
         }
 
         #result {
@@ -248,12 +249,6 @@
             margin-bottom: 10px;
         }
 
-        .loading-dots {
-            display: inline-block;
-            color: #e94560;
-            font-weight: bold;
-        }
-
         .output-pre {
             background: #f5f5f5;
             padding: 10px;
@@ -272,31 +267,44 @@
             margin-bottom: 10px;
         }
 
-        /* 配置弹窗样式 */
+        /* 配置弹窗 */
         .modal-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.25);
             display: none;
             justify-content: center;
             align-items: center;
             z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+
+        .modal-overlay.show {
+            opacity: 1;
         }
 
         .modal {
-            background: white;
-            border-radius: 8px;
+            background: #fff;
+            border-radius: 12px;
             padding: 15px;
-            width: 90%;
-            max-width: 750px;
-            height: 70vh;
-            max-height: 600px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+            width: 85%;
+            max-width: 620px;
+            height: 62vh;
+            max-height: 520px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             display: flex;
             flex-direction: column;
+            border: 1px solid rgba(0,0,0,0.08);
+            transform: scale(0.95);
+            transition: transform 0.25s ease;
+        }
+
+        .modal-overlay.show .modal {
+            transform: scale(1);
         }
 
         .modal-header {
@@ -312,7 +320,7 @@
         .modal-header h2 {
             margin: 0;
             color: #1a1a2e;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
         }
 
         .modal-close {
@@ -328,6 +336,7 @@
             gap: 8px;
             margin-bottom: 12px;
             border-bottom: 1px solid #ddd;
+            flex-shrink: 0;
         }
 
         .config-tab {
@@ -383,6 +392,7 @@
             margin-top: 12px;
             padding-top: 12px;
             border-top: 1px solid #eee;
+            flex-shrink: 0;
         }
 
         .config-toggle {
@@ -394,14 +404,6 @@
             background: #e8f4fd;
             border-radius: 4px;
             border-left: 3px solid #2196F3;
-            flex-shrink: 0;
-        }
-
-        .config-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            border-bottom: 1px solid #ddd;
             flex-shrink: 0;
         }
 
@@ -421,10 +423,16 @@
     </style>
 </head>
 <body>
+    <!-- 关于弹窗 overlay -->
+    <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
+
     <div class="container">
-        <div style="position: relative; margin-bottom: 10px; text-align: center;">
-            <h1>文档处理服务</h1>
-            <button class="btn" onclick="openConfig()" style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: auto; padding: 6px 12px; font-size: 12px;">⚙️ 配置</button>
+        <div class="topbar">
+            <div></div>
+            <div class="topbar-actions">
+                <button class="topbar-btn" onclick="openConfig()">📋 配置</button>
+                <button class="topbar-btn" onclick="showAbout()">ℹ️ 关于</button>
+            </div>
         </div>
 
         <div class="card">
@@ -432,12 +440,12 @@
             <div class="tools-grid">
                 <div class="tool-item" onclick="selectTool('to_docx')">
                     <div class="icon">📄</div>
-                    <div class="name">批量转化</div>
+                    <div class="name">批量提取</div>
                     <div class="desc">PDF/TXT → DOCX</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_index')">
                     <div class="icon">📑</div>
-                    <div class="name">文件索引</div>
+                    <div class="name">构建索引</div>
                     <div class="desc">目录 → Excel索引表</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_compare')">
@@ -447,7 +455,7 @@
                 </div>
                 <div class="tool-item" onclick="selectTool('to_pdf')">
                     <div class="icon">📑</div>
-                    <div class="name">批量转PDF</div>
+                    <div class="name">批量转化</div>
                     <div class="desc">DOCX → PDF</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_pageNum')">
@@ -466,32 +474,41 @@
         <div class="card" id="toolPanel" style="display: none;">
             <h2 id="toolTitle">功能名称</h2>
 
-            <!-- 输入区域 -->
-            <div class="form-group">
+            <!-- 模式指示器 -->
+            <div id="modeIndicator" style="display: none; font-size: 11px; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px;"></div>
+
+            <!-- 目录选择 / 上传区域 -->
+            <div class="form-group" id="folderSelectGroup">
                 <div style="display: flex; gap: 8px;">
                     <input type="text" id="workdir" placeholder="选择文件夹" readonly style="flex:1;">
-                    <button type="button" class="btn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">选择文件夹</button>
+                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">选择文件夹</button>
                 </div>
-                <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleFolderSelect(event)">
+            </div>
+
+            <!-- 远程模式：上传（浏览器文件夹选择，隐藏） -->
+            <div id="remoteUploadGroup" style="display: none;">
+                <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleRemoteUpload(event)">
                 <div id="uploadProgress" style="display: none; margin-top: 8px; padding: 8px; background: #e8f4fd; border-radius: 4px; font-size: 12px;">
-                    <span class="loading-dots">正在上传文件...</span>
+                    <span>正在上传文件...</span>
                 </div>
             </div>
 
-            <!-- 文件选择列表（用于文档比较） -->
-            <div id="fileSelectPanel" style="display: none;">
-                <label>👇原稿 / 终稿：</label>
+            <!-- 文件选择列表（统一双列面板） -->
+            <div id="filePanel" style="display: none;">
+                <div style="margin-bottom: 5px;">
+                    <label id="fileLabel" style="margin:0;">👇目录文件：</label>
+                </div>
                 <div class="file-row">
-                    <div id="origList" class="file-list" style="flex:1;"></div>
-                    <div id="finalList" class="file-list" style="flex:1;"></div>
+                    <div id="leftList" class="file-list" style="flex:1;"></div>
+                    <div id="rightList" class="file-list" style="flex:1;"></div>
                 </div>
             </div>
 
-            <!-- 按钮区域：显示文件列表 + 清理 + 下载 + 执行 -->
+            <!-- 按钮区域 -->
             <div style="display: flex; gap: 8px; align-items: center;">
                 <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📂 查看</button>
-                <button class="btn" id="clearFilesBtn" onclick="clearSessionFiles()" style="width: auto; padding: 10px 16px; white-space: nowrap;">🗑️ 清理</button>
-                <button class="btn" id="downloadBtn" onclick="downloadResults()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📥 下载</button>
+                <button class="btn" id="openDirBtn" onclick="openWorkdir()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📁 打开</button>
+                <button class="btn" id="downloadBtn" onclick="downloadResults()" style="width: auto; padding: 10px 16px; white-space: nowrap; display: none;">📥 下载</button>
                 <button class="btn" onclick="runTool()" style="flex: 1;">执行</button>
             </div>
 
@@ -500,7 +517,6 @@
                 <div id="fileList" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
             </div>
 
-            <!-- 功能说明在下面 -->
             <p class="intro" id="toolIntro" style="margin-top: 10px;"></p>
         </div>
 
@@ -515,23 +531,23 @@
                 <button class="modal-close" onclick="closeConfig()">&times;</button>
             </div>
             
-            <div class="config-toggle" style="padding: 8px; margin-bottom: 10px;">
+            <div class="config-toggle">
                 <label for="useUserConfig" style="font-weight: bold; color: #1a1a2e;">
                     <input type="checkbox" id="useUserConfig" onchange="toggleUserConfig()" checked>
                     ✓ 使用自定义配置
                 </label>
                 <span class="config-info" style="margin-left: 10px; font-size: 11px; color: #666;">
-                    配置保存在浏览器本地，可导出为文件备份
+                    配置持久化到服务端，按浏览器设备隔离
                 </span>
             </div>
 
             <div class="config-tabs">
-                <button class="config-tab active" onclick="switchConfigTab('company')">公司配置</button>
+                <button class="config-tab active" onclick="switchConfigTab('company')">机构配置</button>
                 <button class="config-tab" onclick="switchConfigTab('compare')">比较配置</button>
                 <button class="config-tab" onclick="switchConfigTab('raw')">YAML源码</button>
             </div>
 
-            <!-- 公司配置 -->
+            <!-- 机构配置 -->
             <div class="config-section active" id="companyConfig">
                 <div id="companyConfigForm">
                     <!-- 动态生成的表单 -->
@@ -539,29 +555,35 @@
                 <div class="config-info">
                     <strong>说明：</strong>
                     <ul style="margin-top: 5px; padding-left: 20px;">
-                        <li>公司名称：发文单位全称</li>
-                        <li>简称：公司简称列表，用于匹配印章文件</li>
+                        <li>单位名称：发文单位全称</li>
+                        <li>简称：单位简称列表，用于匹配印章文件</li>
                         <li>代字：发文代字，用于生成文号</li>
-                        <li>印章位置：印章图片文件路径，如 ./公司名.png</li>
-                        <li>印章文件名需与公司名称一致，如"哈喽沃尔得有限公司.png"</li>
+                        <li>印章位置：印章图片文件路径，如 ./单位名.png</li>
+                        <li>印章文件名需与单位名称一致，如"哈喽沃尔得有限公司.png"</li>
                     </ul>
                 </div>
             </div>
 
             <!-- 比较配置 -->
             <div class="config-section" id="compareConfig">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px;">
                     <div>
                         <label style="display: block; font-size: 12px; font-weight: bold; color: #333; margin-bottom: 4px;">句子相似度阈值</label>
                         <input type="number" id="sentenceThreshold" step="0.01" min="0" max="1" value="0.40" 
                                style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
-                        <div style="font-size: 10px; color: #777; margin-top: 3px;">小于此值会被识别为不同句子</div>
+                        <div style="font-size: 10px; color: #777; margin-top: 3px;">低于此值视为不同句子</div>
                     </div>
                     <div>
                         <label style="display: block; font-size: 12px; font-weight: bold; color: #333; margin-bottom: 4px;">段落相似度阈值</label>
                         <input type="number" id="paragraphThreshold" step="0.01" min="0" max="1" value="0.40" 
                                style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
-                        <div style="font-size: 10px; color: #777; margin-top: 3px;">小于此值会被识别为不同段落</div>
+                        <div style="font-size: 10px; color: #777; margin-top: 3px;">低于此值视为不同段落</div>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 12px; font-weight: bold; color: #333; margin-bottom: 4px;">短文直接比对阈值</label>
+                        <input type="number" id="shortParaThreshold" step="1" min="0" max="200" value="50" 
+                               style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                        <div style="font-size: 10px; color: #777; margin-top: 3px;">总字符数低于此值跳过句子拆分</div>
                     </div>
                 </div>
                 <div class="config-info" style="background: #f0f0f0; padding: 8px; border-radius: 4px;">
@@ -569,7 +591,7 @@
                     <ul style="margin-top: 3px; padding-left: 18px; font-size: 10px;">
                         <li>阈值越小，判断为"相似"的标准越严格</li>
                         <li>建议值在0.3-0.6之间</li>
-                        <li>默认值: 0.40</li>
+                        <li>默认值: 句子0.40 / 段落0.40 / 短文50字</li>
                     </ul>
                 </div>
             </div>
@@ -587,53 +609,87 @@
                 </div>
             </div>
 
-            <div class="config-actions" style="flex-shrink: 0;">
-                <button class="btn" onclick="loadServerConfig()" style="background: #6c757d; width: auto;">重置为默认</button>
-                <button class="btn" onclick="exportConfig()" style="background: #17a2b8; width: auto;">📥 导出</button>
-                <button class="btn" onclick="importConfig()" style="background: #17a2b8; width: auto;">📤 导入</button>
+            <div class="config-actions">
+                <button class="btn" onclick="loadDefaultConfig()" style="background: #6c757d; width: auto;">重置为默认</button>
                 <button class="btn" onclick="saveUserConfig()" style="width: auto;">保存配置</button>
             </div>
         </div>
     </div>
 
     <script>
-        // 页面加载时默认选中"文档比较"，并恢复上次路径
-        document.addEventListener('DOMContentLoaded', async function() {
-            // 1. 默认选中文档比较功能
-            selectTool('to_compare');
-            
-            // 2. 恢复上次选择的路径（统一从 localStorage 读取）
-            const savedPath = localStorage.getItem('workdir');
-            if (savedPath) {
-                document.getElementById('workdir').value = savedPath;
-            }
-
-            // 3. 路径恢复后，如果当前工具是文档比较，加载原稿/终稿列表
-            if (currentTool === 'to_compare') {
-                const workdir = document.getElementById('workdir').value.trim();
-                if (workdir) {
-                    loadCompareFiles(workdir);
-                }
-            }
+        // ==================== 全局错误捕获 ====================
+        window.addEventListener('error', function(e) {
+            console.error('[GLOBAL ERROR]', e.message, 'at', e.filename, ':', e.lineno);
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('[UNHANDLED REJECTION]', e.reason);
         });
 
+        // ==================== client_id 管理 ====================
+        function getClientId() {
+            let cid = localStorage.getItem('docproc_client_id');
+            if (!cid) {
+                cid = crypto.randomUUID();
+                localStorage.setItem('docproc_client_id', cid);
+            }
+            return cid;
+        }
+
+        // ==================== 远程/本地模式检测 ====================
+        function isRemoteMode() {
+            const hostname = window.location.hostname;
+            return hostname !== 'localhost' && hostname !== '127.0.0.1';
+        }
+
+        function updateModeUI() {
+            const remote = isRemoteMode();
+            const modeEl = document.getElementById('modeIndicator');
+            const selectBtn = document.getElementById('selectFolderBtn');
+            const remoteGroup = document.getElementById('remoteUploadGroup');
+            const openBtn = document.getElementById('openDirBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            if (remote) {
+                modeEl.style.display = 'block';
+                modeEl.style.background = '#fff3cd';
+                modeEl.style.color = '#856404';
+                modeEl.textContent = '🌐 远程模式：通过浏览器上传文件，处理后可下载结果';
+                selectBtn.textContent = '📤 上传文件夹';
+                remoteGroup.style.display = 'block';
+                openBtn.style.display = 'none';
+                downloadBtn.style.display = 'inline-block';
+            } else {
+                modeEl.style.display = 'block';
+                modeEl.style.background = '#d4edda';
+                modeEl.style.color = '#155724';
+                modeEl.textContent = '🖥️ 本地模式：直接操作服务器文件系统';
+                selectBtn.textContent = '选择文件夹';
+                remoteGroup.style.display = 'none';
+                openBtn.style.display = 'inline-block';
+                downloadBtn.style.display = 'none';
+            }
+        }
+
+        // ==================== 工具定义 ====================
         const tools = {
             to_docx: {
-                name: '文档转Word',
-                intro: '提取 PDF、DOC、TXT、HTML、MD 等文档文本，生成格式化的 DOCX 文件。',
+                name: '批量提取',
+                intro: '提取选择的文档文本，生成格式化的 DOCX 文件。',
                 features: [
                     '支持 PDF、DOC、DOCX、TXT、HTML、HTM、MD 格式',
-                    '自动识别公文标题、附件、日期等格式',
-                    '生成国标公文格式文档'
+                    '提取原文档文字，不保留格式',
+                    '构建GB/T 9704—2012格式文档',
+                    '选择或直接处理目录内所有文件'
                 ]
             },
             to_index: {
-                name: '文件索引',
+                name: '构建索引',
                 intro: '扫描目录及子目录，生成带超链接的 Excel 索引表。',
                 features: [
                     '自动扫描所有子目录',
-                    '文件名可点击跳转',
-                    '显示文件大小、修改日期'
+                    '构建超链接的 Excel 索引表',
+                    '显示文件大小、修改日期',
+                    '索引目录内所有文件'
                 ]
             },
             to_compare: {
@@ -642,34 +698,38 @@
                 features: [
                     '短句和字符级差异比较',
                     '差异标注（不含格式）',
-                    '生成 DOCX 结果文档'
+                    '构建新的 DOCX 结果文档',
+                    '选择目录内文件'
                 ]
             },
             to_pdf: {
-                name: '转PDF',
-                intro: '将 DOCX 文档转换为 PDF 格式。',
+                name: '批量转化',
+                intro: '将选择的 DOCX 文档转换为 PDF 格式。',
                 features: [
                     '自动将 DOC 转换为 DOCX',
                     '保持原有格式',
-                    '目录内全部 DOCX 生成 PDF'
+                    '批量生成 PDF',
+                    '选择或直接处理目录内所有文件'
                 ]
             },
             to_pageNum: {
                 name: '添加页码',
-                intro: '目录内全部 DOCX 文档另存后添加页码。',
+                intro: '为选择的 DOCX 文档另存后添加页码。',
                 features: [
-                    '全部 DOC 自动转换为 DOCX',
-                    '页面标准化',
-                    '另存后添加页码'
+                    '目录内全部 DOC 转换为 DOCX',
+                    '另存新文件后再处理',
+                    '清除文档页脚构建页码',
+                    '选择或直接处理目录内所有文件'
                 ]
             },
             to_redhead: {
                 name: '文档套红',
-                intro: '生成红头文件，包括发文机关、文号、印章等。',
+                intro: '为选择的 DOCX 文档生成红头文件，包括发文机关、文号、印章等。',
                 features: [
                     '匹配配置的单位简称和代字',
-                    '添加红头部分',
-                    '只处理4位数字前缀的 DOCX 文档'
+                    '另存新文件后再处理',
+                    '自动匹配印章并套红',
+                    '选择或直接处理目录内所有文件'
                 ]
             }
         };
@@ -677,108 +737,137 @@
         let currentTool = '';
 
         function selectTool(tool) {
-            currentTool = tool;
+            try {
+                currentTool = tool;
+                document.querySelectorAll('.tool-item').forEach(item => item.classList.remove('active'));
+                const toolElement = document.querySelector(`.tool-item[onclick*="'${tool}'"]`);
+                if (toolElement) toolElement.classList.add('active');
 
-            document.querySelectorAll('.tool-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            // 通过工具名称查找对应元素并设置 active
-            const toolElement = document.querySelector(`.tool-item[onclick*="'${tool}'"]`);
-            if (toolElement) {
-                toolElement.classList.add('active');
-            }
+                const toolInfo = tools[tool];
+                if (!toolInfo) { console.error('Tool not found:', tool); return; }
+                document.getElementById('toolTitle').textContent = toolInfo.name;
+                document.getElementById('toolIntro').textContent = toolInfo.intro;
 
-            const toolInfo = tools[tool];
-            document.getElementById('toolTitle').textContent = toolInfo.name;
-            document.getElementById('toolIntro').textContent = toolInfo.intro;
+                let featureHtml = '<ul class="feature-list">';
+                toolInfo.features.forEach(f => { featureHtml += `<li>${f}</li>`; });
+                featureHtml += '</ul>';
+                document.getElementById('toolIntro').innerHTML += featureHtml;
 
-            let featureHtml = '<ul class="feature-list">';
-            toolInfo.features.forEach(f => {
-                featureHtml += `<li>${f}</li>`;
-            });
-            featureHtml += '</ul>';
-            document.getElementById('toolIntro').innerHTML += featureHtml;
+                document.getElementById('toolPanel').style.display = 'block';
+                document.getElementById('result').style.display = 'none';
+                document.getElementById('fileListPanel').style.display = 'none';
+                document.getElementById('showFileListBtn').style.display = 'inline-block';
 
-            document.getElementById('toolPanel').style.display = 'block';
-            document.getElementById('result').style.display = 'none';
-
-            // 不清空路径，只清空结果和文件列表
-            document.getElementById('fileListPanel').style.display = 'none';
-            document.getElementById('fileSelectPanel').style.display = 'none';
-            document.getElementById('showFileListBtn').style.display = 'inline-block';
-
-            // 切换到compare时，如果有路径则自动加载原稿/终稿列表
-            if (tool === 'to_compare') {
-                // 优先使用远程session模式
-                if (isRemoteMode && currentSessionId) {
-                    loadCompareFiles('/temp/' + currentSessionId);
-                } else {
-                    const workdir = document.getElementById('workdir').value.trim();
-                    if (workdir) {
-                        loadCompareFiles(workdir);
-                    }
-                }
+                const workdir = document.getElementById('workdir').value.trim();
+                if (workdir) loadFileList(workdir, tool);
+            } catch (e) {
+                console.error('selectTool error:', e);
             }
         }
 
-        // 加载compare功能的文件列表
-        async function loadCompareFiles(workdir) {
-            const body = {tool: 'to_compare'};
-            
-            // 远程模式使用session_id，否则使用workdir
-            if (isRemoteMode && currentSessionId) {
-                body.session_id = currentSessionId;
-                body.workdir = '/temp/' + currentSessionId;
-            } else {
-                body.workdir = workdir;
-            }
-            
+        // ==================== 文件列表面板（统一双列） ====================
+        async function loadFileList(workdir, tool) {
+            if (!tool) return;
+            const panel = document.getElementById('filePanel');
+            const label = document.getElementById('fileLabel');
+            const leftList = document.getElementById('leftList');
+            const rightList = document.getElementById('rightList');
+
+            const isIndex = (tool === 'to_index');
+            const isCompare = (tool === 'to_compare');
+            label.textContent = isIndex ? '📂目录文件：' : isCompare ? '👇原稿 / 终稿：' : '📂目录文件：';
+
+            // 远程模式用 client_id，本地模式用 workdir
+            const body = isRemoteMode()
+                ? {client_id: getClientId(), tool}
+                : {workdir, tool};
+
             const filesRes = await fetch('/list_files', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             });
             const filesData = await filesRes.json();
-            if (filesData.success && filesData.files) {
-                const docFiles = filesData.files
-                    .map(f => f.name)
-                    .filter(name => name.toLowerCase().endsWith('.docx') || name.toLowerCase().endsWith('.doc'));
-                showFileSelect(docFiles);
+
+            if (!filesData.success || !filesData.files || filesData.files.length === 0) {
+                leftList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">目录中无匹配文件</div>';
+                rightList.innerHTML = '';
+                panel.style.display = 'block';
+                return;
             }
+
+            if (isCompare) {
+                const fileNames = filesData.files.map(f => f.name);
+                leftList.innerHTML = fileNames.map(f => {
+                    const e = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    return `<span class="file-tag" onclick="selectRadio(this, 'orig', '${e}')">${f}</span>`;
+                }).join('');
+                rightList.innerHTML = fileNames.map(f => {
+                    const e = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    return `<span class="file-tag" onclick="selectRadio(this, 'final', '${e}')">${f}</span>`;
+                }).join('');
+            } else if (isIndex) {
+                const files = filesData.files;
+                const mid = Math.ceil(files.length / 2);
+                leftList.innerHTML = files.slice(0, mid).map(f =>
+                    `<span class="file-tag" style="cursor:default;">${f.name}</span>`
+                ).join('');
+                rightList.innerHTML = files.slice(mid).map(f =>
+                    `<span class="file-tag" style="cursor:default;">${f.name}</span>`
+                ).join('');
+            } else {
+                const files = filesData.files;
+                const mid = Math.ceil(files.length / 2);
+                leftList.innerHTML = files.slice(0, mid).map(f => {
+                    const e = f.name.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    return `<span class="file-tag" data-filename="${e}" onclick="toggleFileTag(this)">${f.name}</span>`;
+                }).join('');
+                rightList.innerHTML = files.slice(mid).map(f => {
+                    const e = f.name.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    return `<span class="file-tag" data-filename="${e}" onclick="toggleFileTag(this)">${f.name}</span>`;
+                }).join('');
+            }
+            panel.style.display = 'block';
         }
 
-        // 切换文件列表显示
-        let fileListCache = [];
+        window.toggleFileTag = function(el) { el.classList.toggle('selected'); };
+
+        window.selectRadio = function(el, group, value) {
+            el.parentElement.querySelectorAll('.file-tag').forEach(tag => tag.classList.remove('selected'));
+            el.classList.add('selected');
+        };
+
+        function getCheckedFiles() {
+            const leftList = document.getElementById('leftList');
+            const rightList = document.getElementById('rightList');
+            return Array.from(leftList.querySelectorAll('.file-tag.selected'))
+                        .concat(Array.from(rightList.querySelectorAll('.file-tag.selected')))
+                        .map(t => t.dataset.filename);
+        }
+
+        // 查看文件列表
         window.toggleFileList = async function() {
             const panel = document.getElementById('fileListPanel');
             const fileList = document.getElementById('fileList');
             const workdir = document.getElementById('workdir').value.trim();
-            
-            if (!workdir) {
-                return;
-            }
-            
+
+            // 远程模式用 client_id，本地模式需有 workdir
+            const body = isRemoteMode()
+                ? {client_id: getClientId(), tool: currentTool, show_all: true}
+                : {workdir, tool: currentTool, show_all: true};
+
+            if (!isRemoteMode() && !workdir) return;
+
             if (panel.style.display === 'none') {
-                // 展开：获取文件列表
-                let requestBody = {tool: currentTool};
-                
-                // 远程模式：使用session_id
-                if (isRemoteMode && currentSessionId) {
-                    requestBody.session_id = currentSessionId;
-                    requestBody.show_all = true;  // 显示所有文件（包括上传的原始文件）
-                } else {
-                    requestBody.workdir = workdir;
-                }
-                
                 const filesRes = await fetch('/list_files', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify(body)
                 });
                 const filesData = await filesRes.json();
                 if (filesData.success && filesData.files) {
                     if (filesData.files.length > 0) {
-                        fileList.innerHTML = filesData.files.map(f => 
+                        fileList.innerHTML = filesData.files.map(f =>
                             `<span style="padding:2px 6px;background:#f0f0f0;border-radius:3px;font-size:12px;">📄 ${f.name}</span>`
                         ).join('');
                     } else {
@@ -789,430 +878,185 @@
                 }
                 panel.style.display = 'block';
             } else {
-                // 收起
                 panel.style.display = 'none';
             }
-        }
+        };
 
-        // 清理会话目录中的所有文件
-        window.clearSessionFiles = async function() {
-            if (!currentSessionId) return;
-            
-            if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
-            
-            try {
-                const response = await fetch('/clear_session', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({session_id: currentSessionId})
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    // 隐藏文件列表面板
-                    document.getElementById('fileListPanel').style.display = 'none';
-                    // 显示提示
-                    const progress = document.getElementById('uploadProgress');
-                    progress.style.display = 'block';
-                    progress.innerHTML = '<span style="color: #28a745;">✓ 已清理所有文件</span>';
-                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
-                }
-            } catch (error) {
-                console.error('清理失败:', error);
+        // 打开工作目录（本地模式） / 查看文件（远程模式）
+        window.openWorkdir = async function() {
+            if (isRemoteMode()) {
+                downloadResults(); // 远程模式：打开=下载
+                return;
             }
-        }
+            const workdir = document.getElementById('workdir').value.trim();
+            if (!workdir) { alert('请先选择工作目录'); return; }
+            await fetch('/open_folder', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: workdir})
+            });
+        };
 
-        // 当前会话ID（用于文件上传模式）
-        let currentSessionId = null;
-        let isRemoteMode = false;  // 标记是否是远程模式（通过上传文件）
-        let isMetadataMode = false;  // 标记是否是元信息模式（to_index不上传文件内容）
-
-        // 检测是否是局域网访问
-        function isLanAccess() {
-            const hostname = window.location.hostname;
-            return hostname !== 'localhost' && hostname !== '127.0.0.1';
-        }
-
-        // 用户断开连接时（关闭页面、刷新、切换标签等）销毁会话
-        window.addEventListener('beforeunload', function() {
-            if (currentSessionId) {
-                const blob = new Blob([JSON.stringify({session_id: currentSessionId})], {type: 'application/json'});
-                navigator.sendBeacon('/destroy_session', blob);
-            }
-        });
-
-        // 心跳定时器：每30秒发送一次心跳保持会话活跃
-        let heartbeatTimer = null;
-        function startHeartbeat() {
-            if (heartbeatTimer) clearInterval(heartbeatTimer);
-            heartbeatTimer = setInterval(function() {
-                if (currentSessionId) {
-                    fetch('/heartbeat', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({session_id: currentSessionId})
-                    }).catch(() => {});
-                }
-            }, 30000);
-        }
-        function stopHeartbeat() {
-            if (heartbeatTimer) {
-                clearInterval(heartbeatTimer);
-                heartbeatTimer = null;
-            }
-        }
-
-        // 选择文件夹 - 根据访问方式决定使用哪种模式
+        // ==================== 选择文件夹 / 上传 ====================
         window.selectFolder = async function() {
-            if (isLanAccess()) {
-                // 局域网模式：使用浏览器文件夹选择
+            if (isRemoteMode()) {
+                // 远程模式：触发浏览器文件夹选择
                 document.getElementById('folderInput').click();
             } else {
-                // 本地模式：使用服务器端文件夹选择
+                // 本地模式：服务端 tkinter 对话框
                 await selectLocalFolder();
             }
-        }
+        };
 
-        // 本地模式：服务器端文件夹选择
         async function selectLocalFolder() {
             try {
-                const response = await fetch('/select_folder', {
-                    method: 'POST'
-                });
+                const response = await fetch('/select_folder', { method: 'POST' });
                 const data = await response.json();
                 if (data.success) {
                     const workdir = data.path;
                     document.getElementById('workdir').value = workdir;
                     localStorage.setItem('workdir', workdir);
-                    
-                    fileListCache = [];
-                    isRemoteMode = false;
-                    isMetadataMode = false;
-                    currentSessionId = null;
-                    
-                    if (currentTool === 'to_compare') {
-                        const filesRes = await fetch('/list_files', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({workdir: workdir, tool: currentTool})
-                        });
-                        const filesData = await filesRes.json();
-                        if (filesData.success && filesData.files) {
-                            const docFiles = filesData.files
-                                .map(f => f.name)
-                                .filter(name => name.toLowerCase().endsWith('.docx') || name.toLowerCase().endsWith('.doc'));
-                            showFileSelect(docFiles);
-                        }
-                    }
+
+                    fetch('/save_workdir', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({client_id: getClientId(), workdir})
+                    });
+
+                    if (currentTool) await loadFileList(workdir, currentTool);
                 }
             } catch (error) {
                 console.error('选择文件夹失败:', error);
             }
         }
 
-        // 处理文件夹选择（浏览器模式）
-        async function handleFolderSelect(event) {
+        // 远程模式：上传文件夹中的所有文件
+        async function handleRemoteUpload(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
-            // 获取文件夹路径（从第一个文件的路径推断）
-            const fullPath = files[0].webkitRelativePath;
-            const folderName = fullPath.split('/')[0];
+            const progress = document.getElementById('uploadProgress');
+            progress.style.display = 'block';
+            progress.innerHTML = '<span class="loading-dots">正在上传文件...</span>';
 
-            // to_index 工具：只提取元信息，不上传文件内容
-            if (currentTool === 'to_index') {
-                await handleFolderSelectMetadata(files, folderName);
-            } else {
-                await handleFolderSelectUpload(files, folderName);
-            }
-        }
-
-        // to_index 专用：只提取文件元信息发送给后端，不上传文件内容
-        async function handleFolderSelectMetadata(files, folderName) {
-            document.getElementById('uploadProgress').style.display = 'block';
-            document.getElementById('workdir').value = folderName + '（扫描中...）';
-
-            // 从 FileList 提取元信息（所有文件类型，不限扩展名）
-            const metadata = [];
-            for (const file of files) {
-                metadata.push({
-                    name: file.name,
-                    path: file.webkitRelativePath || file.name,
-                    size: file.size,
-                    lastModified: file.lastModified  // 毫秒时间戳
-                });
-            }
-
-            if (metadata.length === 0) {
-                alert('该文件夹中没有文件');
-                document.getElementById('uploadProgress').style.display = 'none';
-                return;
-            }
-
-            try {
-                const response = await fetch('/build_index_from_metadata', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        metadata: metadata,
-                        folder_name: folderName,
-                        session_id: currentSessionId || undefined
-                    })
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    currentSessionId = data.session_id;
-                    isRemoteMode = true;
-                    isMetadataMode = true;  // 标记为元信息模式
-                    startHeartbeat();
-                    document.getElementById('workdir').value = folderName + '（已索引 ' + data.file_count + ' 个文件）';
-                    document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 索引完成，共 ' + data.file_count + ' 个文件（仅元信息，未上传文件内容）</span>';
-
-                    // 清空文件列表缓存
-                    fileListCache = [];
-
-                    // 3秒后隐藏进度提示
-                    setTimeout(() => {
-                        document.getElementById('uploadProgress').style.display = 'none';
-                    }, 3000);
-                } else {
-                    throw new Error(data.message || '索引生成失败');
-                }
-            } catch (error) {
-                console.error('索引生成失败:', error);
-                document.getElementById('workdir').value = '';
-                document.getElementById('uploadProgress').innerHTML = '<span style="color: #dc3545;">✗ 索引生成失败: ' + error.message + '</span>';
-            }
-        }
-
-        // 其他工具：上传文件内容到服务器
-        async function handleFolderSelectUpload(files, folderName) {
-            // 显示上传进度
-            document.getElementById('uploadProgress').style.display = 'block';
-            document.getElementById('workdir').value = folderName + '（上传中...）';
-
-            // 创建FormData
-            const formData = new FormData();
-            
-            // 添加文件（只添加当前工具支持的类型）
-            const toolExtensions = {
+            const extensions = {
                 'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
-                'to_index': ['.docx', '.doc'],
+                'to_index': [],
                 'to_compare': ['.docx', '.doc'],
                 'to_pdf': ['.docx', '.doc'],
                 'to_pageNum': ['.docx', '.doc'],
                 'to_redhead': ['.docx']
             };
-            const extensions = toolExtensions[currentTool] || ['.docx'];
-            
+            const allowedExt = extensions[currentTool] || ['.docx'];
+
+            const formData = new FormData();
             let uploadCount = 0;
             for (const file of files) {
                 const ext = '.' + file.name.split('.').pop().toLowerCase();
-                if (extensions.includes(ext)) {
+                if (allowedExt.length === 0 || allowedExt.includes(ext)) {
                     formData.append('files', file);
                     uploadCount++;
                 }
             }
 
             if (uploadCount === 0) {
-                alert('该文件夹中没有支持的文件类型');
-                document.getElementById('uploadProgress').style.display = 'none';
+                progress.innerHTML = '<span style="color: #dc3545;">✗ 没有支持的文件类型</span>';
+                setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 return;
             }
 
             formData.append('tool', currentTool);
-            formData.append('original_path', folderName);
-            if (currentSessionId) {
-                formData.append('session_id', currentSessionId);
-            }
+            formData.append('client_id', getClientId());
 
             try {
-                const response = await fetch('/upload_files', {
-                    method: 'POST',
-                    body: formData
-                });
+                const response = await fetch('/upload_files', { method: 'POST', body: formData });
                 const data = await response.json();
-
                 if (data.success) {
-                    currentSessionId = data.session_id;
-                    isRemoteMode = true;
-                    isMetadataMode = false;
-                    startHeartbeat();
-                    document.getElementById('workdir').value = folderName + '（已上传 ' + data.files.length + ' 个文件）';
-                    document.getElementById('uploadProgress').innerHTML = '<span style="color: #28a745;">✓ 上传完成，共 ' + data.files.length + ' 个文件</span>';
-                    
-                    // 清空文件列表缓存
-                    fileListCache = [];
-                    
-                    // 如果是compare工具，显示文件选择
-                    if (currentTool === 'to_compare') {
-                        // 优先使用上传返回的文件名列表（已过滤为doc/docx）
-                        const docFiles = data.files.filter(name => 
-                            name.toLowerCase().endsWith('.docx') || name.toLowerCase().endsWith('.doc')
-                        );
-                        showFileSelect(docFiles);
-                    }
-
-                    // 3秒后隐藏进度提示
-                    setTimeout(() => {
-                        document.getElementById('uploadProgress').style.display = 'none';
-                    }, 3000);
+                    progress.innerHTML = `<span style="color: #28a745;">✓ 上传完成 ${data.file_count} 个文件</span>`;
+                    // 加载文件列表
+                    await loadFileList(null, currentTool);
+                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
                     throw new Error(data.message || '上传失败');
                 }
             } catch (error) {
-                console.error('上传失败:', error);
-                document.getElementById('workdir').value = '';
-                document.getElementById('uploadProgress').innerHTML = '<span style="color: #dc3545;">✗ 上传失败: ' + error.message + '</span>';
+                progress.innerHTML = `<span style="color: #dc3545;">✗ 上传失败: ${error.message}</span>`;
             }
         }
 
-        // 显示文件选择列表（原稿和终稿分开）- 紧凑显示
-        function showFileSelect(files) {
-            const panel = document.getElementById('fileSelectPanel');
-            const origList = document.getElementById('origList');
-            const finalList = document.getElementById('finalList');
-            
-            // 统一转换为字符串数组（兼容 loadCompareFiles 和 handleFolderSelect 两种来源）
-            const fileNames = files.map(f => typeof f === 'string' ? f : f.name);
-            
-            // 使用转义避免特殊字符问题
-            origList.innerHTML = fileNames.map(f => {
-                const escapedName = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
-                return `<span class="file-tag" onclick="selectRadio(this, 'orig', '${escapedName}')">${f}</span>`;
-            }).join('');
-            
-            finalList.innerHTML = fileNames.map(f => {
-                const escapedName = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
-                return `<span class="file-tag" onclick="selectRadio(this, 'final', '${escapedName}')">${f}</span>`;
-            }).join('');
-            
-            panel.style.display = 'block';
-        }
-        
-        // 选择文件标签
-        window.selectRadio = function(el, group, value) {
-            // 移除同组其他选中状态
-            el.parentElement.querySelectorAll('.file-tag').forEach(tag => {
-                tag.classList.remove('selected');
-            });
-            el.classList.add('selected');
-        }
+        // 远程模式：下载结果
+        window.downloadResults = async function() {
+            const folderName = document.getElementById('workdir').value.trim() || 'results';
+            try {
+                const response = await fetch('/download_results', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_id: getClientId(), folder_name: folderName})
+                });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = folderName + '_处理结果.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+            } catch (error) {
+                console.error('下载失败:', error);
+            }
+        };
 
+        // ==================== 执行工具 ====================
         async function runTool() {
             const workdir = document.getElementById('workdir').value.trim();
             const resultDiv = document.getElementById('result');
 
-            if (!workdir) {
+            if (!isRemoteMode() && !workdir) {
                 resultDiv.className = 'error';
                 resultDiv.textContent = '请选择工作目录';
                 resultDiv.style.display = 'block';
                 return;
             }
 
-            // to_index 元信息模式：索引已在前端选文件夹时生成，直接展示结果
-            if (isMetadataMode && currentTool === 'to_index' && currentSessionId) {
-                resultDiv.className = 'success';
-                resultDiv.innerHTML = '<pre class="output-pre" id="outputLog"></pre>';
-                resultDiv.style.display = 'block';
-                const outputLog = document.getElementById('outputLog');
-
-                try {
-                    const checkRes = await fetch('/check_results', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({session_id: currentSessionId})
-                    });
-                    const checkData = await checkRes.json();
-                    if (checkData.success && checkData.files.length > 0) {
-                        const fileList = checkData.files.map(f => `  - ${f.name}`).join('\n');
-                        outputLog.textContent = `索引已生成（仅元信息，未上传文件内容）\n生成 ${checkData.files.length} 个文件:\n${fileList}\n\n[结束]`;
-                    } else {
-                        outputLog.textContent = '索引已生成\n\n[结束]';
-                    }
-                } catch (e) {
-                    outputLog.textContent = '索引已生成\n\n[结束]';
-                }
-                return;
-            }
-
-            // 对于需要交互的功能，获取选中的文件
             let selectedFiles = [];
             if (currentTool === 'to_compare') {
-                const origSelected = document.querySelector('#origList .file-tag.selected');
-                const finalSelected = document.querySelector('#finalList .file-tag.selected');
-                
+                const origSelected = document.querySelector('#leftList .file-tag.selected');
+                const finalSelected = document.querySelector('#rightList .file-tag.selected');
                 if (!origSelected || !finalSelected) {
                     resultDiv.className = 'error';
                     resultDiv.textContent = '请分别选择原稿和终稿';
                     resultDiv.style.display = 'block';
                     return;
                 }
-                
                 selectedFiles = [origSelected.textContent, finalSelected.textContent];
+            } else {
+                selectedFiles = getCheckedFiles();
             }
 
             resultDiv.className = 'success';
             resultDiv.innerHTML = '<pre class="output-pre" id="outputLog"></pre>';
             resultDiv.style.display = 'block';
 
+            const userConfig = getUserConfig();
+            const bodyData = {
+                tool: currentTool
+            };
+            // 远程模式用 client_id，本地模式用 workdir
+            if (isRemoteMode()) {
+                bodyData.client_id = getClientId();
+            } else {
+                bodyData.workdir = workdir;
+            }
+            if (selectedFiles.length > 0) bodyData.files = selectedFiles;
+            if (userConfig) bodyData.userConfig = userConfig;
+
             try {
-                const bodyData = {
-                    tool: currentTool,
-                    workdir: isRemoteMode ? '/temp/' + currentSessionId : workdir
-                };
-
-                if (isRemoteMode && currentSessionId) {
-                    const res = await fetch('/check_results', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({session_id: currentSessionId})
-                    });
-                    bodyData.workdir = '';  // 将在下面重新设置
-                }
-
-                // 如果有选中文件，添加到请求
-                if (selectedFiles.length > 0) {
-                    bodyData.files = selectedFiles;
-                }
-
-                // 如果有用户配置，添加到请求
-                const userConfig = getUserConfig();
-                if (userConfig) {
-                    bodyData.userConfig = userConfig;
-                }
-
-                // 根据模式设置正确的工作目录
-                if (isRemoteMode && currentSessionId) {
-                    // 重新获取服务器路径
-                    const checkRes = await fetch('/check_results', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({session_id: currentSessionId})
-                    });
-                    const checkData = await checkRes.json();
-                    if (checkData.success) {
-                        bodyData.workdir = checkData.server_path || workdir;
-                    }
-                }
-
-                // 统一使用支持配置的API
-                const apiUrl = '/run_tool_with_config';
-                
-                // 远程模式需要特殊处理：先获取服务器路径
-                let actualWorkdir = bodyData.workdir;
-                if (isRemoteMode && currentSessionId) {
-                    // 构建临时目录路径
-                    actualWorkdir = '/temp_workdirs/' + currentSessionId;
-                    bodyData.workdir = actualWorkdir;
-                }
-
-                const response = await fetch(apiUrl, {
+                const response = await fetch('/run_tool_with_config', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(bodyData)
                 });
 
@@ -1220,7 +1064,6 @@
                 const decoder = new TextDecoder();
                 const outputLog = document.getElementById('outputLog');
                 let outputLines = [];
-                let processSuccess = false;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -1238,231 +1081,144 @@
                                     outputLog.textContent = outputLines.join('\n');
                                     outputLog.scrollTop = outputLog.scrollHeight;
                                 } else if (data.type === 'end') {
-                                    processSuccess = data.success;
                                     if (!data.success) {
                                         resultDiv.className = 'error';
                                         const errorContent = data.error || outputLines.join('\n') || '执行失败';
                                         resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(errorContent) + '</pre>';
                                     } else {
-                                        // 处理成功，显示结果文件列表并启用下载按钮
                                         outputLog.textContent += '\n\n[结束]';
-                                        if (isRemoteMode && currentSessionId) {
-                                            // 先获取并显示结果文件列表
-                                            const checkRes = await fetch('/check_results', {
-                                                method: 'POST',
-                                                headers: {'Content-Type': 'application/json'},
-                                                body: JSON.stringify({session_id: currentSessionId})
-                                            });
-                                            const checkData = await checkRes.json();
-                                            if (checkData.success && checkData.files.length > 0) {
-                                                const fileList = checkData.files.map(f => `  - ${f.name}`).join('\n');
-                                                outputLog.textContent += `\n生成 ${checkData.files.length} 个文件:\n${fileList}`;
-                                            }
-                                            // 下载按钮始终可用
-                                        }
                                     }
                                 }
                             } catch (e) {}
                         }
                     }
                 }
+                // 刷新文件列表
+                if (workdir) loadFileList(workdir, currentTool);
             } catch (error) {
                 resultDiv.className = 'error';
                 resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(error.message) + '</pre>';
             }
         }
 
-        // 下载处理结果
-        async function downloadResults() {
-            if (!currentSessionId) {
-                alert('没有文件可供下载');
-                return;
-            }
-            
-            try {
-                // 先检查是否有结果文件
-                const checkRes = await fetch('/check_results', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({session_id: currentSessionId})
-                });
-                const checkData = await checkRes.json();
-                if (!checkData.success || !checkData.files || checkData.files.length === 0) {
-                    alert('没有文件可供下载');
-                    return;
-                }
-                
-                const folderName = document.getElementById('workdir').value.split('（')[0];
-                const response = await fetch('/download_results', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        original_path: folderName
-                    })
-                });
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = folderName + '_处理结果.zip';
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                    
-                    const outputLog = document.getElementById('outputLog');
-                    if (outputLog) {
-                        outputLog.textContent += '\n✓ 结果已下载到本地';
-                    }
-                }
-            } catch (error) {
-                console.error('下载失败:', error);
-                const outputLog = document.getElementById('outputLog');
-                if (outputLog) {
-                    outputLog.textContent += '\n✗ 下载失败: ' + error.message;
-                }
-            }
-        }
-
-        // HTML转义函数，防止XSS
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
-        // 拖拽支持 - 绑定到输入框
+        // ==================== 拖拽支持 ====================
         const workdirInput = document.getElementById('workdir');
-        workdirInput.addEventListener('dragover', function(e) {
-            e.preventDefault();
-        });
-        workdirInput.addEventListener('drop', function(e) {
-            e.preventDefault();
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                const path = files[0].path;
-                workdirInput.value = path;
-            }
-        });
+        workdirInput.addEventListener('dragover', function(e) { e.preventDefault(); });
+        workdirInput.addEventListener('drop', function(e) { e.preventDefault(); });
 
-        // 打开目录（Windows系统使用explorer）
-        window.openFolder = function() {
-            const path = document.getElementById('workdir').value.trim();
-            if (!path) return;
-            fetch('/open_folder', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({path: path})
-            }).then(res => res.json())
-              .then(data => {
-                  if (!data.success) {
-                      resultDiv.innerHTML += '<br><span style="color:#721c24;">打开目录失败</span>';
-                  }
-              })
-              .catch(err => {
-                  resultDiv.innerHTML += '<br><span style="color:#721c24;">打开目录失败: ' + err.message + '</span>';
-              });
-        }
-
-        // 配置相关函数
+        // ==================== 配置管理 ====================
         let userConfig = null;
         let isUsingUserConfig = false;
 
-        // 页面加载时从localStorage加载用户配置
-        document.addEventListener('DOMContentLoaded', async function() {
-            // 默认勾选"使用自定义配置"
+        // client_id
+        async function initConfig() {
             document.getElementById('useUserConfig').checked = true;
-            
-            // 1. 优先从 localStorage 加载
+
+            // 1. 优先从 localStorage 加载（即时显示）
             const savedConfig = localStorage.getItem('userConfig');
             if (savedConfig) {
                 try {
-                    userConfig = JSON.parse(savedConfig);
-                    isUsingUserConfig = true;
-                } catch (e) {
-                    userConfig = {};
-                    isUsingUserConfig = true;
-                }
-            }
-            
-            // 2. 如果 localStorage 为空，从服务端获取初始配置（仅首次）
-            if (!userConfig || Object.keys(userConfig).length === 0) {
-                try {
-                    const response = await fetch('/get_server_config');
-                    const data = await response.json();
-                    if (data.success && data.config) {
-                        userConfig = data.config;
-                        delete userConfig.last_workdir;
+                    const parsed = JSON.parse(savedConfig);
+                    if (parsed && (Object.keys(parsed).length > 0)) {
+                        userConfig = parsed;
                         isUsingUserConfig = true;
-                        localStorage.setItem('userConfig', JSON.stringify(userConfig));
+                    } else {
+                        userConfig = null;
                     }
                 } catch (e) {
-                    console.log('从服务器加载初始配置失败');
-                    userConfig = {};
+                    userConfig = null;
+                }
+            }
+
+            // 2. 从服务端加载（权威来源，同步 client_id）
+            try {
+                const response = await fetch('/get_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_id: getClientId()})
+                });
+                const data = await response.json();
+                if (data.success && data.config) {
+                    // 保存服务端返回的 client_id
+                    if (data.client_id) {
+                        localStorage.setItem('docproc_client_id', data.client_id);
+                    }
+                    userConfig = data.config;
+                    if (userConfig.last_workdir) delete userConfig.last_workdir;
+                    isUsingUserConfig = true;
+                    localStorage.setItem('userConfig', JSON.stringify(userConfig));
+
+                    // 恢复工作目录
+                    if (data.config.last_workdir) {
+                        document.getElementById('workdir').value = data.config.last_workdir;
+                        localStorage.setItem('workdir', data.config.last_workdir);
+                        if (currentTool) loadFileList(data.config.last_workdir, currentTool);
+                    }
+                }
+            } catch (e) {
+                console.log('从后端加载配置失败:', e);
+                if (!userConfig) {
+                    userConfig = {
+                        compare: {
+                            sentence_similarity_threshold: 0.40,
+                            para_similarity_threshold: 0.40,
+                            short_para_char_threshold: 50
+                        }
+                    };
                     isUsingUserConfig = true;
                 }
             }
-        });
+        }
 
         // 打开配置弹窗
         window.openConfig = async function() {
             const modal = document.getElementById('configModal');
             modal.style.display = 'flex';
-            
-            // 加载配置
+            requestAnimationFrame(() => { modal.classList.add('show'); });
             await loadUserConfig();
         };
 
-        // 关闭配置弹窗
         window.closeConfig = function() {
             const modal = document.getElementById('configModal');
-            modal.style.display = 'none';
+            modal.classList.remove('show');
+            setTimeout(() => { modal.style.display = 'none'; }, 250);
         };
 
-        // 切换配置标签页
-        window.switchConfigTab = function(tabName) {
-            // 更新标签
-            document.querySelectorAll('.config-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+        window.switchConfigTab = async function(tabName) {
+            document.querySelectorAll('.config-tab').forEach(tab => tab.classList.remove('active'));
             document.querySelector(`.config-tab[onclick*="${tabName}"]`).classList.add('active');
 
-            // 更新内容
-            document.querySelectorAll('.config-section').forEach(section => {
-                section.classList.remove('active');
-            });
-            
-            // raw对应rawYamlConfig，其他对应xxxConfig
+            document.querySelectorAll('.config-section').forEach(section => section.classList.remove('active'));
             const sectionId = tabName === 'raw' ? 'rawYamlConfig' : tabName + 'Config';
             document.getElementById(sectionId).classList.add('active');
 
-            // 切换到YAML源码时，显示用户配置或加载服务器配置
             if (tabName === 'raw') {
-                console.log('切换到YAML标签');
                 if (userConfig && Object.keys(userConfig).length > 0) {
-                    // 有用户配置，显示用户配置
                     document.getElementById('rawYamlText').value = objectToYaml(userConfig);
                 } else {
-                    // 没有用户配置，从服务器加载默认配置
-                    fetch('/get_server_config')
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                document.getElementById('rawYamlText').value = objectToYaml(data.config);
-                            }
-                        })
-                        .catch(err => {
-                            console.error('加载配置失败:', err);
-                            document.getElementById('rawYamlText').value = '加载配置失败: ' + err.message;
+                    try {
+                        const response = await fetch('/get_config', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({client_id: getClientId()})
                         });
+                        const data = await response.json();
+                        if (data.success) {
+                            document.getElementById('rawYamlText').value = objectToYaml(data.config);
+                        }
+                    } catch (e) {
+                        console.log('加载配置失败:', e);
+                    }
                 }
             }
         };
 
-        // 切换是否使用用户配置
         window.toggleUserConfig = function() {
             isUsingUserConfig = document.getElementById('useUserConfig').checked;
             if (!isUsingUserConfig) {
@@ -1471,138 +1227,167 @@
             }
         };
 
-        // 加载用户配置到表单
         async function loadUserConfig() {
-            // 检查是否有有效的用户配置（非空对象）
             const hasValidConfig = userConfig && Object.keys(userConfig).length > 0;
-            
+
             if (hasValidConfig) {
-                // 加载到公司配置表单
                 loadCompanyConfigForm(userConfig);
-                
-                // 加载到比较配置
                 if (userConfig.compare) {
                     document.getElementById('sentenceThreshold').value = userConfig.compare.sentence_similarity_threshold || 0.40;
                     document.getElementById('paragraphThreshold').value = userConfig.compare.para_similarity_threshold || 0.40;
+                    document.getElementById('shortParaThreshold').value = userConfig.compare.short_para_char_threshold || 50;
                 } else {
                     document.getElementById('sentenceThreshold').value = 0.40;
                     document.getElementById('paragraphThreshold').value = 0.40;
+                    document.getElementById('shortParaThreshold').value = 50;
                 }
-                
-                // 加载到YAML源码
                 document.getElementById('rawYamlText').value = objectToYaml(userConfig);
             } else {
-                // 没有有效用户配置，从服务器加载默认配置
-                await loadServerConfig();
+                await loadDefaultConfig();
             }
         }
 
-        // 加载服务器默认配置
-        window.loadServerConfig = async function() {
+        // 加载默认配置（从模板配置读取）
+        window.loadDefaultConfig = async function() {
             try {
-                const response = await fetch('/get_server_config');
+                const response = await fetch('/get_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_id: getClientId(), reset: true})
+                });
                 const data = await response.json();
                 if (data.success) {
                     userConfig = data.config;
-                    // last_workdir 不属于用户配置，删除
-                    delete userConfig.last_workdir;
+                    if (userConfig.last_workdir) delete userConfig.last_workdir;
                     loadCompanyConfigForm(userConfig);
-                    
                     if (userConfig.compare) {
                         document.getElementById('sentenceThreshold').value = userConfig.compare.sentence_similarity_threshold || 0.40;
                         document.getElementById('paragraphThreshold').value = userConfig.compare.para_similarity_threshold || 0.40;
+                        document.getElementById('shortParaThreshold').value = userConfig.compare.short_para_char_threshold || 50;
                     }
-                    
                     document.getElementById('rawYamlText').value = objectToYaml(userConfig);
                 }
             } catch (error) {
-                console.error('加载服务器配置失败:', error);
-                alert('加载服务器配置失败: ' + error.message);
+                console.error('加载配置失败:', error);
             }
         };
 
-        // 加载公司配置到表单（紧凑布局）
         function loadCompanyConfigForm(config) {
             const formDiv = document.getElementById('companyConfigForm');
             formDiv.innerHTML = '';
-            
-            // 移除 compare 和 last_workdir 部分
+
             const configWithoutMeta = {...config};
             delete configWithoutMeta.compare;
             delete configWithoutMeta.last_workdir;
-            
+
             let formHtml = '';
-            
+
+            // 表头
+            formHtml += `
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 2px; padding: 4px 8px;">
+                    <div style="flex: 1; min-width: 120px; font-size: 11px; color: #888; font-weight: 500;">全称</div>
+                    <div style="flex: 1; min-width: 120px; font-size: 11px; color: #888; font-weight: 500;">简称</div>
+                    <div style="flex: 0 0 70px; font-size: 11px; color: #888; font-weight: 500;">代字</div>
+                    <div style="flex: 1; min-width: 120px; font-size: 11px; color: #888; font-weight: 500;">印章位置</div>
+                    <div style="flex: 0 0 auto; min-width: 36px;"></div>
+                </div>
+            `;
+
             for (const companyName in configWithoutMeta) {
                 const companyInfo = configWithoutMeta[companyName];
                 const shortNames = companyInfo.简称 || [];
                 const daizi = companyInfo.代字 || '';
                 const stampPath = companyInfo['印章位置'] || '';
-                
+                const escName = escapeHtml(companyName);
+                const escJsName = escName.replace(/'/g, "\\'");
+
                 formHtml += `
-                    <div class="company-section" style="margin-bottom: 12px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; background: #f9f9f9;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                            <div style="flex: 1;">
-                                <h3 style="margin: 0 0 5px 0; font-size: 13px; font-weight: bold; color: #333;">${companyName}</h3>
-                                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                                    <div style="flex: 1; min-width: 150px;">
-                                        <div style="font-size: 11px; color: #666; margin-bottom: 3px;">简称（逗号分隔）</div>
-                                        <input type="text" data-company="${companyName}" data-field="shortnames" 
-                                               value="${shortNames.join(', ')}" 
-                                               style="width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
-                                    </div>
-                                    <div style="flex: 0 0 80px;">
-                                        <div style="font-size: 11px; color: #666; margin-bottom: 3px;">发文代字</div>
-                                        <input type="text" data-company="${companyName}" data-field="daizi" 
-                                               value="${daizi}" 
-                                               style="width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
-                                    </div>
-                                    <div style="flex: 1; min-width: 180px;">
-                                        <div style="font-size: 11px; color: #666; margin-bottom: 3px;">印章位置</div>
-                                        <input type="text" data-company="${companyName}" data-field="stamp" 
-                                               value="${stampPath}" 
-                                               placeholder="./公司名.png" 
-                                               style="width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
-                                    </div>
-                                    <div>
-                                        <button type="button" onclick="removeCompany('${companyName}')" 
-                                                style="background: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 11px; cursor: pointer;">删除</button>
-                                    </div>
-                                </div>
+                    <div class="company-section" data-original-name="${escJsName}" style="margin-bottom: 6px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 4px; background: #f9f9f9;">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" data-field="name" data-original="${escJsName}"
+                                   value="${escName}" title="单位全称（可直接编辑）"
+                                   style="flex: 1; min-width: 120px; padding: 3px 6px; font-size: 12px; font-weight: bold; color: #333; border: 1px solid transparent; border-radius: 3px; background: transparent;"
+                                   onfocus="this.style.borderColor='#ccc'; this.style.background='#fff';"
+                                   onblur="this.style.borderColor='transparent'; this.style.background='transparent';">
+                            <div style="flex: 1; min-width: 120px;">
+                                <input type="text" data-field="shortnames" data-original="${escJsName}"
+                                       value="${escapeHtml(shortNames.join(', '))}" placeholder="简称（逗号分隔）"
+                                       style="width: 100%; padding: 3px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
+                            </div>
+                            <div style="flex: 0 0 70px;">
+                                <input type="text" data-field="daizi" data-original="${escJsName}"
+                                       value="${escapeHtml(daizi)}" placeholder="代字"
+                                       style="width: 100%; padding: 3px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
+                            </div>
+                            <div style="flex: 1; min-width: 120px;">
+                                <input type="text" data-field="stamp" data-original="${escJsName}"
+                                       value="${escapeHtml(stampPath)}" placeholder="./单位名.png"
+                                       style="width: 100%; padding: 3px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px;">
+                            </div>
+                            <div style="flex: 0 0 auto; min-width: 36px;">
+                                <button type="button" onclick="removeCompany(this.closest('.company-section').dataset.originalName)"
+                                        style="background: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 11px; cursor: pointer;">删除</button>
                             </div>
                         </div>
                     </div>
                 `;
             }
-            
+
             formHtml += `
-                <button type="button" class="btn" onclick="addNewCompany()" 
-                        style="width: 100%; margin-top: 8px; padding: 6px 10px; background: #28a745; border: none; border-radius: 4px; color: white; font-size: 12px; cursor: pointer;">
-                    + 添加新公司
+                <button type="button" onclick="addNewCompany()"
+                        style="width: auto; margin-top: 3px; padding: 4px 12px; background: #28a745; border: none; border-radius: 4px; color: white; font-size: 12px; cursor: pointer;">
+                    + 添加新单位
                 </button>
             `;
-            
+
             formDiv.innerHTML = formHtml;
         }
 
-        // 添加新公司
         window.addNewCompany = function() {
-            const companyName = prompt('请输入公司全称：');
-            if (!companyName) return;
-            
-            if (!userConfig) userConfig = {};
-            
-            userConfig[companyName] = {
-                简称: [],
-                代字: '',
-                印章位置: ''
-            };
-            
-            loadCompanyConfigForm(userConfig);
-            document.getElementById('rawYamlText').value = objectToYaml(userConfig);
+            let existing = document.getElementById('newCompanyRow');
+            if (existing) { existing.querySelector('input').focus(); return; }
+
+            const formDiv = document.getElementById('companyConfigForm');
+            const addBtn = formDiv.querySelector('button[onclick="addNewCompany()"]');
+
+            const row = document.createElement('div');
+            row.id = 'newCompanyRow';
+            row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-top:8px;';
+            row.innerHTML = `
+                <input type="text" id="newCompanyInput" placeholder="输入单位全称"
+                       style="flex:1; padding:4px 8px; font-size:12px; border:1px solid #e94560; border-radius:3px; outline:none;">
+                <button type="button" onclick="confirmNewCompany()"
+                        style="padding:4px 10px; background:#28a745; border:none; border-radius:3px; color:white; font-size:12px; cursor:pointer;">确定</button>
+                <button type="button" onclick="cancelNewCompany()"
+                        style="padding:4px 10px; background:#6c757d; border:none; border-radius:3px; color:white; font-size:12px; cursor:pointer;">取消</button>
+            `;
+            addBtn.parentNode.insertBefore(row, addBtn);
+
+            const input = row.querySelector('input');
+            input.focus();
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') confirmNewCompany();
+                if (e.key === 'Escape') cancelNewCompany();
+            });
         };
 
-        // 删除公司
+        window.confirmNewCompany = function() {
+            const input = document.getElementById('newCompanyInput');
+            const companyName = input ? input.value.trim() : '';
+            if (!companyName) { input.focus(); return; }
+
+            if (!userConfig) userConfig = {};
+            userConfig[companyName] = {简称: [], 代字: '', 印章位置: ''};
+            loadCompanyConfigForm(userConfig);
+            document.getElementById('rawYamlText').value = objectToYaml(userConfig);
+            cancelNewCompany();
+        };
+
+        window.cancelNewCompany = function() {
+            const row = document.getElementById('newCompanyRow');
+            if (row) row.remove();
+        };
+
         window.removeCompany = function(companyName) {
             if (confirm(`确定要删除 "${companyName}" 的配置吗？`)) {
                 delete userConfig[companyName];
@@ -1611,124 +1396,88 @@
             }
         };
 
-        // 保存用户配置
         window.saveUserConfig = async function() {
             try {
-                // 从表单收集数据
-                const updatedConfig = {};
-                
-                // 从公司配置表单收集
-                const companySections = document.querySelectorAll('.company-section');
-                companySections.forEach(section => {
-                    const companyName = section.querySelector('h3').textContent;
-                    const shortnamesInput = section.querySelector('input[data-field="shortnames"]');
-                    const daiziInput = section.querySelector('input[data-field="daizi"]');
-                    const stampInput = section.querySelector('input[data-field="stamp"]');
-                    
-                    const shortNames = shortnamesInput.value.split(',').map(s => s.trim()).filter(s => s);
-                    
-                    updatedConfig[companyName] = {
-                        简称: shortNames,
-                        代字: daiziInput.value.trim(),
-                        印章位置: stampInput.value.trim()
+                let updatedConfig = {};
+
+                // YAML标签页优先
+                const rawTab = document.querySelector('.config-tab[onclick*="raw"]');
+                if (rawTab && rawTab.classList.contains('active')) {
+                    const yamlText = document.getElementById('rawYamlText').value.trim();
+                    if (!yamlText) throw new Error('YAML 配置不能为空');
+                    updatedConfig = yamlToObject(yamlText);
+                    if (!updatedConfig || Object.keys(updatedConfig).length === 0) {
+                        throw new Error('YAML 格式不正确，请检查');
+                    }
+                } else {
+                    const companySections = document.querySelectorAll('.company-section');
+                    companySections.forEach(section => {
+                        const originalName = section.dataset.originalName;
+                        const nameInput = section.querySelector('input[data-field="name"]');
+                        const shortnamesInput = section.querySelector('input[data-field="shortnames"]');
+                        const daiziInput = section.querySelector('input[data-field="daizi"]');
+                        const stampInput = section.querySelector('input[data-field="stamp"]');
+
+                        const currentName = nameInput ? nameInput.value.trim() : originalName;
+                        const shortNames = shortnamesInput.value.split(',').map(s => s.trim()).filter(s => s);
+
+                        updatedConfig[currentName] = {
+                            简称: shortNames,
+                            代字: daiziInput.value.trim(),
+                            印章位置: stampInput.value.trim()
+                        };
+                    });
+
+                    updatedConfig.compare = {
+                        sentence_similarity_threshold: parseFloat(document.getElementById('sentenceThreshold').value) || 0.40,
+                        para_similarity_threshold: parseFloat(document.getElementById('paragraphThreshold').value) || 0.40,
+                        short_para_char_threshold: parseInt(document.getElementById('shortParaThreshold').value) || 50
                     };
-                });
-                
-                // 从比较配置收集
-                updatedConfig.compare = {
-                    sentence_similarity_threshold: parseFloat(document.getElementById('sentenceThreshold').value) || 0.40,
-                    para_similarity_threshold: parseFloat(document.getElementById('paragraphThreshold').value) || 0.40
-                };
-                
-                // 验证配置
-                if (Object.keys(updatedConfig).length === 0) {
-                    throw new Error('配置不能为空');
                 }
-                
+
+                if (Object.keys(updatedConfig).length === 0) throw new Error('配置不能为空');
+
                 userConfig = updatedConfig;
                 isUsingUserConfig = true;
                 document.getElementById('useUserConfig').checked = true;
-                
+
                 // 保存到 localStorage
                 localStorage.setItem('userConfig', JSON.stringify(userConfig));
-                
-                // 更新YAML源码显示
+
+                // 持久化到服务端（按 client_id 隔离）
+                const saveRes = await fetch('/save_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_id: getClientId(), config: userConfig})
+                });
+                const saveData = await saveRes.json();
+                if (!saveData.success) throw new Error(saveData.message || '保存失败');
+
                 document.getElementById('rawYamlText').value = objectToYaml(userConfig);
-                
                 closeConfig();
-                
             } catch (error) {
                 alert('保存配置失败: ' + error.message);
             }
         };
 
-        // 导出配置为 YAML 文件下载
-        window.exportConfig = function() {
-            if (!userConfig || Object.keys(userConfig).length === 0) {
-                alert('当前没有可导出的配置');
-                return;
-            }
-            const yamlStr = objectToYaml(userConfig);
-            const blob = new Blob([yamlStr], { type: 'text/yaml;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'config.yaml';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        };
-
-        // 导入配置从 YAML 文件
-        window.importConfig = function() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.yaml,.yml';
-            input.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                try {
-                    const text = await file.text();
-                    const imported = yamlToObject(text);
-                    if (!imported || Object.keys(imported).length === 0) {
-                        alert('导入失败：配置文件为空或格式不正确');
-                        return;
-                    }
-                    if (!confirm('导入将覆盖当前配置，是否继续？')) return;
-                    userConfig = imported;
-                    isUsingUserConfig = true;
-                    document.getElementById('useUserConfig').checked = true;
-                    localStorage.setItem('userConfig', JSON.stringify(userConfig));
-                    // 刷新表单
-                    loadCompanyConfigForm(userConfig);
-                    if (userConfig.compare) {
-                        document.getElementById('sentenceThreshold').value = userConfig.compare.sentence_similarity_threshold || 0.40;
-                        document.getElementById('paragraphThreshold').value = userConfig.compare.para_similarity_threshold || 0.40;
-                    }
-                    document.getElementById('rawYamlText').value = objectToYaml(userConfig);
-                    alert('配置导入成功');
-                } catch (err) {
-                    alert('导入失败：' + err.message);
-                }
-            };
-            input.click();
-        };
-
-        // 对象转换为YAML字符串
+        // YAML工具函数
         function objectToYaml(obj) {
             let yaml = '';
-            
             for (const key in obj) {
                 if (key === 'compare') {
                     yaml += 'compare:\n';
                     for (const subKey in obj[key]) {
                         yaml += `  ${subKey}: ${obj[key][subKey]}\n`;
                     }
+                } else if (key === 'last_workdir') {
+                    continue;
                 } else {
-                    // 公司配置
-                    yaml += `${key}:\n`;
                     const companyInfo = obj[key];
+                    if (!companyInfo || typeof companyInfo !== 'object') {
+                        yaml += `${key}: ${companyInfo}\n`;
+                        continue;
+                    }
+                    yaml += `${key}:\n`;
                     yaml += `  简称:\n`;
                     const shortNames = companyInfo['简称'];
                     if (shortNames && Array.isArray(shortNames)) {
@@ -1743,11 +1492,9 @@
                 }
                 yaml += '\n';
             }
-            
             return yaml.trim();
         }
 
-        // YAML字符串解析为对象（轻量实现，覆盖项目配置格式）
         function yamlToObject(yamlStr) {
             const result = {};
             let currentKey = null;
@@ -1755,13 +1502,11 @@
             let listKey = null;
 
             for (const rawLine of yamlStr.split('\n')) {
-                const line = rawLine.replace(/#.*$/, ''); // 去注释
+                const line = rawLine.replace(/#.*$/, '');
                 if (!line.trim()) continue;
-
                 const indent = line.search(/\S/);
 
                 if (indent === 0) {
-                    // 顶层 key
                     const match = line.match(/^(\S[\s\S]*?):\s*$/);
                     if (match) {
                         currentKey = match[1].trim();
@@ -1769,7 +1514,6 @@
                         currentSubKey = null;
                         listKey = null;
                     } else {
-                        // 顶层 key: value（不常见但兼容）
                         const kv = line.match(/^(\S[\s\S]*?):\s*(.+)$/);
                         if (kv) {
                             currentKey = kv[1].trim();
@@ -1780,20 +1524,17 @@
                     }
                 } else if (indent >= 2 && currentKey) {
                     const trimmed = line.trim();
-                    // 列表项 "- value"
                     if (trimmed.startsWith('- ')) {
                         if (listKey && result[currentKey][listKey]) {
                             result[currentKey][listKey].push(trimmed.substring(2).trim());
                         }
                         continue;
                     }
-                    // 子 key: value
                     const kv = trimmed.match(/^(\S[\s\S]*?):\s*(.*)$/);
                     if (kv) {
                         currentSubKey = kv[1].trim();
                         const val = kv[2].trim();
                         if (val === '') {
-                            // 值为空，可能是列表或空对象
                             if (currentSubKey === '简称') {
                                 result[currentKey][currentSubKey] = [];
                                 listKey = currentSubKey;
@@ -1817,7 +1558,6 @@
             if (val === 'null' || val === '') return '';
             const num = Number(val);
             if (!isNaN(num) && val !== '') return num;
-            // 去引号
             if ((val.startsWith('"') && val.endsWith('"')) ||
                 (val.startsWith("'") && val.endsWith("'"))) {
                 return val.slice(1, -1);
@@ -1825,13 +1565,71 @@
             return val;
         }
 
-        // 获取用户配置（用于工具执行）
         window.getUserConfig = function() {
-            if (isUsingUserConfig && userConfig) {
-                return userConfig;
-            }
+            if (isUsingUserConfig && userConfig) return userConfig;
             return null;
         };
+
+        // ==================== 关于弹窗 ====================
+        window.showAbout = function() {
+            const overlay = document.getElementById('aboutOverlay');
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;">
+                    <div style="text-align:center;margin-bottom:12px;">
+                        <h2 style="margin:6px 0 2px;font-size:18px;color:#1a1a2e;">文枢</h2>
+                        <div style="font-size:11px;color:#999;">DocProc · 文档处理工具集</div>
+                    </div>
+                    <div style="color:#444;font-size:12px;line-height:2;">
+                        <div>批量提取 · 文件索引 · 文档比较</div>
+                        <div>批量转化 · 添加页码 · 文件套红</div>
+                    </div>
+                    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:12px;color:#666;line-height:2;">
+                        <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/DocProc" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1/DocProc</a></div>
+                    </div>
+                    <div style="text-align:center;margin-top:14px;">
+                        <button onclick="closeAbout()" style="padding:5px 24px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
+                    </div>
+                </div>
+            `;
+            requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+            overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAbout(); });
+        };
+
+        window.closeAbout = function() {
+            const overlay = document.getElementById('aboutOverlay');
+            overlay.style.opacity = '0';
+            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 250);
+        };
+
+        // 链接拦截（防止在 iframe/WebView 内导航）
+        document.addEventListener('click', function(e) {
+            const link = e.target.closest('a');
+            if (!link) return;
+            const href = link.getAttribute('href');
+            if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+            e.preventDefault();
+            window.open(href, '_blank');
+        });
+
+        // ==================== 页面初始化 ====================
+        document.addEventListener('DOMContentLoaded', async function() {
+            updateModeUI();
+            selectTool('to_compare');
+
+            const savedPath = localStorage.getItem('workdir');
+            if (savedPath) {
+                document.getElementById('workdir').value = savedPath;
+            }
+
+            // 初始化配置（从服务端加载）
+            await initConfig();
+
+            // 远程模式：工作目录显示 client_id
+            if (isRemoteMode()) {
+                document.getElementById('workdir').value = '📁 远程工作区 (' + getClientId().slice(0, 8) + '...)';
+            }
+        });
     </script>
 </body>
 </html>

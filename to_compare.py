@@ -7,12 +7,14 @@ Word文档比较工具
 import os
 import glob
 import difflib
+from copy import deepcopy
 import yaml
 from docx import Document
-from docx.shared import RGBColor
+from docx.shared import Pt, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from doc_process import doc_to_docx
 from load_config import load_user_config
-from mystyle import clear_styles, add_my_styles, set_page
 
 
 def load_compare_config():
@@ -23,9 +25,10 @@ def load_compare_config():
         compare_config = config.get('compare', {})
         sentence_threshold = compare_config.get('sentence_similarity_threshold', 0.40)
         para_threshold = compare_config.get('para_similarity_threshold', 0.40)
-        return sentence_threshold, para_threshold
+        short_para_char_threshold = compare_config.get('short_para_char_threshold', 50)
+        return sentence_threshold, para_threshold, short_para_char_threshold
     
-    return 0.40, 0.40  # 默认值
+    return 0.40, 0.40, 50  # 默认值
 
 
 def find_docx_files(workdir):
@@ -694,14 +697,24 @@ def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_i
                 _apply_diff_run(result_para, sf_diffs)
 
 
-def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD):
+def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD,
+                         short_para_char_threshold=0):
     """
     句子级别差异比较（改进版）
     - 按终稿句子顺序输出
     - 贪心1:1匹配 + 句子级拆分/合并检测
     - 使用逆序对检测句子互换
     - 低于相似度阈值的配对直接标记新增+删除
+
+    Args:
+        short_para_char_threshold: >0 时，若原文+终稿总字符数不超过此值，
+            直接走字符级diff，跳过句子拆分
     """
+    # 短段落直接字符级diff，避免句子拆分产生不合理的碎片
+    if short_para_char_threshold > 0 and len(orig_text) + len(final_text) <= short_para_char_threshold:
+        para_diff = char_level_diff(orig_text, final_text)
+        _apply_diff_run(result_para, para_diff)
+        return
     orig_sentences = split_into_sentences(orig_text)
     final_sentences = split_into_sentences(final_text)
     
@@ -956,44 +969,371 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
         next_orig += 1
 
 
-def compare_with_python(original_path, final_path, output_path):
-    """使用python-docx进行段落级对比，识别新增/删除/修改"""
+# ======================== 原地标记辅助函数 ========================
+
+def _get_para_font_info(paragraph):
+    """从段落提取字体信息（字体名、东亚字体、字号、加粗）
+    作为该段落新增run的默认字体
+    优先取最后一个run的有效字体名，若没有则向前回溯
+    """
+    font_info = {'name': None, 'eastAsia': None, 'size': None, 'bold': None}
+
+    if paragraph.runs:
+        # 从最后一个run向前回溯，找到第一个有字体名信息的run
+        for run in reversed(paragraph.runs):
+            has_name = False
+            try:
+                rPr = run.font.element.rPr
+                if rPr is not None:
+                    rFonts = rPr.find(qn('w:rFonts'))
+                    if rFonts is not None:
+                        ea = rFonts.get(qn('w:eastAsia'))
+                        if ea:
+                            font_info['eastAsia'] = ea
+                            font_info['name'] = ea
+                            has_name = True
+                        ascii_f = rFonts.get(qn('w:ascii'))
+                        if ascii_f and not font_info.get('name'):
+                            font_info['name'] = ascii_f
+                            has_name = True
+            except Exception:
+                pass
+
+            fn = run.font.name
+            if fn:
+                font_info['name'] = fn
+                has_name = True
+
+            # 只有找到字体名才回溯继续搜索
+            if has_name:
+                if not font_info.get('size'):
+                    font_info['size'] = run.font.size
+                if font_info.get('bold') is None:
+                    font_info['bold'] = run.font.bold
+                break
+
+        # 如果整个段落都没有字体名，至少收集字号
+        if not font_info.get('name'):
+            for run in paragraph.runs:
+                if not font_info.get('size'):
+                    font_info['size'] = run.font.size
+                if font_info.get('bold') is None:
+                    font_info['bold'] = run.font.bold
+                if font_info.get('size') is not None:
+                    break
+
+    # 回退到段落样式的XML
+    if not font_info.get('name'):
+        try:
+            style = paragraph.style
+            if style:
+                s_elem = style._element
+                s_pPr = s_elem.find(qn('w:pPr'))
+                if s_pPr is not None:
+                    s_rPr = s_pPr.find(qn('w:rPr'))
+                else:
+                    s_rPr = s_elem.find(qn('w:rPr'))
+                if s_rPr is not None:
+                    s_rFonts = s_rPr.find(qn('w:rFonts'))
+                    if s_rFonts is not None:
+                        ea = s_rFonts.get(qn('w:eastAsia'))
+                        if ea:
+                            font_info['eastAsia'] = ea
+                            font_info['name'] = ea
+                        ascii_f = s_rFonts.get(qn('w:ascii'))
+                        if ascii_f and not font_info.get('name'):
+                            font_info['name'] = ascii_f
+                    s_sz = s_rPr.find(qn('w:sz'))
+                    if s_sz is not None and not font_info.get('size'):
+                        sz_val = s_sz.get(qn('w:val'))
+                        if sz_val:
+                            font_info['size'] = Pt(int(sz_val) // 2)
+
+                if not font_info.get('name') and style.font:
+                    font_info['name'] = style.font.name
+                    if not font_info.get('size'):
+                        font_info['size'] = style.font.size
+                    if not font_info.get('eastAsia') and style.font.name:
+                        font_info['eastAsia'] = style.font.name
+        except Exception:
+            pass
+
+    # 最终 fallback
+    if not font_info.get('name') and not font_info.get('eastAsia'):
+        font_info['name'] = '仿宋'
+        font_info['eastAsia'] = '仿宋'
+    if not font_info.get('size'):
+        font_info['size'] = Pt(16)
+
+    if font_info.get('name') and not font_info.get('eastAsia'):
+        font_info['eastAsia'] = font_info['name']
+    elif font_info.get('eastAsia') and not font_info.get('name'):
+        font_info['name'] = font_info['eastAsia']
+
+    return font_info
+
+
+def _apply_run_font(run, font_info):
+    """将字体信息应用到run对象（同时设置ascii和eastAsia字体）"""
+    font_name = font_info.get('name')
+    east_asia = font_info.get('eastAsia')
+
     try:
-        # 预加载配置，避免重复调用
-        SENTENCE_SIM_THRESHOLD, PARA_SIM_THRESHOLD = load_compare_config()
-        
-        # 打开文档
+        if font_info.get('size'):
+            run.font.size = font_info['size']
+        if font_info.get('bold') is not None:
+            run.font.bold = font_info['bold']
+
+        if font_name or east_asia:
+            rPr = run.element.rPr
+            if rPr is None:
+                rPr = OxmlElement('w:rPr')
+                run.element.append(rPr)
+
+            rFonts = rPr.find(qn('w:rFonts'))
+            if rFonts is None:
+                rFonts = OxmlElement('w:rFonts')
+                rPr.append(rFonts)
+
+            if font_name:
+                rFonts.set(qn('w:ascii'), font_name)
+                rFonts.set(qn('w:hAnsi'), font_name)
+                run.font.name = font_name
+            if east_asia:
+                rFonts.set(qn('w:eastAsia'), east_asia)
+            elif font_name:
+                rFonts.set(qn('w:eastAsia'), font_name)
+    except Exception:
+        pass
+
+
+def _clear_para_runs(paragraph):
+    """清空段落的所有run和hyperlink元素，保留段落级格式"""
+    p_elem = paragraph._element
+    for child in list(p_elem):
+        tag = child.tag
+        if tag.endswith('}r') or tag.endswith('}hyperlink'):
+            p_elem.remove(child)
+
+
+def _set_para_red_with_deletion(result_para, orig_text, font_info):
+    """将一个段落标记为已删除（蓝色+删除线），保留段落中的图片/表格等元素"""
+    has_content = False
+    for run in result_para.runs:
+        has_content = True
+        run.font.color.rgb = RGBColor(0, 0, 255)
+        run.font.strike = True
+        _apply_run_font(run, font_info)
+
+    if not has_content and orig_text:
+        run = result_para.add_run(orig_text)
+        run.font.color.rgb = RGBColor(0, 0, 255)
+        run.font.strike = True
+        _apply_run_font(run, font_info)
+
+
+def _create_new_para_elem(para_elem, text, font_info, color=None, is_after=True):
+    """在para_elem之后或之前创建新段落XML元素，返回新元素"""
+    if is_after:
+        ref_elem = para_elem
+    else:
+        prev = para_elem.getprevious()
+        ref_elem = prev if prev is not None else para_elem
+
+    ref_pPr = ref_elem.find(qn('w:pPr'))
+
+    temp_doc = Document()
+    temp_p = temp_doc.add_paragraph(text)
+    for run in temp_p.runs:
+        _apply_run_font(run, font_info)
+        if color:
+            run.font.color.rgb = color
+
+    new_elem = temp_p._element
+
+    if ref_pPr is not None:
+        existing_pPr = new_elem.find(qn('w:pPr'))
+        if existing_pPr is not None:
+            new_elem.remove(existing_pPr)
+        copied_pPr = deepcopy(ref_pPr)
+        new_elem.insert(0, copied_pPr)
+
+    parent = para_elem.getparent()
+    if is_after:
+        next_sibling = para_elem.getnext()
+        if next_sibling is not None:
+            parent.insert(list(parent).index(next_sibling), new_elem)
+        else:
+            parent.append(new_elem)
+    else:
+        parent.insert(list(parent).index(para_elem), new_elem)
+
+    return new_elem
+
+
+def _apply_para_format_from_last(doc, new_para):
+    """将文档中最后一个段落的段落级格式应用到新段落"""
+    if len(doc.paragraphs) < 2:
+        return
+    last_para_elem = doc.paragraphs[-2]._element
+    last_pPr = last_para_elem.find(qn('w:pPr'))
+    if last_pPr is not None:
+        new_elem = new_para._element
+        existing_pPr = new_elem.find(qn('w:pPr'))
+        if existing_pPr is not None:
+            new_elem.remove(existing_pPr)
+        new_elem.insert(0, deepcopy(last_pPr))
+
+
+def _apply_diff_run_inplace(result_para, diffs, font_info):
+    """将diff结果写入段落，保留字体格式"""
+    for tag, text in diffs:
+        if not text:
+            continue
+        run = result_para.add_run(text)
+        _apply_run_font(run, font_info)
+        if tag == 'delete':
+            run.font.color.rgb = RGBColor(0, 0, 255)
+            run.font.strike = True
+        elif tag == 'insert':
+            run.font.color.rgb = RGBColor(255, 0, 0)
+
+
+def _find_para_before_for_insert(result_doc, f_idx, f_match, final_paras, orig_paras_len):
+    """查找插入位置的参考段落索引"""
+    search_f = f_idx - 1
+    while search_f >= 0:
+        if not final_paras[search_f]['text']:
+            search_f -= 1
+            continue
+        o = f_match[search_f]
+        if o != -1:
+            if isinstance(o, list):
+                return min(o), search_f
+            return o, search_f
+        search_f -= 1
+    return 0, -1
+
+
+def _output_split_diff_inplace(result_doc, base_para, orig_text, all_f_indices,
+                                final_paras, SENTENCE_SIM_THRESHOLD, font_info):
+    """原地版拆分输出：1原稿段落 → N终稿段落"""
+    combined_final_text = "".join(
+        final_paras[sf]['text'] for sf in all_f_indices
+    )
+
+    diffs = char_level_diff(orig_text, combined_final_text)
+
+    boundaries = []
+    cursor = 0
+    for sf in all_f_indices:
+        sf_text = final_paras[sf]['text']
+        sf_len = len(sf_text)
+        boundaries.append((cursor, cursor + sf_len, sf))
+        cursor += sf_len
+
+    f_pos = 0
+    para_diffs_map = {sf: [] for sf in all_f_indices}
+
+    for tag, text in diffs:
+        if not text:
+            continue
+        text_len = len(text)
+
+        if tag == 'delete':
+            target_sf = _find_boundary(boundaries, f_pos)
+            para_diffs_map[target_sf].append((tag, text))
+        elif tag in ('equal', 'insert'):
+            _split_diff_to_boundaries(para_diffs_map, boundaries, tag, text, f_pos)
+            f_pos += text_len
+
+    # 输出：第一个拆分到 base_para，后续插入新段落
+    first = True
+    insert_after_elem = base_para._element
+    for sf in all_f_indices:
+        sf_diffs = para_diffs_map[sf]
+
+        if first:
+            out_para = base_para
+            _clear_para_runs(out_para)
+            first = False
+        else:
+            piece_text = ""
+            for tag, txt in sf_diffs:
+                piece_text += txt
+            if not piece_text:
+                piece_text = final_paras[sf]['text']
+
+            _create_new_para_elem(
+                insert_after_elem, piece_text, font_info,
+                is_after=True
+            )
+            insert_after_elem = insert_after_elem.getnext()
+            continue
+
+        if not sf_diffs:
+            run = out_para.add_run(final_paras[sf]['text'])
+            _apply_run_font(run, font_info)
+        else:
+            all_equal = all(t == 'equal' for t, _ in sf_diffs)
+            if all_equal:
+                for t, txt in sf_diffs:
+                    run = out_para.add_run(txt)
+                    _apply_run_font(run, font_info)
+            else:
+                for tag, text in sf_diffs:
+                    if not text:
+                        continue
+                    run = out_para.add_run(text)
+                    _apply_run_font(run, font_info)
+                    if tag == 'delete':
+                        run.font.color.rgb = RGBColor(0, 0, 255)
+                        run.font.strike = True
+                    elif tag == 'insert':
+                        run.font.color.rgb = RGBColor(255, 0, 0)
+
+
+def compare_with_python_inplace(original_path, final_path, output_path):
+    """在原稿复制版上开展比对和标记，保留图片、表格、页眉页脚等元素
+
+    流程：
+    1. 文件级拷贝原稿 → output_path
+    2. 段落匹配（贪婪匹配 + 合并/拆分检测 + 逆序对移动检测）
+    3. 在副本上原地标记差异：修改段落文本样式、插入新增段落
+    """
+    import shutil
+
+    try:
+        # 预加载配置
+        SENTENCE_SIM_THRESHOLD, PARA_SIM_THRESHOLD, SHORT_PARA_CHAR_THRESHOLD = load_compare_config()
+
+        # 打开文档（匹配用）
         orig_doc = Document(original_path)
         final_doc = Document(final_path)
-        
-        # 获取段落
+
         orig_paras = get_paragraphs_with_style(orig_doc)
         final_paras = get_paragraphs_with_style(final_doc)
-        
-        # 创建比较结果文档
-        result_doc = Document()
-        set_page(result_doc)
-        clear_styles(result_doc)
-        add_my_styles(result_doc)
-        
-        # 步骤1: 找出完全匹配的段落
+
+        # 拷贝原稿为结果文档
+        shutil.copy2(original_path, output_path)
+        result_doc = Document(output_path)
+
+        # ── 段落匹配 ──
         orig_matched = set()
         final_matched = set()
-        
-        orig_map = {}  # 文本 -> 索引列表
+        orig_map = {}
         final_map = {}
-        
+
         for i, p in enumerate(orig_paras):
             if p['text'] not in orig_map:
                 orig_map[p['text']] = []
             orig_map[p['text']].append(i)
-            
+
         for i, p in enumerate(final_paras):
             if p['text'] not in final_map:
                 final_map[p['text']] = []
             final_map[p['text']].append(i)
-        
-        # 匹配完全相同的段落
+
         for text, indices in final_map.items():
             if text in orig_map:
                 for o_idx in orig_map[text]:
@@ -1002,19 +1342,10 @@ def compare_with_python(original_path, final_path, output_path):
                             orig_matched.add(o_idx)
                             final_matched.add(f_idx)
                             break
-        
-        # 步骤2: 找相似段落（可能是拆分或修改）
-        
-        final_unmatched = [i for i in range(len(final_paras)) if i not in final_matched]
-        
-        # 步骤3: 使用动态规划找最优匹配
-        # f_match[f_idx] = o_idx (匹配的原始段落索引) 或 -1 (新增段落)
+
         f_match = [-1] * len(final_paras)
-        
-        # 标记已匹配的原文档段落
         matched_orig = set()
-        
-        # 1. 完全匹配优先
+
         for text, f_indices in final_map.items():
             if text in orig_map:
                 for o_idx in orig_map[text]:
@@ -1022,120 +1353,79 @@ def compare_with_python(original_path, final_path, output_path):
                         if o_idx not in matched_orig and f_match[f_idx] == -1:
                             f_match[f_idx] = o_idx
                             matched_orig.add(o_idx)
-                            break  # 这个段落已匹配，跳出内层循环
-        
-        # 2. 相似匹配（支持一对多关系的改进算法）
-        # 首先收集所有可能的匹配
+                            break
+
         match_candidates = []
         for f_idx in range(len(final_paras)):
             if f_match[f_idx] != -1:
                 continue
-            
             for o_idx in range(len(orig_paras)):
                 if o_idx in matched_orig:
                     continue
-                
-                ratio = difflib.SequenceMatcher(None,
-                    orig_paras[o_idx]['text'],
-                    final_paras[f_idx]['text']
+                ratio = difflib.SequenceMatcher(
+                    None, orig_paras[o_idx]['text'], final_paras[f_idx]['text']
                 ).ratio()
-                
                 if ratio >= PARA_SIM_THRESHOLD:
-                    # 添加位置接近度权重
                     position_score = 1.0 / (abs(o_idx - f_idx) + 1)
                     total_score = ratio * 0.7 + position_score * 0.3
                     match_candidates.append((total_score, ratio, o_idx, f_idx))
-        
-        # 按总分排序
+
         match_candidates.sort(reverse=True, key=lambda x: x[0])
-        
-        # 处理一对多匹配：允许一个终文档段落匹配多个原文档段落
-        # 但一个原文档段落只能匹配一个终文档段落
+
         for total_score, ratio, o_idx, f_idx in match_candidates:
             if o_idx in matched_orig:
                 continue
-            
-            # 修改：只在完全相同时跳过重复段落，相似匹配应该允许
             f_text = final_paras[f_idx]['text']
             o_text = orig_paras[o_idx]['text']
-            
-            # 如果是完全相同的文本，应用重复段落规则
             if f_text == o_text:
                 f_text_count = sum(1 for p in final_paras if p['text'] == f_text)
-                
                 if f_text_count > 1:
-                    # 检查这个文本是否是第一次出现
                     first_occurrence = True
                     for i in range(f_idx):
                         if final_paras[i]['text'] == f_text:
                             first_occurrence = False
                             break
-                    
                     if not first_occurrence:
-                        # 重复的完全相同的终文档段落，跳过匹配
                         continue
-            
-            # 如果这个终文档段落已经有匹配，检查是否应该添加额外的原文档段落
-            # 修改：更严格的一对多匹配条件，只在真正需要合并时使用
             if f_match[f_idx] != -1:
                 existing_o_idx = f_match[f_idx]
-                
-                # 检查是否应该创建一对多匹配
                 should_create_one_to_many = False
-                
-                # 情况1：已存在一对多匹配，检查是否可以添加
                 if isinstance(existing_o_idx, list):
-                    # 如果与原列表中的段落相邻，可以添加
                     min_idx = min(existing_o_idx)
                     max_idx = max(existing_o_idx)
                     if (min_idx - 1 <= o_idx <= max_idx + 1):
                         should_create_one_to_many = True
-                # 情况2：已存在一对一匹配，检查是否可以升级为一对多
                 else:
-                    # 只允许相邻段落创建一对多匹配，且相似度要足够高
-                    if abs(o_idx - existing_o_idx) == 1 and ratio >= 0.6:  # 更严格的条件
+                    if abs(o_idx - existing_o_idx) == 1 and ratio >= 0.6:
                         should_create_one_to_many = True
-                
                 if should_create_one_to_many:
-                    # 创建一对多匹配关系
                     if isinstance(existing_o_idx, list):
                         f_match[f_idx].append(o_idx)
                     else:
                         f_match[f_idx] = [existing_o_idx, o_idx]
                     matched_orig.add(o_idx)
-                    # print(f"一对多匹配: 终段落[{f_idx}] 匹配 原段落{existing_o_idx}和{o_idx}")
                 else:
-                    # 不创建一对多匹配，让这个原段落匹配其他终段落
                     continue
             else:
-                # 一对一匹配
                 f_match[f_idx] = o_idx
                 matched_orig.add(o_idx)
-        
-        # 步骤2.5: 拆分检测（1原稿段落 → N终稿段落）
-        # o_match[o_idx] = [f_idx1, f_idx2, ...] 反向映射
+
+        # 拆分组反向映射
         o_match = {}
-        split_matched_final = set()  # 已参与拆分组匹配的终稿索引
-        
-        # 步骤2.4: 合并检测（N原稿段落 → 1终稿段落）
-        # 检查已1:1匹配的终稿段落，其匹配的原稿段落相邻位置是否有未匹配的orig段落，
-        # 拼接后是否能更好地匹配终稿文本。这对短段落合并场景尤为重要
-        # （如标题"关于…的" + "通知" → "关于…的通知"）
+        split_matched_final = set()
+
+        # 合并检测
         if True:
-            # 收集所有仍未匹配的orig段落
             unmatched_orig = set()
             for o_i in range(len(orig_paras)):
                 if o_i not in matched_orig:
                     unmatched_orig.add(o_i)
-            
-            # 合并候选：检查每个已1:1匹配的终稿段落
+
             merge_candidates = []
             for f_i in range(len(final_paras)):
                 o_i = f_match[f_i]
                 if o_i == -1 or isinstance(o_i, list):
                     continue
-                
-                # 检查 o_i 相邻位置的未匹配 orig 段落
                 for adjacent_o in [o_i - 1, o_i + 1]:
                     if adjacent_o < 0 or adjacent_o >= len(orig_paras):
                         continue
@@ -1143,76 +1433,53 @@ def compare_with_python(original_path, final_path, output_path):
                         continue
                     if not orig_paras[adjacent_o]['text']:
                         continue
-                    
-                    # 拼接文本（按原稿顺序）
                     if adjacent_o < o_i:
                         combined = orig_paras[adjacent_o]['text'] + orig_paras[o_i]['text']
                     else:
                         combined = orig_paras[o_i]['text'] + orig_paras[adjacent_o]['text']
-                    
                     combined_ratio = difflib.SequenceMatcher(
                         None, combined, final_paras[f_i]['text']
                     ).ratio()
-                    
-                    # 当前单段落匹配的 ratio
                     current_ratio = difflib.SequenceMatcher(
                         None, orig_paras[o_i]['text'], final_paras[f_i]['text']
                     ).ratio()
-                    
-                    # 合并后 ratio 必须高于当前单段落 ratio，且高于阈值
                     if combined_ratio > current_ratio and combined_ratio >= PARA_SIM_THRESHOLD:
-                        # 改进程度
                         improvement = combined_ratio - current_ratio
                         merge_candidates.append((improvement, combined_ratio, o_i, adjacent_o, f_i))
-            
-            # 按改进程度降序排序，贪心处理
+
             merge_candidates.sort(reverse=True, key=lambda x: x[0])
-            
             for improvement, combined_ratio, o_i, adjacent_o, f_i in merge_candidates:
-                # 再次检查：两个 orig 段落是否仍可用
                 if adjacent_o in matched_orig:
                     continue
                 if isinstance(f_match[f_i], list) and adjacent_o in f_match[f_i]:
                     continue
-                
-                # 升级为一对多匹配
                 if isinstance(f_match[f_i], list):
                     f_match[f_i] = sorted(f_match[f_i] + [adjacent_o])
                 else:
                     f_match[f_i] = sorted([o_i, adjacent_o])
                 matched_orig.add(adjacent_o)
-        
-        # 找出仍未匹配的终稿段落
+
+        # 拆分检测
         final_unmatched_after_step2 = [i for i in range(len(final_paras)) if f_match[i] == -1]
-        
         if final_unmatched_after_step2:
-            # 对每个未匹配终稿段落，扫描所有已1:1匹配的原稿段落（不含已在matched_orig中的）
-            # 拆分场景：原稿段落被拆为多个终稿段落，所以原稿段落已被1:1匹配但仍有剩余终稿段落与它相似
             split_candidates = []
             for f_idx in final_unmatched_after_step2:
                 f_text = final_paras[f_idx]['text']
                 if not f_text:
                     continue
-                
                 for o_idx in range(len(orig_paras)):
                     o_text = orig_paras[o_idx]['text']
                     if not o_text:
                         continue
-                    
-                    # 跳过已在拆分组中的原稿段落（避免无限拆分）
                     if o_idx in o_match:
                         continue
-                    
                     ratio = difflib.SequenceMatcher(None, o_text, f_text).ratio()
-                    
                     if ratio >= PARA_SIM_THRESHOLD:
                         position_score = 1.0 / (abs(o_idx - f_idx) + 1)
                         total_score = ratio * 0.7 + position_score * 0.3
                         split_candidates.append((total_score, ratio, o_idx, f_idx))
-            
-            # ---- 拆分升级检测：短段落单句ratio低，但拼接后ratio高 ----
-            # 场景：原稿"华南乳业…仪式致辞" → 终稿段落1"华南乳业…投产" + 终稿段落2"仪式致辞"
-            # 终稿段落2单句ratio=0.32 < 阈值，但与段落1拼接后ratio=1.0 > 当前1:1匹配ratio
+
+            # 拆分升级检测
             split_upgrade_candidates = []
             for f_idx in final_unmatched_after_step2:
                 if f_idx in split_matched_final:
@@ -1220,149 +1487,187 @@ def compare_with_python(original_path, final_path, output_path):
                 f_text = final_paras[f_idx]['text']
                 if not f_text:
                     continue
-                
-                # 检查此终稿段落是否与某个已1:1匹配的终稿段落相邻
                 for adjacent_f in [f_idx - 1, f_idx + 1]:
                     if adjacent_f < 0 or adjacent_f >= len(final_paras):
                         continue
-                    
                     o_i = f_match[adjacent_f]
                     if o_i == -1 or isinstance(o_i, list):
                         continue
-                    
-                    # 相邻终稿段落已1:1匹配到原稿段落 o_i
                     o_text = orig_paras[o_i]['text']
                     if not o_text:
                         continue
-                    
-                    # 拼接终稿文本
                     if adjacent_f < f_idx:
                         combined_final = final_paras[adjacent_f]['text'] + f_text
                     else:
                         combined_final = f_text + final_paras[adjacent_f]['text']
-                    
                     combined_ratio = difflib.SequenceMatcher(None, o_text, combined_final).ratio()
-                    
-                    # 当前1:1匹配的ratio
                     current_ratio = difflib.SequenceMatcher(
                         None, o_text, final_paras[adjacent_f]['text']
                     ).ratio()
-                    
-                    # 拼接ratio必须高于当前1:1匹配ratio，且高于阈值
                     if combined_ratio > current_ratio and combined_ratio >= PARA_SIM_THRESHOLD:
                         improvement = combined_ratio - current_ratio
-                        split_upgrade_candidates.append((improvement, combined_ratio, o_i, adjacent_f, f_idx))
-            
-            # 按改进程度排序
+                        split_upgrade_candidates.append(
+                            (improvement, combined_ratio, o_i, adjacent_f, f_idx)
+                        )
+
             split_upgrade_candidates.sort(reverse=True, key=lambda x: x[0])
-            
             for improvement, combined_ratio, o_i, adjacent_f, f_idx in split_upgrade_candidates:
-                # 再次检查：原稿段落和终稿段落是否仍可用
                 if o_i in o_match:
                     continue
                 if f_idx in split_matched_final:
                     continue
                 if isinstance(f_match[adjacent_f], list) and f_idx in f_match[adjacent_f]:
                     continue
-                
-                # 将已1:1匹配的终稿段落 adjacent_f 和未匹配终稿段落 f_idx 合并为拆分组
-                # 在 o_match 中记录：原稿段落 o_i 拆分为 [adjacent_f, f_idx]
                 o_match[o_i] = [adjacent_f, f_idx]
                 split_matched_final.add(f_idx)
-                # 注意：adjacent_f 已经在 f_match 中匹配了，它的匹配关系保持不变
-                # 输出时会在 o_match 分支中处理拆分组
-            
-            # 按总分排序
+
             split_candidates.sort(reverse=True, key=lambda x: x[0])
-            
-            # 贪心分配：将未匹配终稿段落分配到原稿段落的拆分组
             for total_score, ratio, o_idx, f_idx in split_candidates:
                 if f_idx in split_matched_final:
                     continue
                 if o_idx in o_match and len(o_match[o_idx]) >= 3:
-                    # 限制每个原稿段落最多拆为3个终稿段落
                     continue
-                
-                # 检查终稿段落连续性：同组的终稿段落应相邻
                 if o_idx in o_match:
                     existing_f_indices = o_match[o_idx]
-                    # 新加入的终稿段落必须与组内已有段落相邻
                     if not any(abs(f_idx - ef) == 1 for ef in existing_f_indices):
                         continue
-                
                 if o_idx not in o_match:
                     o_match[o_idx] = []
                 o_match[o_idx].append(f_idx)
                 split_matched_final.add(f_idx)
-        
-        # 步骤2.75: 段落级逆序对检测（段落互换/重排）
-        # 检测一对一匹配中是否存在原稿位置与终稿位置顺序不一致的配对
-        # 互换处理：
-        #   - 向后移的段落（原在前、后来在后）：原位输出蓝色删除整段（占位标记）
-        #   - 向前移的段落（原在后、后来在前）：终稿位置正常做 sentence_level_diff
-        #   - 终稿新位的向后移段落：也正常做 sentence_level_diff，保留内部差异
-        moved_para_orig_set = set()       # 向后移的原稿段落索引（原位输出蓝删占位）
-        forward_moved_para_orig_set = set()  # 向前移的原稿段落索引
-        
-        # 收集所有一对一匹配的配对
-        para_pairs = []  # [(o_idx, f_idx), ...]
+
+        # 段落级逆序对检测（段落互换/重排）
+        moved_para_orig_set = set()
+        forward_moved_para_orig_set = set()
+
+        para_pairs = []
         for f_i in range(len(final_paras)):
             o_i = f_match[f_i]
             if o_i != -1 and not isinstance(o_i, list):
                 para_pairs.append((o_i, f_i))
-        
-        # 按 o_idx 排序，检测逆序对
+
         para_pairs_sorted = sorted(para_pairs, key=lambda x: x[0])
         for i in range(len(para_pairs_sorted)):
             for j in range(i + 1, len(para_pairs_sorted)):
                 if para_pairs_sorted[i][1] > para_pairs_sorted[j][1]:
-                    # 交叉：orig_i 在前但 final_i 在后 → orig_i 向后移
                     moved_para_orig_set.add(para_pairs_sorted[i][0])
                     forward_moved_para_orig_set.add(para_pairs_sorted[j][0])
-        
-        # 3. 按终文档顺序输出 - 修复删除段落顺序问题
-        processed_orig = set()  # 已处理的原文档段落索引
-        next_orig_idx = 0  # 下一个待处理的原文档段落索引
-        outputted_split_final = set()  # 已通过拆分组输出的终稿段落索引
-        
+
+        # ── 至此，匹配逻辑完成，开始原地标记 ──
+
+        # 预收集所有原稿段落的字体信息
+        orig_font_info = [_get_para_font_info(p) for p in orig_doc.paragraphs]
+
+        # 快照结果文档中的段落对象（用于原地修改，不受后续插入影响）
+        result_paras = list(result_doc.paragraphs)
+
+        processed_orig = set()
+        next_orig_idx = 0
+        outputted_split_final = set()
+
         for f_idx in range(len(final_paras)):
             o_idx = f_match[f_idx]
             final_text = final_paras[f_idx]['text']
-            
-            # 终稿为空段落 → 保留空段落
-            if not final_text:
-                result_doc.add_paragraph()
-                continue
-            
-            # 跳过已在拆分组中输出的终稿段落
+
             if f_idx in outputted_split_final:
                 continue
-            
+
+            # 确定目标原稿索引
             if o_idx == -1:
-                # 新增段落
-                p = result_doc.add_paragraph()
-                run = p.add_run(final_text)
-                run.font.color.rgb = RGBColor(255, 0, 0)
+                target_o = len(orig_paras)
+            elif isinstance(o_idx, list):
+                target_o = min(o_idx)
             else:
-                # 处理一对多匹配（合并：N原稿 → 1终稿）
-                if isinstance(o_idx, list):
-                    # 先输出 o_idx 列表中第一个索引之前的未处理段落（删除的）
-                    first_o_idx = min(o_idx)
-                    while next_orig_idx < first_o_idx:
-                        # 检查这个段落是否已经被匹配
-                        if next_orig_idx not in matched_orig:
-                            orig_del_text = orig_paras[next_orig_idx]['text']
-                            if orig_del_text:
-                                p = result_doc.add_paragraph()
-                                run = p.add_run(orig_del_text)
-                                run.font.color.rgb = RGBColor(0, 0, 255)
-                                run.font.strike = True
+                target_o = o_idx
+
+            # ── 新增段落（终稿独有）：红前蓝后 ──
+            if o_idx == -1:
+                ref_o_idx, _ = _find_para_before_for_insert(
+                    result_doc, f_idx, f_match, final_paras, len(orig_paras)
+                )
+                if ref_o_idx is not None and ref_o_idx < len(orig_font_info):
+                    insert_font = orig_font_info[ref_o_idx]
+                else:
+                    insert_font = orig_font_info[0] if orig_font_info else {
+                        'name': '仿宋', 'eastAsia': '仿宋', 'size': Pt(16), 'bold': None
+                    }
+
+                if not final_text:
+                    if next_orig_idx < len(result_paras):
+                        _create_new_para_elem(
+                            result_paras[next_orig_idx]._element,
+                            '', insert_font, None,
+                            is_after=False
+                        )
+                    else:
+                        new_p = result_doc.add_paragraph('')
+                        _apply_para_format_from_last(result_doc, new_p)
+                else:
+                    if next_orig_idx < len(result_paras):
+                        _create_new_para_elem(
+                            result_paras[next_orig_idx]._element,
+                            final_text, insert_font, RGBColor(255, 0, 0),
+                            is_after=False
+                        )
+                    else:
+                        new_p = result_doc.add_paragraph()
+                        _apply_para_format_from_last(result_doc, new_p)
+                        run = new_p.add_run(final_text)
+                        run.font.color.rgb = RGBColor(255, 0, 0)
+                        _apply_run_font(run, insert_font)
+
+                # 蓝后：处理删除段落
+                while next_orig_idx < target_o:
+                    if next_orig_idx not in processed_orig:
+                        if next_orig_idx in moved_para_orig_set:
+                            _set_para_red_with_deletion(
+                                result_paras[next_orig_idx],
+                                orig_paras[next_orig_idx]['text'],
+                                orig_font_info[next_orig_idx]
+                            )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        elif next_orig_idx not in matched_orig:
+                            _set_para_red_with_deletion(
+                                result_paras[next_orig_idx],
+                                orig_paras[next_orig_idx]['text'],
+                                orig_font_info[next_orig_idx]
+                            )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        else:
+                            break
+                    else:
                         next_orig_idx += 1
-                    
-                    # 合并多个原文档段落与一个终文档段落对比
-                    p = result_doc.add_paragraph()
-                    
-                    # 合并所有原文档段落的文本
+
+            # 非新增段落
+            else:
+                # 步骤A: 处理当前匹配前的删除段落
+                while next_orig_idx < target_o:
+                    if next_orig_idx not in processed_orig:
+                        if next_orig_idx in moved_para_orig_set:
+                            _set_para_red_with_deletion(
+                                result_paras[next_orig_idx],
+                                orig_paras[next_orig_idx]['text'],
+                                orig_font_info[next_orig_idx]
+                            )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        elif next_orig_idx not in matched_orig:
+                            _set_para_red_with_deletion(
+                                result_paras[next_orig_idx],
+                                orig_paras[next_orig_idx]['text'],
+                                orig_font_info[next_orig_idx]
+                            )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        else:
+                            break
+                    else:
+                        next_orig_idx += 1
+
+                # B2: N→1 合并段落
+                if isinstance(o_idx, list):
                     combined_orig_text = ""
                     for idx in o_idx:
                         if idx not in processed_orig:
@@ -1370,98 +1675,90 @@ def compare_with_python(original_path, final_path, output_path):
                             processed_orig.add(idx)
                             if idx >= next_orig_idx:
                                 next_orig_idx = idx + 1
-                    
-                    # 进行对比
-                    sentence_level_diff(combined_orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
+
+                    first_o = min(o_idx)
+                    p = result_paras[first_o]
+                    _clear_para_runs(p)
+                    font_info = orig_font_info[first_o]
+
+                    sentence_level_diff(combined_orig_text, final_text, p, SENTENCE_SIM_THRESHOLD,
+                                         SHORT_PARA_CHAR_THRESHOLD)
+                    for r in p.runs:
+                        _apply_run_font(r, font_info)
+
+                    for extra_o in sorted(o_idx):
+                        if extra_o != first_o and extra_o < len(result_paras):
+                            _clear_para_runs(result_paras[extra_o])
+                            if orig_paras[extra_o]['text']:
+                                run = result_paras[extra_o].add_run(
+                                    orig_paras[extra_o]['text']
+                                )
+                                run.font.color.rgb = RGBColor(0, 0, 255)
+                                run.font.strike = True
+                                _apply_run_font(run, orig_font_info[extra_o])
+
+                # B3: 一对一匹配
                 else:
-                    # 一对一匹配 - 先输出 o_idx 之前的未处理段落
-                    while next_orig_idx < o_idx:
-                        if next_orig_idx in processed_orig:
-                            next_orig_idx += 1
-                            continue
-                        if next_orig_idx in moved_para_orig_set:
-                            # 向后移的段落 → 原位输出蓝色删除整段（占位标记）
-                            orig_del_text = orig_paras[next_orig_idx]['text']
-                            if orig_del_text:
-                                p = result_doc.add_paragraph()
-                                run = p.add_run(orig_del_text)
-                                run.font.color.rgb = RGBColor(0, 0, 255)
-                                run.font.strike = True
-                            processed_orig.add(next_orig_idx)
-                        elif next_orig_idx not in matched_orig:
-                            # 未匹配的原稿段落 → 蓝色删除
-                            orig_del_text = orig_paras[next_orig_idx]['text']
-                            if orig_del_text:
-                                p = result_doc.add_paragraph()
-                                run = p.add_run(orig_del_text)
-                                run.font.color.rgb = RGBColor(0, 0, 255)
-                                run.font.strike = True
-                            processed_orig.add(next_orig_idx)
-                        # 顺序不变的已匹配段落（forward_moved也在matched_orig中），
-                        # 不在原位输出，会在其终稿位置正常输出
-                        next_orig_idx += 1
-                    
-                    if o_idx in processed_orig and o_idx not in moved_para_orig_set:
-                        # 如果这个原始段落已经被处理过，且不是向后移的段落，就当作新增段落处理
-                        p = result_doc.add_paragraph()
-                        run = p.add_run(final_text)
-                        run.font.color.rgb = RGBColor(255, 0, 0)
-                    elif o_idx in moved_para_orig_set:
-                        # 向后移的段落：蓝删占位已在原位输出，终稿新位正常做diff保留内部差异
-                        # 注意：processed_orig 已在 while 循环中添加了 o_idx，这里不再重复添加
-                        next_orig_idx = max(next_orig_idx, o_idx + 1)
+                    if o_idx in moved_para_orig_set:
                         orig_text = orig_paras[o_idx]['text']
-                        p = result_doc.add_paragraph()
-                        sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
+                        font_info = orig_font_info[o_idx]
+
+                        p_new = result_doc.add_paragraph()
+                        _apply_para_format_from_last(result_doc, p_new)
+                        sentence_level_diff(orig_text, final_text, p_new, SENTENCE_SIM_THRESHOLD,
+                                             SHORT_PARA_CHAR_THRESHOLD)
+                        for r in p_new.runs:
+                            _apply_run_font(r, font_info)
+
+                        if next_orig_idx < len(result_paras):
+                            target_elem = result_paras[next_orig_idx]._element
+                            parent = target_elem.getparent()
+                            parent.insert(list(parent).index(target_elem), p_new._element)
                     else:
-                        # 处理当前匹配的段落
                         processed_orig.add(o_idx)
-                        next_orig_idx = o_idx + 1
-                        
+                        next_orig_idx = max(next_orig_idx, o_idx + 1)
+
                         orig_text = orig_paras[o_idx]['text']
-                        
-                        # 检查拆分组：1原稿 → N终稿
+                        p = result_paras[o_idx]
+                        font_info = orig_font_info[o_idx]
+
                         if o_idx in o_match:
-                            # 收集该原稿段落的所有终稿段落（包括1:1匹配的主段落 + 拆分组）
                             split_f_indices = sorted(o_match[o_idx])
-                            # 主段落 f_idx 在前，拆分组附加在后，按终稿顺序排列
                             all_f_indices = [f_idx] + [sf for sf in split_f_indices if sf != f_idx]
-                            
-                            # 按终稿段落边界切割字符级 diff，分别输出
-                            _output_split_diff(
-                                result_doc, orig_text, all_f_indices, 
-                                final_paras, SENTENCE_SIM_THRESHOLD
+
+                            _clear_para_runs(p)
+                            _output_split_diff_inplace(
+                                result_doc, p, orig_text, all_f_indices,
+                                final_paras, SENTENCE_SIM_THRESHOLD, font_info
                             )
-                            
-                            # 标记拆分组终稿段落为已输出
+
                             for sf in all_f_indices:
                                 if sf != f_idx:
                                     outputted_split_final.add(sf)
-                        
-                        elif orig_text == final_text and o_idx not in moved_para_orig_set and o_idx not in forward_moved_para_orig_set:
-                            # 文本完全相同且非移动段落 → 直接输出
-                            result_doc.add_paragraph(orig_text)
+
+                        elif orig_text == final_text and o_idx not in moved_para_orig_set \
+                                and o_idx not in forward_moved_para_orig_set:
+                            pass
                         else:
-                            # 有差异，或是移动段落 → 走 sentence_level_diff
-                            # 移动段落的蓝删占位已在原位输出，终稿新位正常做diff保留内部差异
-                            p = result_doc.add_paragraph()
-                            sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD)
-        
-        # 4. 输出剩余的删除段落（跳过空段落和已处理的移动段落）
+                            _clear_para_runs(p)
+                            sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD,
+                                                 SHORT_PARA_CHAR_THRESHOLD)
+                            for r in p.runs:
+                                _apply_run_font(r, font_info)
+
+        # 步骤C: 处理剩余的删除段落
         while next_orig_idx < len(orig_paras):
-            # 检查这个段落是否已经被匹配或已处理
-            if next_orig_idx not in matched_orig and next_orig_idx not in processed_orig:
-                orig_del_text = orig_paras[next_orig_idx]['text']
-                if orig_del_text:
-                    p = result_doc.add_paragraph()
-                    run = p.add_run(orig_del_text)
-                    run.font.color.rgb = RGBColor(0, 0, 255)
-                    run.font.strike = True
+            if next_orig_idx not in processed_orig and next_orig_idx not in matched_orig:
+                _set_para_red_with_deletion(
+                    result_paras[next_orig_idx],
+                    orig_paras[next_orig_idx]['text'],
+                    orig_font_info[next_orig_idx]
+                )
             next_orig_idx += 1
-        
+
         result_doc.save(output_path)
-        return True, "短句级比对"
-        
+        return True, "短句级比对（原地）"
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1522,7 +1819,7 @@ def main(workdir, original_path=None, final_path=None):
     output_name = f"对比标注-{os.path.basename(original)}"
     print("开始比较...")
     
-    success, result_msg = compare_with_python(original, final, os.path.join(workdir, output_name))
+    success, result_msg = compare_with_python_inplace(original, final, os.path.join(workdir, output_name))
     
     if success:
         print(f"方法: {result_msg}")

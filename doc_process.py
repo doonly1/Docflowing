@@ -77,9 +77,10 @@ def doc_to_docx(workdir):
         word.Visible = False
         for file in doc_files:
             print('转化docx：{}'.format(file))
-            file_path = os.path.join(workdir, file)
+            file_path = os.path.abspath(os.path.normpath(os.path.join(workdir, file)))
             doc = word.Documents.Open(file_path)
-            doc.SaveAs("{}x".format(file_path), 12)
+            new_path = os.path.abspath(os.path.normpath(file_path + "x"))
+            doc.SaveAs(new_path, 12)
             doc.Close()
             try:
                 os.remove(file_path)
@@ -87,7 +88,8 @@ def doc_to_docx(workdir):
                 pass
         word.Quit()
         return
-    except Exception:
+    except Exception as e:
+        print(e)
         pass  # win32com 不可用，回退到 LibreOffice
 
     # 尝试 LibreOffice

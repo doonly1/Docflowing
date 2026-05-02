@@ -29,16 +29,49 @@ def _make_text_run(text):
     return parse_xml('<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:t xml:space="preserve">%s</w:t></w:r>' % text)
 
 
-def set_page_number(doc):
-    """
-    用 python-docx 替代 win32 COM
-    "- 页 -" 域。
-    只需在第一个 section 的 footer 添加，其余节通过 is_linked_to_previous 自动继承。
-    """
-    section = doc.sections[0]
-    footer = section.footer
+def _clear_footer(footer):
+    """清除页脚中所有段落内容。"""
+    for p_elem in footer._element.findall(qn('w:p')):
+        footer._element.remove(p_elem)
 
-    # 确保 footer 有段落可承接内容
+
+def add_page_number_single(file_path):
+    """为单个文件添加页码（设置页面→添加样式→插入页码→保存）
+
+    若是 .doc 文件会先转换为 .docx；
+    若文件名非数字前缀，会先另存为数字前缀文件再添加页码，不覆盖原文件。
+    """
+    workdir = os.path.dirname(file_path)
+
+    # .doc 文件先转换为 .docx
+    if file_path.lower().endswith('.doc') and not file_path.lower().endswith('.docx'):
+        doc_to_docx(workdir)
+        file_path = os.path.splitext(file_path)[0] + '.docx'
+        if not os.path.exists(file_path):
+            print(f'转换失败：{os.path.basename(file_path)}')
+            return
+
+    # 非数字前缀文件需另存，避免覆盖原文件
+    basename = os.path.basename(file_path)
+    if not basename[:4].isdigit():
+        doc = Document(file_path)
+        save_path = save_docx(doc, basename, workdir)
+        if not save_path:
+            print(f'另存失败：{basename}')
+            return
+        file_path = save_path
+
+    # 添加页码
+    doc = Document(file_path)
+    add_my_styles(doc)
+
+    # 清除首页页脚、禁用奇偶页不同
+    _clear_footer(doc.sections[0].footer)
+    doc.settings.odd_and_even_pages_header_footer = False
+    for section in doc.sections:
+        section.footer.is_linked_to_previous = True
+
+    footer = doc.sections[0].footer
     if not footer.paragraphs:
         footer.add_paragraph()
     para = footer.paragraphs[0]
@@ -49,45 +82,29 @@ def set_page_number(doc):
     except Exception:
         pass
 
-    # 如果段落已有内容，先加空格分隔
-    if para.text:
-        para.add_run('  ')
-
     # "- 1 -" 格式
     para._p.append(_make_text_run('- '))
     para._p.append(_make_page_field())
     para._p.append(_make_text_run(' -'))
 
+    doc.save(file_path)
+    print(f'添加页码：{os.path.basename(file_path)} 成功。')
+
 
 def add_page_numbers(workdir):
+    """为目录中所有 docx 文件添加页码（含 .doc 转换、另存、页码插入均由 add_page_number_single 完成）"""
     doc_to_docx(workdir)
     files = [f for f in os.listdir(workdir)
-            if f.lower().endswith('.docx') and not f.startswith("~$")
-            and not re.match(r'^\d{4}_', f)]
+             if f.lower().endswith('.docx') and not f.startswith("~$")]
 
     for file in files:
-        doc = Document(os.path.join(workdir, file))
-        save_docx(doc, file, workdir)
-    digit_files = [f for f in os.listdir(workdir)
-                   if f.lower().endswith('.docx') and f[:4].isdigit()]
-
-    # 对数字前缀文件添加页码
-    for file in digit_files:
-        print('添加页码：', file, end='  ')
-        file_path = os.path.join(workdir, file)
-
-        doc = Document(file_path)
-        set_page(doc)
-        add_my_styles(doc)
-        set_page_number(doc)
-        doc.save(file_path)
-        print('成功。')
+        add_page_number_single(os.path.join(workdir, file))
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) > 1:
-        workdir = sys.argv[1]
-    else:
-        workdir = os.path.dirname(__file__)
-    add_page_numbers(workdir)
-
+    paths = sys.argv[1:] if len(sys.argv) > 1 else [os.path.dirname(__file__)]
+    for path in paths:
+        if os.path.isfile(path):
+            add_page_number_single(path)
+        elif os.path.isdir(path):
+            add_page_numbers(path)

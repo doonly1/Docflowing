@@ -15,6 +15,9 @@ __pycache__/
 ~$*
 temp*
 
+# 工作区缓存
+workspaces/
+
 # 其他
 /.*/
 !/.git/

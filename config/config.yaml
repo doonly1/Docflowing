@@ -8,5 +8,6 @@
 compare:
   sentence_similarity_threshold: 0.40
   para_similarity_threshold: 0.40
+  short_para_char_threshold: 50
 
 last_workdir: ""

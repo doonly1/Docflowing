@@ -113,10 +113,6 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
 
 
 def build_index(workdir):
-    try:
-        doc_to_docx(workdir)
-    except Exception as e:
-        print(f"  docx转换失败: {e}")
     print(f"正在扫描目录: {workdir}")
     file_info_list = collect_file_info(workdir)
     create_excel(file_info_list, workdir, 'file_index.xlsx')
