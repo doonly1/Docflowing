@@ -928,18 +928,25 @@
             }
         }
 
-        // 远程模式：上传文件夹中的所有文件
+        // 远程模式：上传文件夹中的所有文件（或构建索引时仅上传元数据）
         async function handleRemoteUpload(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
             const progress = document.getElementById('uploadProgress');
             progress.style.display = 'block';
+            progress.innerHTML = '正在处理...';
+
+            // 构建索引模式：只上传元数据，不上传文件内容
+            if (currentTool === 'to_index') {
+                await handleIndexMetadataOnly(files, progress);
+                return;
+            }
+
             progress.innerHTML = '正在上传 <span id="uploadCount">0</span> 个文件...';
 
             const extensions = {
                 'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
-                'to_index': [],
                 'to_compare': ['.docx', '.doc'],
                 'to_pdf': ['.docx', '.doc'],
                 'to_pageNum': ['.docx', '.doc'],
@@ -968,7 +975,7 @@
 
             // 带超时的 fetch（60 秒）
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
 
             try {
                 const response = await fetch('/upload_files', {
@@ -997,6 +1004,67 @@
                 }
                 progress.innerHTML = `<span style="color: #dc3545;">✗ 上传失败: ${msg}</span>`;
                 console.error('Upload error:', error);
+            }
+        }
+
+        // 构建索引专用：只上传元数据，不上传文件内容
+        async function handleIndexMetadataOnly(files, progress) {
+            progress.innerHTML = '正在提取文件信息...';
+
+            // 提取文件夹名称（从第一个文件的 webkitRelativePath 获取）
+            let folderName = 'unknown';
+            const metadataList = [];
+            
+            for (const file of files) {
+                // 获取相对路径（如 "folderName/sub/file.docx"）
+                const relativePath = file.webkitRelativePath || file.name;
+                const pathParts = relativePath.split('/');
+                
+                // 第一层为文件夹名
+                if (pathParts.length > 1 && folderName === 'unknown') {
+                    folderName = pathParts[0];
+                }
+
+                // 提取元数据（不读取文件内容）
+                metadataList.push({
+                    name: pathParts[pathParts.length - 1],
+                    path: relativePath,
+                    size: file.size,
+                    lastModified: file.lastModified
+                });
+            }
+
+            if (metadataList.length === 0) {
+                progress.innerHTML = '<span style="color: #dc3545;">✗ 未找到文件</span>';
+                setTimeout(() => { progress.style.display = 'none'; }, 3000);
+                return;
+            }
+
+            progress.innerHTML = `正在索引 ${metadataList.length} 个文件...`;
+
+            try {
+                const response = await fetch('/build_index_from_metadata', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        metadata: metadataList,
+                        folder_name: folderName,
+                        client_id: getClientId()
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    progress.innerHTML = `<span style="color: #28a745;">✓ 索引完成，共 ${data.file_count} 个文件</span>`;
+                    // 刷新文件列表以显示生成的索引文件
+                    await loadFileList(null, currentTool);
+                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
+                } else {
+                    throw new Error(data.message || '索引生成失败');
+                }
+            } catch (error) {
+                progress.innerHTML = `<span style="color: #dc3545;">✗ 索引失败: ${error.message}</span>`;
+                console.error('Index error:', error);
             }
         }
 
