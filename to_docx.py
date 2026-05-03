@@ -6,6 +6,10 @@
 
 import os
 import re
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def merge_lines_to_paragraphs(lines, char_positions=None):
@@ -260,10 +264,10 @@ def extract_text(file_path):
         return None
     
     try:
-        print(f"正在提取: {filename}")
+        logger.info("正在提取: %s", filename)
         return extractors[ext](file_path)
     except Exception as e:
-        print(f"  提取失败: {e}")
+        logger.error("  提取失败: %s", e)
         return None
 
 
@@ -314,16 +318,16 @@ def convert_folder(workdir):
     )]
     skipped = original_count - len(files)
     if skipped > 0:
-        print(f"已跳过 {skipped} 可能处理过的docx文件")
+        logger.info("已跳过 %s 可能处理过的docx文件", skipped)
     
     if not files:
-        print("未找到支持的文档文件 (pdf/doc/docx/txt/html/md)")
+        logger.warning("未找到支持的文档文件 (pdf/doc/docx/txt/html/md)")
         return
     
     success_count = sum(generate_docx(os.path.join(workdir, f)) for f in files)
     
-    print(f"{'='*50}")
-    print(f"转换完成: 成功 {success_count}, 失败 {len(files) - success_count}")
+    logger.info("%s", '=' * 50)
+    logger.info("转换完成: 成功 %s, 失败 %s", success_count, len(files) - success_count)
 
 
 if __name__ == '__main__':

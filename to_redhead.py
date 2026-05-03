@@ -7,6 +7,10 @@ from mystyle import add_my_styles, para_fm, run_fm, set_page
 from float_picture import parse_xml, nsdecls, add_float_picture
 from load_config import load_user_config
 from doc_process import save_docx
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def apply_font_scaling(run, scaling):
@@ -26,7 +30,7 @@ def apply_font_scaling(run, scaling):
         w_elem = parse_xml('<w:w {} w:val="%d"/>'.format(nsdecls('w')) % scaling)
         rPr.append(w_elem)
     except Exception as e:
-        print(f'字体缩放失败: {e}')
+        logger.warning('字体缩放失败: %s', e)
 
 
 def find_signature(paras):
@@ -62,7 +66,7 @@ def add_seal_single(file_path):
         doc = Document(file_path)
         save_path = save_docx(doc, basename, workdir)
         if not save_path:
-            print(f'另存失败：{basename}')
+            logger.error('另存失败：%s', basename)
             return
         file_path = save_path
         basename = os.path.basename(file_path)
@@ -73,7 +77,7 @@ def add_seal_single(file_path):
     add_my_styles(doc)
 
     # 添加印章
-    print(f'▼添加印章：{basename}')
+    logger.info('▼添加印章：%s', basename)
     signature, date_para = find_signature(paras)
     picture_name = get_stamp_path(signature)
     if date_para and picture_name:
@@ -94,7 +98,7 @@ def add_seal_single(file_path):
                                 pos_x=Pt(seal_x), pos_y=Pt(seal_y),
                                 pos_h_relative='margin', pos_v_relative='paragraph')
         except Exception as e:
-            print(f'失败：{e}')
+            logger.error('印章添加失败：%s', e)
             
     #套红并缩放
     para = paras[0].insert_paragraph_before(style='H0')   #最前段插入发文单位
@@ -119,7 +123,7 @@ def add_seal_single(file_path):
         '<w:bottom w:val="single" w:sz="12" w:space="5" w:color="FF0000"/>' +
         '</w:pBdr>'
     ))
-    print(f'文号：{wenhao}')
+    logger.info('文号：%s', wenhao)
 
     para = paras[0].insert_paragraph_before(style='Fangsong')   #插入空行
     para_fm(para,0,0,28.95,0,0,0,'C')
@@ -128,7 +132,7 @@ def add_seal_single(file_path):
     #文档保存docx
     save_path = os.path.join(workdir, str(wenhao)+basename[4:])
     doc.save(save_path)
-    print('文档已保存：', os.path.normpath(save_path))
+    logger.info('文档已保存：%s', os.path.normpath(save_path))
 
 
 def add_seal(workdir):

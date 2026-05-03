@@ -10,12 +10,32 @@ import json
 import uuid
 import yaml
 import shutil
-from flask import Flask, request, jsonify
+import hashlib
+import secrets
+from functools import wraps
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 
+from logging_config import setup_logging, set_request_id, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
+
+
+@app.before_request
+def _capture_request_id():
+    req_id = request.headers.get('X-Request-Id') or str(uuid.uuid4())
+    set_request_id(req_id)
+    g.request_id = req_id
+
+
+@app.after_request
+def _inject_request_id(response):
+    response.headers['X-Request-Id'] = g.get('request_id', '')
+    return response
 
 # 上传限制
 MAX_FILE_SIZE = 50 * 1024 * 1024       # 单文件最大 50MB
@@ -35,30 +55,96 @@ TOOL_SCRIPTS = {
     'to_redhead': 'to_redhead.py'
 }
 
-# ==================== 用户配置持久化（client_id 方案） ====================
+# ==================== Token 认证系统 ====================
+
+SECRET_KEY = os.environ.get('DOCPROC_SECRET', secrets.token_hex(32))
+
+def _get_auth_data_dir():
+    auth_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth')
+    os.makedirs(auth_dir, exist_ok=True)
+    return auth_dir
+
+def _get_users_path():
+    return os.path.join(_get_auth_data_dir(), 'users.json')
+
+def _get_tokens_path():
+    return os.path.join(_get_auth_data_dir(), 'tokens.json')
+
+def _load_json(path):
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_json(path, data):
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _hash_password(password: str) -> str:
+    salt = os.urandom(16).hex()
+    pwd_hash = hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
+    return f'{salt}${pwd_hash}'
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        salt, pwd_hash = stored.split('$', 1)
+        computed = hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
+        return computed == pwd_hash
+    except Exception:
+        return False
+
+def _generate_token() -> str:
+    return secrets.token_hex(32)
+
+def _get_user_id_from_token(token: str) -> str or None:
+    tokens = _load_json(_get_tokens_path())
+    return tokens.get(token)
+
+def _login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        token = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+        elif auth_header:
+            token = auth_header
+
+        if not token:
+            data = request.get_json(silent=True) or {}
+            token = data.get('token') or data.get('client_id')
+
+        if not token:
+            return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+        user_id = _get_user_id_from_token(token)
+        if not user_id:
+            return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
+
+        kwargs['_user_id'] = user_id
+        return f(*args, **kwargs)
+    return decorated
+
+# ==================== 用户配置持久化（按用户隔离） ====================
 
 def _get_config_base_dir():
-    """获取用户配置根目录"""
     config_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc')
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 
+def _get_user_config_dir():
+    users_dir = os.path.join(_get_config_base_dir(), 'users')
+    os.makedirs(users_dir, exist_ok=True)
+    return users_dir
 
-def _get_client_config_dir():
-    """获取客户端配置目录"""
-    clients_dir = os.path.join(_get_config_base_dir(), 'clients')
-    os.makedirs(clients_dir, exist_ok=True)
-    return clients_dir
+def _get_user_config_path(user_id):
+    return os.path.join(_get_user_config_dir(), f'{user_id}.yaml')
 
-
-def _get_client_config_path(client_id):
-    """获取指定 client_id 的配置文件路径"""
-    return os.path.join(_get_client_config_dir(), f'{client_id}.yaml')
-
-
-def _ensure_client_config(client_id):
-    """确保 client_id 对应的配置存在，不存在则从模板创建"""
-    config_path = _get_client_config_path(client_id)
+def _ensure_user_config(user_id):
+    config_path = _get_user_config_path(user_id)
     if not os.path.exists(config_path):
         template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      'config', 'config.yaml')
@@ -74,33 +160,25 @@ def _ensure_client_config(client_id):
                 yaml.dump({}, f, allow_unicode=True, default_flow_style=False)
     return config_path
 
+# ==================== Workspace 管理（按用户隔离） ====================
 
-# ==================== Workspace 管理（client_id 隔离） ====================
-
-def _get_workspace_dir(client_id):
-    """获取 client_id 对应的 workspace 根目录"""
+def _get_workspace_dir(user_id):
     ws_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          'workspaces', client_id)
+                          'workspaces', user_id)
     return ws_dir
 
-
-def _get_workspace_workdir(client_id):
-    """获取 workspace 的统一工作目录（上传原始文件 + 处理结果混在一起）"""
-    workdir = os.path.join(_get_workspace_dir(client_id), 'workdir')
+def _get_workspace_workdir(user_id):
+    workdir = os.path.join(_get_workspace_dir(user_id), 'workdir')
     os.makedirs(workdir, exist_ok=True)
     return workdir
 
-
-def _get_workspace_resources_dir(client_id):
-    """获取 workspace 的资源目录（印章等用户资源）"""
-    res_dir = os.path.join(_get_workspace_dir(client_id), 'resources', 'stamps')
+def _get_workspace_resources_dir(user_id):
+    res_dir = os.path.join(_get_workspace_dir(user_id), 'resources', 'stamps')
     os.makedirs(res_dir, exist_ok=True)
     return res_dir
 
-
-def _update_workspace_activity(client_id):
-    """更新 workspace 的活动时间戳"""
-    ws_dir = _get_workspace_dir(client_id)
+def _update_workspace_activity(user_id):
+    ws_dir = _get_workspace_dir(user_id)
     touch_file = os.path.join(ws_dir, '.last_active')
     try:
         os.makedirs(ws_dir, exist_ok=True)
@@ -152,6 +230,108 @@ def _get_tool_extensions(tool):
 def index():
     return app.send_static_file('index.html')
 
+# ==================== 认证 API ====================
+
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': '请求数据不能为空'})
+
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '').strip()
+
+    if not username:
+        return jsonify({'success': False, 'message': '用户名不能为空'})
+    if len(username) < 2 or len(username) > 32:
+        return jsonify({'success': False, 'message': '用户名长度为 2-32 个字符'})
+    if not password or len(password) < 6:
+        return jsonify({'success': False, 'message': '密码至少 6 个字符'})
+
+    users = _load_json(_get_users_path())
+    for uid, uinfo in users.items():
+        if uinfo.get('username') == username:
+            return jsonify({'success': False, 'message': '用户名已存在'})
+
+    user_id = str(uuid.uuid4())
+    users[user_id] = {
+        'username': username,
+        'password': _hash_password(password),
+        'created_at': time.time()
+    }
+    _save_json(_get_users_path(), users)
+
+    token = _generate_token()
+    tokens = _load_json(_get_tokens_path())
+    tokens[token] = user_id
+    _save_json(_get_tokens_path(), tokens)
+
+    _ensure_user_config(user_id)
+
+    return jsonify({
+        'success': True,
+        'token': token,
+        'username': username,
+        'message': '注册成功'
+    })
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': '请求数据不能为空'})
+
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '').strip()
+
+    if not username or not password:
+        return jsonify({'success': False, 'message': '用户名和密码不能为空'})
+
+    users = _load_json(_get_users_path())
+    user_id = None
+    for uid, uinfo in users.items():
+        if uinfo.get('username') == username:
+            if _verify_password(password, uinfo.get('password', '')):
+                user_id = uid
+            break
+
+    if not user_id:
+        return jsonify({'success': False, 'message': '用户名或密码错误'})
+
+    token = _generate_token()
+    tokens = _load_json(_get_tokens_path())
+    tokens[token] = user_id
+    _save_json(_get_tokens_path(), tokens)
+
+    _ensure_user_config(user_id)
+
+    return jsonify({
+        'success': True,
+        'token': token,
+        'username': username,
+        'message': '登录成功'
+    })
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    elif auth_header:
+        token = auth_header
+
+    if not token:
+        data = request.get_json(silent=True) or {}
+        token = data.get('token') or data.get('client_id')
+
+    if token:
+        tokens = _load_json(_get_tokens_path())
+        tokens.pop(token, None)
+        _save_json(_get_tokens_path(), tokens)
+
+    return jsonify({'success': True, 'message': '已退出登录'})
+
 # 请求体过大处理
 @app.errorhandler(413)
 def request_entity_too_large(error):
@@ -162,23 +342,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 @app.route('/list_files', methods=['POST'])
-def api_list_files():
-    """列出目录中的文档文件
-
-    支持本地模式和远程模式：
-    - 本地模式：workdir 为服务端本地路径
-    - 远程模式：client_id 映射到 workspace workdir
-    """
+@_login_required
+def api_list_files(_user_id=None):
     data = request.get_json()
     workdir = data.get('workdir')
     tool = data.get('tool', 'to_docx')
-    client_id = data.get('client_id')
+    token = data.get('token') or data.get('client_id')
     show_all = data.get('show_all', False)
 
-    # 远程模式：用 client_id 获取 workspace 工作目录
-    if client_id:
-        _update_workspace_activity(client_id)
-        workdir = _get_workspace_workdir(client_id)
+    if not workdir and (token or _user_id):
+        _update_workspace_activity(_user_id)
+        workdir = _get_workspace_workdir(_user_id)
 
     if not workdir or not os.path.isdir(workdir):
         return jsonify({'success': False, 'message': '目录不存在'})
@@ -191,9 +365,7 @@ def api_list_files():
             if f.startswith('~$'):
                 continue
             file_path = os.path.join(workdir, f)
-            # 只显示文件，不显示目录
             if os.path.isfile(file_path):
-                # show_all=true 时显示所有文件，否则按工具类型过滤
                 if show_all or f.lower().endswith(extensions):
                     files.append({
                         'name': f,
@@ -291,106 +463,72 @@ def api_open_folder():
         return jsonify({'success': False, 'message': str(e)})
 
 
-# ==================== 配置管理（client_id 持久化） ====================
+# ==================== 配置管理（按用户持久化） ====================
 
 @app.route('/get_config', methods=['POST'])
-def api_get_config():
-    """读取用户配置（按 client_id 隔离）
-
-    请求体：
-        { "client_id": "xxx" }
-
-    响应：
-        { "success": true, "config": {...}, "client_id": "xxx" }
-    """
-    import yaml
+@_login_required
+def api_get_config(_user_id=None):
     data = request.get_json() if request.is_json else {}
-    client_id = data.get('client_id') if data else None
-
-    # 无 client_id 时自动生成
-    if not client_id:
-        client_id = str(uuid.uuid4())
-
-    config_path = _ensure_client_config(client_id)
+    config_path = _ensure_user_config(_user_id)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
-        return jsonify({'success': True, 'config': config, 'client_id': client_id})
+        return jsonify({'success': True, 'config': config})
     except Exception as e:
         return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
 
-
 @app.route('/save_config', methods=['POST'])
-def api_save_config():
-    """保存用户配置（按 client_id 隔离）
-
-    请求体：
-        { "client_id": "xxx", "config": {...} }
-    """
+@_login_required
+def api_save_config(_user_id=None):
     data = request.get_json()
-    client_id = data.get('client_id')
     config = data.get('config')
-
-    if not client_id:
-        client_id = str(uuid.uuid4())
 
     if not config:
         return jsonify({'success': False, 'message': '配置不能为空'})
 
-    config_path = _ensure_client_config(client_id)
+    config_path = _ensure_user_config(_user_id)
     try:
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-        return jsonify({'success': True, 'client_id': client_id})
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': f'保存配置失败: {str(e)}'})
 
-
 @app.route('/save_workdir', methods=['POST'])
-def api_save_workdir():
-    """保存最近工作目录到用户配置（按 client_id 隔离）"""
+@_login_required
+def api_save_workdir(_user_id=None):
     data = request.get_json()
-    client_id = data.get('client_id')
     workdir = data.get('workdir')
 
-    if not client_id:
-        client_id = str(uuid.uuid4())
-
-    config_path = _ensure_client_config(client_id)
+    config_path = _ensure_user_config(_user_id)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
         config['last_workdir'] = workdir
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-        return jsonify({'success': True, 'client_id': client_id})
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
 
 @app.route('/run_tool_with_config', methods=['POST'])
-def api_run_tool_with_config():
-    """执行工具（支持自定义配置）
-
-    支持本地和远程模式：
-    - 本地模式：workdir 为服务端本地路径
-    - 远程模式：client_id 映射到 workspace workdir
-    """
+@_login_required
+def api_run_tool_with_config(_user_id=None):
     data = request.get_json()
     
     tool = data.get('tool')
     workdir = data.get('workdir')
     files = data.get('files')
     user_config = data.get('userConfig')
-    client_id = data.get('client_id')
+    token = data.get('token') or data.get('client_id')
     
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
     
-    # 远程模式：用 client_id 获取 workspace 工作目录
-    if client_id:
-        _update_workspace_activity(client_id)
-        workdir = _get_workspace_workdir(client_id)
+    if not workdir and (token or _user_id):
+        _update_workspace_activity(_user_id)
+        workdir = _get_workspace_workdir(_user_id)
     
     if not workdir:
         return jsonify({'success': False, 'message': '未指定工作目录'})
@@ -417,6 +555,7 @@ def api_run_tool_with_config():
             # 创建临时配置文件（如果用户提供了配置）
             temp_config_path = None
             env = os.environ.copy()
+            env['REQUEST_ID'] = g.get('request_id', '')
             
             if user_config:
                 try:
@@ -495,19 +634,30 @@ def api_run_tool_with_config():
 
 @app.route('/upload_files', methods=['POST', 'OPTIONS'])
 def api_upload_files():
-    """接收用户上传的文件，保存到 workspace workdir"""
-    # OPTIONS 预检直接返回
     if request.method == 'OPTIONS':
         return jsonify({'success': True})
 
     _cleanup_expired_workspaces()
 
-    client_id = request.form.get('client_id')
-    if not client_id:
-        return jsonify({'success': False, 'message': 'client_id 不能为空'})
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+    elif auth_header:
+        token = auth_header
 
-    _update_workspace_activity(client_id)
-    workdir = _get_workspace_workdir(client_id)
+    if not token:
+        token = request.form.get('token') or request.form.get('client_id')
+
+    if not token:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    user_id = _get_user_id_from_token(token)
+    if not user_id:
+        return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
+
+    _update_workspace_activity(user_id)
+    workdir = _get_workspace_workdir(user_id)
 
     tool = request.form.get('tool', 'to_docx')
     extensions = _get_tool_extensions(tool)
@@ -553,23 +703,16 @@ def api_upload_files():
 
     return jsonify({
         'success': True,
-        'client_id': client_id,
         'files': saved_files,
         'file_count': len(saved_files)
     })
 
-
 @app.route('/check_results', methods=['POST'])
-def api_check_results():
-    """检查 workspace 中的文件列表"""
+@_login_required
+def api_check_results(_user_id=None):
     data = request.get_json()
-    client_id = data.get('client_id')
-
-    if not client_id:
-        return jsonify({'success': False, 'message': 'client_id 不能为空'})
-
-    _update_workspace_activity(client_id)
-    workdir = _get_workspace_workdir(client_id)
+    _update_workspace_activity(_user_id)
+    workdir = _get_workspace_workdir(_user_id)
 
     if not os.path.exists(workdir):
         return jsonify({'success': True, 'files': [], 'count': 0})
@@ -592,22 +735,17 @@ def api_check_results():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-
 @app.route('/download_results', methods=['POST'])
-def api_download_results():
-    """将 workspace 中所有文件打包下载"""
+@_login_required
+def api_download_results(_user_id=None):
     import zipfile
     import io
 
     data = request.get_json()
-    client_id = data.get('client_id')
     folder_name = data.get('folder_name', 'results')
 
-    if not client_id:
-        return jsonify({'success': False, 'message': 'client_id 不能为空'})
-
-    _update_workspace_activity(client_id)
-    workdir = _get_workspace_workdir(client_id)
+    _update_workspace_activity(_user_id)
+    workdir = _get_workspace_workdir(_user_id)
 
     if not os.path.exists(workdir) or not os.listdir(workdir):
         return jsonify({'success': False, 'message': '无文件可供下载'})
@@ -633,17 +771,10 @@ def api_download_results():
     except Exception as e:
         return jsonify({'success': False, 'message': f'打包失败: {str(e)}'})
 
-
 @app.route('/clear_workspace', methods=['POST'])
-def api_clear_workspace():
-    """清空 workspace workdir 中的所有文件（保留 workdir 目录自身）"""
-    data = request.get_json()
-    client_id = data.get('client_id')
-
-    if not client_id:
-        return jsonify({'success': False, 'message': 'client_id 不能为空'})
-
-    workdir = _get_workspace_workdir(client_id)
+@_login_required
+def api_clear_workspace(_user_id=None):
+    workdir = _get_workspace_workdir(_user_id)
     if not os.path.exists(workdir):
         return jsonify({'success': True, 'message': '目录为空'})
 
@@ -661,25 +792,20 @@ def api_clear_workspace():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-
 @app.route('/build_index_from_metadata', methods=['POST'])
-def api_build_index_from_metadata():
-    """从前端上传的文件元信息直接构建索引（无需上传文件内容）"""
+@_login_required
+def api_build_index_from_metadata(_user_id=None):
     from to_index import build_index_from_metadata
 
     data = request.get_json()
     metadata_list = data.get('metadata', [])
     folder_name = data.get('folder_name', 'unknown')
-    client_id = data.get('client_id')
 
     if not metadata_list:
         return jsonify({'success': False, 'message': '没有文件元信息'})
 
-    if not client_id:
-        client_id = str(uuid.uuid4())
-
-    _update_workspace_activity(client_id)
-    output_dir = _get_workspace_workdir(client_id)
+    _update_workspace_activity(_user_id)
+    output_dir = _get_workspace_workdir(_user_id)
 
     try:
         output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)
@@ -689,7 +815,6 @@ def api_build_index_from_metadata():
         file_count = len(metadata_list)
         return jsonify({
             'success': True,
-            'client_id': client_id,
             'file_count': file_count,
             'message': f'已索引 {file_count} 个文件'
         })
@@ -701,10 +826,10 @@ def api_build_index_from_metadata():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
 
-    print("=" * 50)
-    print("文档处理服务")
-    print(f"访问地址: http://0.0.0.0:{port}")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("文档处理服务")
+    logger.info("访问地址: http://0.0.0.0:%s", port)
+    logger.info("=" * 50)
 
     # 本地运行时打开浏览器（云端部署时无显示器，跳过）
     if port == 5000:

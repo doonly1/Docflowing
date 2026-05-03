@@ -7,6 +7,10 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 from mystyle import set_page, add_my_styles
 from doc_process import doc_to_docx, save_docx
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def _make_page_field():
@@ -48,7 +52,7 @@ def add_page_number_single(file_path):
         doc_to_docx(workdir)
         file_path = os.path.splitext(file_path)[0] + '.docx'
         if not os.path.exists(file_path):
-            print(f'转换失败：{os.path.basename(file_path)}')
+            logger.warning('转换失败：%s', os.path.basename(file_path))
             return
 
     # 非数字前缀文件需另存，避免覆盖原文件
@@ -57,7 +61,7 @@ def add_page_number_single(file_path):
         doc = Document(file_path)
         save_path = save_docx(doc, basename, workdir)
         if not save_path:
-            print(f'另存失败：{basename}')
+            logger.error('另存失败：%s', basename)
             return
         file_path = save_path
 
@@ -88,7 +92,7 @@ def add_page_number_single(file_path):
     para._p.append(_make_text_run(' -'))
 
     doc.save(file_path)
-    print(f'添加页码：{os.path.basename(file_path)} 成功。')
+    logger.info('添加页码：%s 成功。', os.path.basename(file_path))
 
 
 def add_page_numbers(workdir):

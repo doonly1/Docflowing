@@ -15,6 +15,10 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from doc_process import doc_to_docx
 from load_config import load_user_config
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def load_compare_config():
@@ -45,14 +49,14 @@ def find_docx_files(workdir):
     all_docs = glob.glob(os.path.join(workdir, "*.docx"))
     
     if len(all_docs) < 2:
-        print(f"目录中只有 {len(all_docs)} 个 docx 文档，至少需要 2 个进行比较")
+        logger.warning("目录中只有 %s 个 docx 文档，至少需要 2 个进行比较", len(all_docs))
         return None, None
     
     # 目录中有 2 个及以上文档，让用户选择
     def select(prompt, choices):
-        print(f"\n{prompt}:")
+        logger.info("\n%s:", prompt)
         for i, doc in enumerate(choices, 1):
-            print(f"  {i}. {os.path.basename(doc)}")
+            logger.info("  %s. %s", i, os.path.basename(doc))
         while True:
             try:
                 choice = input(f"(回车默认1):").strip()
@@ -61,9 +65,9 @@ def find_docx_files(workdir):
                     return None
                 if 1 <= idx <= len(choices):
                     return choices[idx - 1]
-                print(f"请输入1-{len(choices)}")
+                logger.warning("请输入1-%s", len(choices))
             except ValueError:
-                print("请输入数字")
+                logger.warning("请输入数字")
     
     # 选择原稿
     original = select("选择原稿", all_docs)
@@ -1775,12 +1779,12 @@ def check_and_convert_file(file_path):
         docx_path = os.path.splitext(file_path)[0] + '.docx'
         if os.path.exists(docx_path):
             return docx_path
-        print(f"警告：doc 文件转换失败: {file_path}")
+        logger.warning("警告：doc 文件转换失败: %s", file_path)
         return None
     elif ext == '.docx':
         return file_path
     else:
-        print(f"错误：不支持的文件类型 '{ext}'，仅支持 .doc 和 .docx")
+        logger.error("错误：不支持的文件类型 '%s'，仅支持 .doc 和 .docx", ext)
         return None
 
 
@@ -1795,10 +1799,10 @@ def main(workdir, original_path=None, final_path=None):
     # 判断传入的是文件还是目录
     if original_path and final_path:
         if not os.path.exists(original_path):
-            print(f"文件不存在: {original_path}")
+            logger.error("文件不存在: %s", original_path)
             return
         if not os.path.exists(final_path):
-            print(f"文件不存在: {final_path}")
+            logger.error("文件不存在: %s", final_path)
             return
         original = check_and_convert_file(original_path)
         final = check_and_convert_file(final_path)
@@ -1809,23 +1813,22 @@ def main(workdir, original_path=None, final_path=None):
             return
     
     if not original or not final:
-        print("无法比较：请检查文件格式")
+        logger.error("无法比较：请检查文件格式")
         return
 
-    print(f"原稿: {os.path.basename(original)}")
-    print(f"终稿: {os.path.basename(final)}")
+    logger.info("原稿: %s", os.path.basename(original))
+    logger.info("终稿: %s", os.path.basename(final))
     
-    # 确定输出文件名
     output_name = f"对比标注-{os.path.basename(original)}"
-    print("开始比较...")
+    logger.info("开始比较...")
     
     success, result_msg = compare_with_python_inplace(original, final, os.path.join(workdir, output_name))
     
     if success:
-        print(f"方法: {result_msg}")
-        print(f"比较完成: {os.path.normpath(os.path.join(workdir, output_name))}")
+        logger.info("方法: %s", result_msg)
+        logger.info("比较完成: %s", os.path.normpath(os.path.join(workdir, output_name)))
     else:
-        print(f"\n比较失败: {result_msg}")
+        logger.error("\n比较失败: %s", result_msg)
 
 
 if __name__ == "__main__":

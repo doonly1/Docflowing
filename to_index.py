@@ -10,6 +10,10 @@ from doc_process import doc_to_docx
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 def format_file_size(size_bytes):
     if size_bytes == 0:
@@ -55,14 +59,14 @@ def collect_file_info(root_dir):
                 }
                 file_info_list.append(file_info)
             except (PermissionError, FileNotFoundError) as e:
-                print(f"无法访问文件 {file_path}: {e}")
+                logger.warning("无法访问文件 %s: %s", file_path, e)
                 continue
     return file_info_list
 
 
 def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
     if not file_info_list:
-        print("没有找到任何文件")
+        logger.warning("没有找到任何文件")
         return
     max_depth = max(len(info['dir_levels']) for info in file_info_list)
     
@@ -108,12 +112,12 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
     
     output_path = os.path.join(root_dir, output_file)
     wb.save(output_path)
-    print(f"Excel文件已生成: {output_path}")
-    print(f"共整理了 {len(file_info_list)} 个文件")
+    logger.info("Excel文件已生成: %s", output_path)
+    logger.info("共整理了 %s 个文件", len(file_info_list))
 
 
 def build_index(workdir):
-    print(f"正在扫描目录: {workdir}")
+    logger.info("正在扫描目录: %s", workdir)
     file_info_list = collect_file_info(workdir)
     create_excel(file_info_list, workdir, 'file_index.xlsx')
 
@@ -164,7 +168,7 @@ def build_index_from_metadata(metadata_list, folder_name, output_dir):
         })
 
     if not file_info_list:
-        print("没有找到任何文件")
+        logger.warning("没有找到任何文件")
         return None
 
     create_excel(file_info_list, output_dir, 'file_index.xlsx')

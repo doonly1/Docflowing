@@ -5,6 +5,10 @@ import platform
 import subprocess
 
 from mystyle import para_fm, run_fm
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def find_libreoffice():
@@ -76,7 +80,7 @@ def doc_to_docx(workdir):
         word = client.Dispatch("Word.Application")
         word.Visible = False
         for file in doc_files:
-            print('转化docx：{}'.format(file))
+            logger.info('转化docx：{}'.format(file))
             file_path = os.path.abspath(os.path.normpath(os.path.join(workdir, file)))
             doc = word.Documents.Open(file_path)
             new_path = os.path.abspath(os.path.normpath(file_path + "x"))
@@ -89,14 +93,14 @@ def doc_to_docx(workdir):
         word.Quit()
         return
     except Exception as e:
-        print(e)
+        logger.warning('win32com 转换失败，回退到 LibreOffice: %s', e)
         pass  # win32com 不可用，回退到 LibreOffice
 
     # 尝试 LibreOffice
     lo_cmd = find_libreoffice()
     if lo_cmd:
         for file in doc_files:
-            print('转化docx(LibreOffice)：{}'.format(file))
+            logger.info('转化docx(LibreOffice)：{}'.format(file))
         cmd = [lo_cmd, '--headless', '--convert-to', 'docx',
                '--outdir', workdir] + [os.path.join(workdir, f) for f in doc_files]
         try:
@@ -108,12 +112,12 @@ def doc_to_docx(workdir):
                 except:
                     pass
         except subprocess.CalledProcessError as e:
-            print(f'LibreOffice 转换失败: {e}')
+            logger.error('LibreOffice 转换失败: %s', e)
         return
 
     # 都不可用
-    print('警告：无法转换 .doc 文件 — 需要 Microsoft Word 或 LibreOffice')
-    print(libreoffice_install_hint())
+    logger.warning('警告：无法转换 .doc 文件 — 需要 Microsoft Word 或 LibreOffice')
+    logger.warning(libreoffice_install_hint())
 
 
 def save_docx(doc, doc_name, workdir=None):
@@ -157,10 +161,10 @@ def save_docx(doc, doc_name, workdir=None):
     
     try:
         doc.save(save_path)
-        print(f"已另存: {save_path}")
+        logger.info("已另存: %s", save_path)
         return save_path
     except Exception as e:
-        print(f"另存失败: {e}")
+        logger.error("另存失败: %s", e)
         return None
 
 

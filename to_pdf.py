@@ -2,6 +2,10 @@ import os
 import subprocess
 from doc_process import doc_to_docx, find_libreoffice, libreoffice_install_hint
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 def _convert_single_pdf_docx2pdf(file_path):
@@ -24,7 +28,7 @@ def _convert_single_pdf_libreoffice(file_path, lo_cmd):
     if result.returncode == 0:
         return file_path, True
     else:
-        print(f"  LibreOffice 转换失败: {file_path} - {result.stderr.strip()}")
+        logger.error("  LibreOffice 转换失败: %s - %s", file_path, result.stderr.strip())
         return file_path, False
 
 
@@ -43,14 +47,14 @@ def convert_single_to_pdf(file_path):
     lo_cmd = find_libreoffice() if not use_docx2pdf else None
 
     if not use_docx2pdf and not lo_cmd:
-        print('错误：无法转换PDF — 需要 Microsoft Word (docx2pdf) 或 LibreOffice')
-        print(libreoffice_install_hint())
+        logger.error('错误：无法转换PDF — 需要 Microsoft Word (docx2pdf) 或 LibreOffice')
+        logger.error(libreoffice_install_hint())
         return False
 
     if use_docx2pdf:
         _, success = _convert_single_pdf_docx2pdf(file_path)
     else:
-        print(f'使用 LibreOffice 转换: {os.path.basename(file_path)}')
+        logger.info('使用 LibreOffice 转换: %s', os.path.basename(file_path))
         _, success = _convert_single_pdf_libreoffice(file_path, lo_cmd)
     return success
 
@@ -66,11 +70,11 @@ def convert_to_pdf(workdir):
     ]
 
     if not docx_files:
-        print('没有找到需要转换的docx文件')
+        logger.warning('没有找到需要转换的docx文件')
         return
 
     success_count = sum(1 for f in docx_files if convert_single_to_pdf(f))
-    print(f'\n转换完成：成功 {success_count}，失败 {len(docx_files) - success_count}')
+    logger.info('\n转换完成：成功 %s，失败 %s', success_count, len(docx_files) - success_count)
 
 
 if __name__ == '__main__':
