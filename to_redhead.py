@@ -130,9 +130,10 @@ def add_seal_single(file_path):
     run_fm(para.add_run(''),'仿宋', 16,0,0,0,0)
 
     #文档保存docx
-    save_path = os.path.join(workdir, str(wenhao)+basename[4:])
+    basename = str(wenhao) + basename[4:]
+    save_path = os.path.join(workdir, basename)
     doc.save(save_path)
-    logger.info('文档已保存：%s', os.path.normpath(save_path))
+    logger.info('文档已保存：%s', basename)
 
 
 def add_seal(workdir):

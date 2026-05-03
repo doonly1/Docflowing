@@ -112,7 +112,7 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
     
     output_path = os.path.join(root_dir, output_file)
     wb.save(output_path)
-    logger.info("Excel文件已生成: %s", output_path)
+    logger.info("已生成: %s", output_path)
     logger.info("共整理了 %s 个文件", len(file_info_list))
 
 
