@@ -31,19 +31,6 @@ def get_db_path():
     return os.path.join(data_dir, 'knowledge.db')
 
 
-def get_storage_path():
-    kb_config = _load_kb_config()
-    storage = kb_config.get('storage_path', '')
-    if storage and os.path.isabs(storage):
-        return storage
-    if storage:
-        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), storage)
-    data_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'kb')
-    storage_dir = os.path.join(data_dir, 'storage')
-    os.makedirs(storage_dir, exist_ok=True)
-    return storage_dir
-
-
 def init_db(conn):
     for sql in ALL_TABLES:
         conn.execute(sql)

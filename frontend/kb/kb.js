@@ -334,7 +334,7 @@ var KnowledgeBase = {
     },
 
     openFile: function(relPath) {
-        this.api('/api/kb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath), 'GET');
+        window.open('/api/kb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
     },
 
     setSort: async function(field) {
