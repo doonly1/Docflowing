@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     owner_id TEXT NOT NULL,
+    kb_type TEXT NOT NULL DEFAULT 'upload',
+    local_path TEXT DEFAULT '',
     created_at REAL
 )
 """
@@ -52,4 +54,9 @@ ALL_TABLES = [
     CREATE_CATEGORIES,
     CREATE_DOCUMENTS,
     CREATE_KB_PERMISSIONS,
+]
+
+MIGRATIONS = [
+    "ALTER TABLE knowledge_bases ADD COLUMN kb_type TEXT NOT NULL DEFAULT 'upload'",
+    "ALTER TABLE knowledge_bases ADD COLUMN local_path TEXT DEFAULT ''",
 ]

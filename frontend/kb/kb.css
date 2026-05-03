@@ -60,12 +60,50 @@
 }
 
 .kb-tree-pane {
-    width: 230px;
-    min-width: 180px;
+    width: 210px;
+    min-width: 210px;
     border-right: 1px solid #e1e4e8;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 4px 0;
     background: #fafbfc;
+    transition: width 0.2s ease, min-width 0.2s ease;
+    position: relative;
+}
+
+.kb-tree-pane.collapsed {
+    width: 32px;
+    min-width: 32px;
+}
+
+.kb-tree-pane.collapsed .kb-tree-title,
+.kb-tree-pane.collapsed .kb-tree-node,
+.kb-tree-pane.collapsed .kb-tree-label,
+.kb-tree-pane.collapsed button:not(.kb-tree-toggle-btn) {
+    display: none;
+}
+
+.kb-tree-toggle-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: #e1e4e8;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    transition: right 0.2s ease;
+}
+
+.kb-tree-pane.collapsed .kb-tree-toggle-btn {
+    right: 5px;
 }
 
 .kb-tree-title {
@@ -447,6 +485,22 @@
 .kb-badge-view {
     background: #e2e3e5;
     color: #383d41;
+}
+
+.kb-badge-local {
+    background: #d1ecf1;
+    color: #0c5460;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 4px;
+}
+
+.kb-local-dir:hover {
+    background: #e8f4f8 !important;
+    cursor: pointer;
 }
 
 .kb-modal-overlay {

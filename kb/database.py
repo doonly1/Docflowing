@@ -3,7 +3,7 @@ import sqlite3
 import threading
 import yaml
 
-from kb.models import ALL_TABLES, CREATE_INDEXES
+from kb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS
 
 _local = threading.local()
 
@@ -47,6 +47,11 @@ def get_storage_path():
 def init_db(conn):
     for sql in ALL_TABLES:
         conn.execute(sql)
+    for sql in MIGRATIONS:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
     for sql in CREATE_INDEXES:
         conn.execute(sql)
     conn.commit()

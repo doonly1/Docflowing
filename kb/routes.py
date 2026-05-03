@@ -28,6 +28,9 @@ def _get_user_id():
         token = data.get('token') or data.get('client_id')
 
     if not token:
+        token = request.args.get('token') or request.args.get('client_id')
+
+    if not token:
         token = request.form.get('token') or request.form.get('client_id')
 
     if not token:
@@ -108,17 +111,31 @@ def create_kb():
 
     data = request.get_json()
     name = (data.get('name') or '').strip()
+    kb_type = (data.get('kb_type') or 'upload').strip()
+    local_path = (data.get('local_path') or '').strip()
+
     if not name:
         return jsonify({'success': False, 'message': '知识库名称不能为空'})
     if len(name) > 64:
         return jsonify({'success': False, 'message': '知识库名称不能超过64个字符'})
 
+    if kb_type == 'local':
+        if not local_path:
+            return jsonify({'success': False, 'message': '本地目录路径不能为空'})
+        if not os.path.isdir(local_path):
+            return jsonify({'success': False, 'message': '指定的本地目录不存在'})
+        if not os.path.isabs(local_path):
+            return jsonify({'success': False, 'message': '本地目录路径必须是绝对路径'})
+    else:
+        local_path = ''
+        kb_type = 'upload'
+
     db = get_db()
     kb_id = str(uuid.uuid4())
     now = time.time()
     db.execute(
-        "INSERT INTO knowledge_bases (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)",
-        (kb_id, name, user_id, now)
+        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (kb_id, name, user_id, kb_type, local_path, now)
     )
     db.execute(
         "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
@@ -128,7 +145,7 @@ def create_kb():
 
     return jsonify({
         'success': True,
-        'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now}
+        'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': kb_type, 'local_path': local_path}
     })
 
 
@@ -164,7 +181,9 @@ def list_kb():
                 'owner_id': row['owner_id'],
                 'created_at': row['created_at'],
                 'permission': permission,
-                'document_count': doc_count
+                'document_count': doc_count,
+                'kb_type': row['kb_type'] if 'kb_type' in row.keys() else 'upload',
+                'local_path': row['local_path'] if 'local_path' in row.keys() else ''
             })
 
     return jsonify({'success': True, 'kbs': kbs})
@@ -188,21 +207,25 @@ def rename_kb(kb_id, _user_id=None):
 @_require_kb_permission('manage')
 def delete_kb(kb_id, _user_id=None):
     db = get_db()
-    doc_rows = db.execute("SELECT id, filename FROM documents WHERE kb_id = ?", (kb_id,)).fetchall()
-    storage_dir = _get_kb_storage_dir(kb_id)
-    for doc in doc_rows:
-        file_path = os.path.join(storage_dir, doc['filename'])
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    kb_row = db.execute("SELECT kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    is_local = kb_row and kb_row['kb_type'] == 'local'
+
+    if not is_local:
+        doc_rows = db.execute("SELECT id, filename FROM documents WHERE kb_id = ?", (kb_id,)).fetchall()
+        storage_dir = _get_kb_storage_dir(kb_id)
+        for doc in doc_rows:
+            file_path = os.path.join(storage_dir, doc['filename'])
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        if os.path.exists(storage_dir):
+            shutil.rmtree(storage_dir, ignore_errors=True)
 
     db.execute("DELETE FROM documents WHERE kb_id = ?", (kb_id,))
     db.execute("DELETE FROM categories WHERE kb_id = ?", (kb_id,))
     db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
     db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
     db.commit()
-
-    if os.path.exists(storage_dir):
-        shutil.rmtree(storage_dir, ignore_errors=True)
 
     return jsonify({'success': True, 'message': '知识库已删除'})
 
@@ -825,29 +848,121 @@ def search_documents():
     keywords = q.lower().split()
 
     for kb_id in visible_ids:
-        kb_row = db.execute("SELECT name FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+        kb_row = db.execute("SELECT name, kb_type, local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
         kb_name = kb_row['name'] if kb_row else ''
-        doc_rows = db.execute(
-            "SELECT * FROM documents WHERE kb_id = ? ORDER BY updated_at DESC", (kb_id,)
-        ).fetchall()
+        kb_type = (kb_row['kb_type'] if 'kb_type' in kb_row.keys() else 'upload') if kb_row else 'upload'
+        local_path = (kb_row['local_path'] if 'local_path' in kb_row.keys() else '') if kb_row else ''
 
-        for doc in doc_rows:
-            matched = False
-            match_type = ''
-            original_lower = doc['original_name'].lower()
+        if kb_type == 'local' and local_path and os.path.isdir(local_path):
+            results.extend(_search_local_dir(local_path, kb_id, kb_name, keywords))
+        else:
+            doc_rows = db.execute(
+                "SELECT * FROM documents WHERE kb_id = ? ORDER BY updated_at DESC", (kb_id,)
+            ).fetchall()
 
-            for kw in keywords:
-                if kw in original_lower:
-                    matched = True
-                    match_type = 'filename'
-                    break
+            for doc in doc_rows:
+                matched = False
+                match_type = ''
+                original_lower = doc['original_name'].lower()
 
-            if not matched:
-                ext = (doc['file_type'] or '').lower()
-                if ext in ('.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv'):
-                    storage_dir = _get_kb_storage_dir(kb_id)
-                    file_path = os.path.join(storage_dir, doc['filename'])
-                    if os.path.exists(file_path):
+                for kw in keywords:
+                    if kw in original_lower:
+                        matched = True
+                        match_type = 'filename'
+                        break
+
+                if not matched:
+                    ext = (doc['file_type'] or '').lower()
+                    if ext in ('.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv'):
+                        storage_dir = _get_kb_storage_dir(kb_id)
+                        file_path = os.path.join(storage_dir, doc['filename'])
+                        if os.path.exists(file_path):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read().lower()
+                                for kw in keywords:
+                                    if kw in content:
+                                        matched = True
+                                        match_type = 'content'
+                                        break
+                            except Exception:
+                                pass
+
+                    if not matched and ext in ('.docx',):
+                        storage_dir = _get_kb_storage_dir(kb_id)
+                        file_path = os.path.join(storage_dir, doc['filename'])
+                        if os.path.exists(file_path):
+                            try:
+                                from docx import Document
+                                d = Document(file_path)
+                                text = '\n'.join(p.text for p in d.paragraphs).lower()
+                                for kw in keywords:
+                                    if kw in text:
+                                        matched = True
+                                        match_type = 'content'
+                                        break
+                            except Exception:
+                                pass
+
+                    if not matched and ext in ('.xlsx', '.xls'):
+                        storage_dir = _get_kb_storage_dir(kb_id)
+                        file_path = os.path.join(storage_dir, doc['filename'])
+                        if os.path.exists(file_path):
+                            try:
+                                import openpyxl
+                                wb = openpyxl.load_workbook(file_path, data_only=True)
+                                text_parts = []
+                                for sn in wb.sheetnames:
+                                    ws = wb[sn]
+                                    for row in ws.iter_rows(values_only=True):
+                                        text_parts.append(' '.join(
+                                            str(c) if c is not None else '' for c in row))
+                                text = ' '.join(text_parts).lower()
+                                for kw in keywords:
+                                    if kw in text:
+                                        matched = True
+                                        match_type = 'content'
+                                        break
+                            except Exception:
+                                pass
+
+                if matched:
+                    results.append({
+                        'document_id': doc['id'],
+                        'kb_id': kb_id,
+                        'kb_name': kb_name,
+                        'filename': doc['original_name'],
+                        'file_type': doc['file_type'],
+                        'file_size': doc['file_size'],
+                        'updated_at': doc['updated_at'],
+                        'match_type': match_type
+                    })
+
+    return jsonify({'success': True, 'results': results, 'query': q})
+
+
+def _search_local_dir(base_path, kb_id, kb_name, keywords):
+    results = []
+    try:
+        for root, dirs, files in os.walk(base_path):
+            dirs[:] = [d for d in dirs if not d.startswith('~$')]
+            for fname in files:
+                if fname.startswith('~$'):
+                    continue
+                matched = False
+                match_type = ''
+                fname_lower = fname.lower()
+
+                for kw in keywords:
+                    if kw in fname_lower:
+                        matched = True
+                        match_type = 'filename'
+                        break
+
+                if not matched:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in ('.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv'):
+                        file_path = os.path.join(root, fname)
                         try:
                             with open(file_path, 'r', encoding='utf-8') as f:
                                 content = f.read().lower()
@@ -859,54 +974,273 @@ def search_documents():
                         except Exception:
                             pass
 
-                if not matched and ext in ('.docx',):
-                    storage_dir = _get_kb_storage_dir(kb_id)
-                    file_path = os.path.join(storage_dir, doc['filename'])
-                    if os.path.exists(file_path):
-                        try:
-                            from docx import Document
-                            d = Document(file_path)
-                            text = '\n'.join(p.text for p in d.paragraphs).lower()
-                            for kw in keywords:
-                                if kw in text:
-                                    matched = True
-                                    match_type = 'content'
-                                    break
-                        except Exception:
-                            pass
+                if matched:
+                    full_path = os.path.join(root, fname)
+                    rel_path = os.path.relpath(full_path, base_path).replace('\\', '/')
+                    stat = os.stat(full_path)
+                    results.append({
+                        'document_id': rel_path,
+                        'kb_id': kb_id,
+                        'kb_name': kb_name,
+                        'filename': fname,
+                        'file_type': os.path.splitext(fname)[1],
+                        'file_size': stat.st_size,
+                        'updated_at': stat.st_mtime,
+                        'match_type': match_type,
+                        'rel_path': rel_path
+                    })
+    except PermissionError:
+        pass
+    return results
 
-                if not matched and ext in ('.xlsx', '.xls'):
-                    storage_dir = _get_kb_storage_dir(kb_id)
-                    file_path = os.path.join(storage_dir, doc['filename'])
-                    if os.path.exists(file_path):
-                        try:
-                            import openpyxl
-                            wb = openpyxl.load_workbook(file_path, data_only=True)
-                            text_parts = []
-                            for sn in wb.sheetnames:
-                                ws = wb[sn]
-                                for row in ws.iter_rows(values_only=True):
-                                    text_parts.append(' '.join(
-                                        str(c) if c is not None else '' for c in row))
-                            text = ' '.join(text_parts).lower()
-                            for kw in keywords:
-                                if kw in text:
-                                    matched = True
-                                    match_type = 'content'
-                                    break
-                        except Exception:
-                            pass
 
-            if matched:
-                results.append({
-                    'document_id': doc['id'],
-                    'kb_id': kb_id,
-                    'kb_name': kb_name,
-                    'filename': doc['original_name'],
-                    'file_type': doc['file_type'],
-                    'file_size': doc['file_size'],
-                    'updated_at': doc['updated_at'],
-                    'match_type': match_type
+@kb_bp.route('/<kb_id>/local-files', methods=['GET'])
+@_require_kb_permission('view')
+def list_local_files(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '知识库不存在'})
+    if kb_row['kb_type'] != 'local':
+        return jsonify({'success': False, 'message': '仅支持本地目录知识库'})
+
+    local_path = kb_row['local_path']
+    if not os.path.isdir(local_path):
+        return jsonify({'success': False, 'message': '本地目录不存在', 'files': [], 'categories': []})
+
+    subdir = request.args.get('subdir', '').strip()
+    target_path = os.path.join(local_path, subdir) if subdir else local_path
+    target_path = os.path.normpath(target_path)
+
+    if not target_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isdir(target_path):
+        return jsonify({'success': False, 'message': '目录不存在'})
+
+    files = []
+    categories = []
+    try:
+        for entry in os.scandir(target_path):
+            if entry.name.startswith('~$'):
+                continue
+            stat = entry.stat()
+            if entry.is_dir():
+                categories.append({
+                    'name': entry.name,
+                    'path': os.path.relpath(entry.path, local_path).replace('\\', '/')
                 })
+            elif entry.is_file():
+                _, ext = os.path.splitext(entry.name)
+                files.append({
+                    'name': entry.name,
+                    'path': os.path.relpath(entry.path, local_path).replace('\\', '/'),
+                    'size': stat.st_size,
+                    'mtime': stat.st_mtime,
+                    'ext': ext.lower()
+                })
+    except PermissionError:
+        return jsonify({'success': False, 'message': '没有权限访问此目录'})
 
-    return jsonify({'success': True, 'results': results, 'query': q})
+    categories.sort(key=lambda x: x['name'].lower())
+    files.sort(key=lambda x: x['name'].lower())
+
+    return jsonify({
+        'success': True,
+        'files': files,
+        'categories': categories,
+        'current_path': subdir.replace('\\', '/') if subdir else ''
+    })
+
+
+@kb_bp.route('/<kb_id>/local-categories', methods=['GET'])
+@_require_kb_permission('view')
+def list_local_categories(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '知识库不存在'})
+    if kb_row['kb_type'] != 'local':
+        return jsonify({'success': False, 'message': '仅支持本地目录知识库'})
+
+    local_path = kb_row['local_path']
+    if not os.path.isdir(local_path):
+        return jsonify({'success': False, 'categories': []})
+
+    recursive = request.args.get('recursive', '0') == '1'
+
+    if recursive:
+        categories = _scan_categories_recursive(local_path, local_path)
+        return jsonify({'success': True, 'categories': categories})
+
+    subdir = request.args.get('subdir', '').strip()
+    target_path = os.path.join(local_path, subdir) if subdir else local_path
+    target_path = os.path.normpath(target_path)
+
+    if not target_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'categories': []})
+
+    categories = _scan_categories(target_path, local_path)
+    return jsonify({'success': True, 'categories': categories})
+
+
+def _scan_categories(target_path, base_path):
+    categories = []
+    try:
+        for entry in os.scandir(target_path):
+            if entry.name.startswith('~$') or not entry.is_dir():
+                continue
+            rel_path = os.path.relpath(entry.path, base_path).replace('\\', '/')
+            child_categories = []
+            try:
+                for child in os.scandir(entry.path):
+                    if not child.name.startswith('~$') and child.is_dir():
+                        child_categories.append({
+                            'name': child.name,
+                            'path': os.path.relpath(child.path, base_path).replace('\\', '/')
+                        })
+            except PermissionError:
+                pass
+            child_categories.sort(key=lambda x: x['name'].lower())
+            categories.append({
+                'name': entry.name,
+                'path': rel_path,
+                'children': child_categories
+            })
+    except PermissionError:
+        pass
+    categories.sort(key=lambda x: x['name'].lower())
+    return categories
+
+
+def _scan_categories_recursive(target_path, base_path):
+    categories = []
+    try:
+        for entry in os.scandir(target_path):
+            if entry.name.startswith('~$') or not entry.is_dir():
+                continue
+            rel_path = os.path.relpath(entry.path, base_path).replace('\\', '/')
+            children = _scan_categories_recursive(entry.path, base_path)
+            categories.append({
+                'name': entry.name,
+                'path': rel_path,
+                'children': children
+            })
+    except PermissionError:
+        pass
+    categories.sort(key=lambda x: x['name'].lower())
+    return categories
+
+
+@kb_bp.route('/<kb_id>/local-files/download', methods=['GET'])
+@_require_kb_permission('view')
+def download_local_file(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row or kb_row['kb_type'] != 'local':
+        return jsonify({'success': False, 'message': '仅支持本地目录知识库'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '文件不存在'})
+
+    return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+
+
+@kb_bp.route('/<kb_id>/local-files/content', methods=['GET'])
+@_require_kb_permission('view')
+def get_local_file_content(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row or kb_row['kb_type'] != 'local':
+        return jsonify({'success': False, 'message': '仅支持本地目录知识库'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '文件不存在'})
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in ('.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv', '.yaml', '.yml', '.py', '.js', '.css'):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return jsonify({'success': True, 'content': content, 'file_type': ext})
+        except UnicodeDecodeError:
+            return jsonify({'success': False, 'message': '无法以文本方式读取此文件'})
+
+    if ext == '.docx':
+        try:
+            from docx import Document
+            doc = Document(file_path)
+            paragraphs = [p.text for p in doc.paragraphs]
+            return jsonify({'success': True, 'content': '\n'.join(paragraphs), 'file_type': ext})
+        except Exception:
+            return jsonify({'success': False, 'message': '无法读取 docx 内容'})
+
+    if ext in ('.xlsx', '.xls'):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            lines = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                lines.append(f'# {sheet_name}')
+                for row in ws.iter_rows(values_only=True):
+                    lines.append('\t'.join(str(c) if c is not None else '' for c in row))
+            return jsonify({'success': True, 'content': '\n'.join(lines), 'file_type': ext})
+        except Exception:
+            return jsonify({'success': False, 'message': '无法读取 xlsx 内容'})
+
+    return jsonify({'success': False, 'message': '不支持在线查看此文件类型的内容'})
+
+
+@kb_bp.route('/<kb_id>/local-files/open', methods=['GET'])
+@_require_kb_permission('view')
+def open_local_file(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row or kb_row['kb_type'] != 'local':
+        return jsonify({'success': False, 'message': '仅支持本地目录知识库'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '文件不存在'})
+
+    try:
+        import platform
+        import subprocess
+        system = platform.system()
+        if system == 'Windows':
+            os.startfile(file_path)
+        elif system == 'Darwin':
+            subprocess.Popen(['open', file_path])
+        else:
+            subprocess.Popen(['xdg-open', file_path])
+        return jsonify({'success': True, 'message': '已打开文件'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})

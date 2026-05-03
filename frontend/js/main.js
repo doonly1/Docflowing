@@ -20,7 +20,7 @@
             localStorage.setItem('docproc_token', token);
             localStorage.setItem('docproc_username', username);
             document.getElementById('authOverlay').style.display = 'none';
-            document.getElementById('userInfo').textContent = '👤 ' + username;
+            updateSidebarUser(username);
             initApp();
         }
 
@@ -32,7 +32,21 @@
             localStorage.removeItem('docproc_client_id');
             localStorage.removeItem('workdir');
             document.getElementById('authOverlay').style.display = 'flex';
-            document.getElementById('userInfo').textContent = '';
+            updateSidebarUser(null);
+        }
+
+        function updateSidebarUser(username) {
+            var el = document.getElementById('sidebar-user-icon');
+            var nd = document.getElementById('sidebar-user-name-display');
+            if (!el) return;
+            if (username) {
+                var initial = username.charAt(0).toUpperCase();
+                el.innerHTML = '<div class="sidebar-avatar">' + initial + '</div><div class="sidebar-username">' + username + '</div>';
+                if (nd) nd.textContent = username;
+            } else {
+                el.innerHTML = '<div class="sidebar-avatar">👤</div><div class="sidebar-username">未登录</div>';
+                if (nd) nd.textContent = '未登录';
+            }
         }
 
         function apiHeaders() {
@@ -1173,13 +1187,52 @@
         document.addEventListener('DOMContentLoaded', async function() {
             if (authToken) {
                 document.getElementById('authOverlay').style.display = 'none';
-                document.getElementById('userInfo').textContent = '👤 ' + (authUsername || '');
+                updateSidebarUser(authUsername);
                 initApp();
             } else {
                 document.getElementById('authOverlay').style.display = 'flex';
                 document.getElementById('authUsername').focus();
             }
         });
+
+function toggleSidebarMenu(e) {
+    if (e) e.stopPropagation();
+    var popup = document.getElementById('sidebar-popup');
+    if (!popup) return;
+    if (popup.style.display === 'none' || popup.style.display === '') {
+        popup.style.display = 'block';
+    } else {
+        popup.style.display = 'none';
+    }
+}
+
+function toggleUserMenu(e) {
+    if (e) e.stopPropagation();
+    var popup = document.getElementById('sidebar-user-popup');
+    if (!popup) return;
+    if (popup.style.display === 'none' || popup.style.display === '') {
+        popup.style.display = 'block';
+    } else {
+        popup.style.display = 'none';
+    }
+}
+
+document.addEventListener('click', function(e) {
+    var popup = document.getElementById('sidebar-popup');
+    var btn = document.getElementById('sidebar-more-btn');
+    if (popup && popup.style.display === 'block') {
+        if (!popup.contains(e.target) && !btn.contains(e.target)) {
+            popup.style.display = 'none';
+        }
+    }
+    var upopup = document.getElementById('sidebar-user-popup');
+    var ubtn = document.getElementById('sidebar-user-icon');
+    if (upopup && upopup.style.display === 'block') {
+        if (!upopup.contains(e.target) && !ubtn.contains(e.target)) {
+            upopup.style.display = 'none';
+        }
+    }
+});
 
 function navigateTo(view) {
     document.querySelectorAll('.sidebar-nav-item').forEach(function(el) {
