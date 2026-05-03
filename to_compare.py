@@ -5,6 +5,7 @@ Word文档比较工具
 """
 
 import os
+import sys
 import glob
 import difflib
 from copy import deepcopy
@@ -57,6 +58,9 @@ def find_docx_files(workdir):
         logger.info("\n%s:", prompt)
         for i, doc in enumerate(choices, 1):
             logger.info("  %s. %s", i, os.path.basename(doc))
+        if not sys.stdin.isatty():
+            logger.warning("非交互模式，自动选择第一个文件")
+            return choices[0]
         while True:
             try:
                 choice = input(f"(回车默认1):").strip()
@@ -68,6 +72,9 @@ def find_docx_files(workdir):
                 logger.warning("请输入1-%s", len(choices))
             except ValueError:
                 logger.warning("请输入数字")
+            except EOFError:
+                logger.warning("stdin 不可用，自动选择第一个文件")
+                return choices[0]
     
     # 选择原稿
     original = select("选择原稿", all_docs)
@@ -1826,13 +1833,12 @@ def main(workdir, original_path=None, final_path=None):
     
     if success:
         logger.info("方法: %s", result_msg)
-        logger.info("比较完成: %s", os.path.normpath(os.path.join(workdir, output_name)))
+        logger.info("比较完成: %s", output_name)
     else:
         logger.error("\n比较失败: %s", result_msg)
 
 
 if __name__ == "__main__":
-    import sys
     original_path = None
     final_path = None
     

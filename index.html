@@ -1897,7 +1897,7 @@
             await initConfig();
 
             if (isRemoteMode()) {
-                document.getElementById('workdir').value = (authUsername || '').slice(0, 8) + '/workdir';
+                document.getElementById('workdir').value = (authUsername || 'default').slice(0, 8) + '/workdir';
             }
         }
 

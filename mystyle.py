@@ -3,7 +3,6 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-import itertools
 
 # 对齐方式映射
 ALIGN_MAP = {

@@ -12,8 +12,10 @@ import yaml
 import shutil
 import hashlib
 import secrets
+import tempfile
+import subprocess
 from functools import wraps
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, Response
 from flask_cors import CORS
 
 from logging_config import setup_logging, set_request_id, get_logger
@@ -99,13 +101,16 @@ def _verify_password(password: str, stored: str) -> bool:
 def _generate_token() -> str:
     return secrets.token_hex(32)
 
-def _get_user_id_from_token(token: str) -> str or None:
+def _get_user_id_from_token(token: str) -> str | None:
     tokens = _load_json(_get_tokens_path())
     return tokens.get(token)
 
 def _login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return f(*args, **kwargs)
+
         auth_header = request.headers.get('Authorization', '')
         token = None
         if auth_header.startswith('Bearer '):
@@ -116,6 +121,9 @@ def _login_required(f):
         if not token:
             data = request.get_json(silent=True) or {}
             token = data.get('token') or data.get('client_id')
+
+        if not token:
+            token = request.form.get('token') or request.form.get('client_id')
 
         if not token:
             return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
@@ -535,12 +543,6 @@ def api_run_tool_with_config(_user_id=None):
     if not os.path.isdir(workdir):
         return jsonify({'success': False, 'message': f'目录不存在: {workdir}'})
     
-    import subprocess
-    import tempfile
-    import yaml
-    from flask import Response
-    import json
-    
     if tool not in TOOL_SCRIPTS:
         return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
     
@@ -550,12 +552,14 @@ def api_run_tool_with_config(_user_id=None):
     if not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'脚本不存在: {script}'})
     
+    current_request_id = g.get('request_id', '')
+
     def generate():
         try:
             # 创建临时配置文件（如果用户提供了配置）
             temp_config_path = None
             env = os.environ.copy()
-            env['REQUEST_ID'] = g.get('request_id', '')
+            env['REQUEST_ID'] = current_request_id
             
             if user_config:
                 try:
@@ -609,7 +613,6 @@ def api_run_tool_with_config(_user_id=None):
             # 清理临时文件
             if temp_config_path and os.path.exists(os.path.dirname(temp_config_path)):
                 try:
-                    import shutil
                     shutil.rmtree(os.path.dirname(temp_config_path))
                 except:
                     pass
@@ -633,31 +636,12 @@ def api_run_tool_with_config(_user_id=None):
 # ==================== Workspace 文件上传/下载/清理 ====================
 
 @app.route('/upload_files', methods=['POST', 'OPTIONS'])
-def api_upload_files():
-    if request.method == 'OPTIONS':
-        return jsonify({'success': True})
-
+@_login_required
+def api_upload_files(_user_id=None):
     _cleanup_expired_workspaces()
 
-    auth_header = request.headers.get('Authorization', '')
-    token = None
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-    elif auth_header:
-        token = auth_header
-
-    if not token:
-        token = request.form.get('token') or request.form.get('client_id')
-
-    if not token:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
-    user_id = _get_user_id_from_token(token)
-    if not user_id:
-        return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
-
-    _update_workspace_activity(user_id)
-    workdir = _get_workspace_workdir(user_id)
+    _update_workspace_activity(_user_id)
+    workdir = _get_workspace_workdir(_user_id)
 
     tool = request.form.get('tool', 'to_docx')
     extensions = _get_tool_extensions(tool)
