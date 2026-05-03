@@ -19,12 +19,14 @@ from flask import Flask, request, jsonify, g, Response
 from flask_cors import CORS
 
 from logging_config import setup_logging, set_request_id, get_logger
+from kb.routes import kb_bp
 
 setup_logging()
 logger = get_logger(__name__)
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 CORS(app)
+app.register_blueprint(kb_bp)
 
 
 @app.before_request
@@ -60,6 +62,7 @@ TOOL_SCRIPTS = {
 # ==================== Token 认证系统 ====================
 
 SECRET_KEY = os.environ.get('DOCPROC_SECRET', secrets.token_hex(32))
+DOCPROC_ADMIN = os.environ.get('DOCPROC_ADMIN', '')
 
 def _get_auth_data_dir():
     auth_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth')
@@ -131,6 +134,43 @@ def _login_required(f):
         user_id = _get_user_id_from_token(token)
         if not user_id:
             return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
+
+        kwargs['_user_id'] = user_id
+        return f(*args, **kwargs)
+    return decorated
+
+def _admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return f(*args, **kwargs)
+
+        auth_header = request.headers.get('Authorization', '')
+        token = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+        elif auth_header:
+            token = auth_header
+
+        if not token:
+            data = request.get_json(silent=True) or {}
+            token = data.get('token') or data.get('client_id')
+
+        if not token:
+            token = request.form.get('token') or request.form.get('client_id')
+
+        if not token:
+            return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+        user_id = _get_user_id_from_token(token)
+        if not user_id:
+            return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
+
+        users = _load_json(_get_users_path())
+        user_info = users.get(user_id, {})
+        role = user_info.get('role', 'viewer')
+        if role != 'admin':
+            return jsonify({'success': False, 'message': '需要管理员权限'}), 403
 
         kwargs['_user_id'] = user_id
         return f(*args, **kwargs)
@@ -265,6 +305,7 @@ def api_register():
     users[user_id] = {
         'username': username,
         'password': _hash_password(password),
+        'role': 'viewer',
         'created_at': time.time()
     }
     _save_json(_get_users_path(), users)
@@ -280,6 +321,7 @@ def api_register():
         'success': True,
         'token': token,
         'username': username,
+        'role': 'viewer',
         'message': '注册成功'
     })
 
@@ -297,10 +339,12 @@ def api_login():
 
     users = _load_json(_get_users_path())
     user_id = None
+    user_role = 'viewer'
     for uid, uinfo in users.items():
         if uinfo.get('username') == username:
             if _verify_password(password, uinfo.get('password', '')):
                 user_id = uid
+                user_role = uinfo.get('role', 'viewer')
             break
 
     if not user_id:
@@ -317,6 +361,7 @@ def api_login():
         'success': True,
         'token': token,
         'username': username,
+        'role': user_role,
         'message': '登录成功'
     })
 
@@ -382,6 +427,80 @@ def api_list_files(_user_id=None):
         return jsonify({'success': True, 'files': files})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/users/list', methods=['GET'])
+@_admin_required
+def api_users_list(_user_id=None):
+    users = _load_json(_get_users_path())
+    user_list = []
+    for uid, uinfo in users.items():
+        user_list.append({
+            'user_id': uid,
+            'username': uinfo.get('username', ''),
+            'role': uinfo.get('role', 'viewer'),
+            'created_at': uinfo.get('created_at', 0)
+        })
+    return jsonify({'success': True, 'users': user_list})
+
+
+@app.route('/api/users/<user_id>/role', methods=['PUT'])
+@_admin_required
+def api_set_user_role(user_id, _user_id=None):
+    data = request.get_json()
+    new_role = (data.get('role') or '').strip()
+    if new_role not in ('admin', 'editor', 'viewer'):
+        return jsonify({'success': False, 'message': '无效的角色，可选值: admin, editor, viewer'})
+
+    if user_id == _user_id:
+        return jsonify({'success': False, 'message': '不能修改自己的角色'})
+
+    users = _load_json(_get_users_path())
+    if user_id not in users:
+        return jsonify({'success': False, 'message': '用户不存在'})
+
+    users[user_id]['role'] = new_role
+    _save_json(_get_users_path(), users)
+    return jsonify({'success': True, 'message': '角色修改成功'})
+
+
+def _ensure_admin_user():
+    if not DOCPROC_ADMIN:
+        return
+    parts = DOCPROC_ADMIN.split(':', 1)
+    if len(parts) != 2:
+        logger.warning("DOCPROC_ADMIN 格式错误，应为 username:password")
+        return
+    admin_username, admin_password = parts[0].strip(), parts[1].strip()
+    if not admin_username or not admin_password:
+        return
+
+    users = _load_json(_get_users_path())
+    admin_uid = None
+    for uid, uinfo in users.items():
+        if uinfo.get('username') == admin_username:
+            admin_uid = uid
+            break
+
+    if admin_uid:
+        if users[admin_uid].get('role') != 'admin':
+            users[admin_uid]['role'] = 'admin'
+            _save_json(_get_users_path(), users)
+            logger.info("已将用户 %s 提升为 admin", admin_username)
+    else:
+        user_id = str(uuid.uuid4())
+        users[user_id] = {
+            'username': admin_username,
+            'password': _hash_password(admin_password),
+            'role': 'admin',
+            'created_at': time.time()
+        }
+        _save_json(_get_users_path(), users)
+        _ensure_user_config(user_id)
+        logger.info("已创建管理员用户: %s", admin_username)
+
+
+_ensure_admin_user()
 
 
 @app.route('/list_dir', methods=['POST'])

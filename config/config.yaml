@@ -11,3 +11,20 @@ compare:
   short_para_char_threshold: 50
 
 last_workdir: ""
+
+knowledge_base:
+  db_path: ""
+  storage_path: ""
+  allowed_extensions:
+    - .docx
+    - .doc
+    - .xlsx
+    - .xls
+    - .pptx
+    - .ppt
+    - .pdf
+    - .md
+    - .txt
+    - .html
+    - .htm
+  max_file_size_mb: 100

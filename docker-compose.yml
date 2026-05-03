@@ -9,9 +9,11 @@ services:
     environment:
       - PORT=5000
       - LOG_LEVEL=INFO
+      - DOCPROC_ADMIN=${DOCPROC_ADMIN:-}
     volumes:
       - docproc_workspaces:/app/workspaces
       - docproc_config:/home/docproc/.config/DocProc
+      - kb_storage:/home/docproc/.config/DocProc/kb/storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]
@@ -23,3 +25,4 @@ services:
 volumes:
   docproc_workspaces:
   docproc_config:
+  kb_storage:

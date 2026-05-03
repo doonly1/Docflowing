@@ -517,6 +517,8 @@
             gap: 6px;
         }
     </style>
+    <link rel="stylesheet" href="frontend/kb/kb.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
 </head>
 <body>
     <!-- 登录/注册遮罩 -->
@@ -547,6 +549,7 @@
         <div class="topbar">
             <div class="user-info" id="userInfo"></div>
             <div class="topbar-actions">
+                <button class="topbar-btn" onclick="openKB()">📚 知识库</button>
                 <button class="topbar-btn" onclick="openConfig()">📋 配置</button>
                 <button class="topbar-btn" onclick="handleLogout()">🚪 退出</button>
                 <button class="topbar-btn" onclick="showAbout()">ℹ️ 关于</button>
@@ -634,6 +637,8 @@
 
         <div id="result"></div>
     </div>
+
+    <div id="kb-view" class="kb-hidden" style="padding: 20px; max-width: 1200px; margin: 0 auto;"></div>
 
     <!-- 配置弹窗 -->
     <div class="modal-overlay" id="configModal">
@@ -1912,5 +1917,8 @@
             }
         });
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="frontend/kb/kb.js"></script>
 </body>
 </html>
