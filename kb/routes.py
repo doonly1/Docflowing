@@ -1,6 +1,9 @@
 import os
 import uuid
 import time
+import zipfile
+import io
+import shutil
 
 from flask import Blueprint, request, jsonify, send_file
 from functools import wraps
@@ -91,28 +94,42 @@ def _require_kb_permission(required_level):
     return decorator
 
 
-# ==================== 知识库 CRUD ====================
+# ==================== 文件库 CRUD ====================
 
-@kb_bp.route('/list', methods=['POST'])
-def create_kb():
+def _get_user_workspace(user_id):
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ws = os.path.join(root_dir, 'workspaces', user_id)
+    os.makedirs(ws, exist_ok=True)
+    return ws
+
+
+@kb_bp.route('/create-folder', methods=['POST'])
+def create_folder():
     user_id = _get_user_id()
     if not user_id:
         return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
     data = request.get_json()
     name = (data.get('name') or '').strip()
-    local_path = (data.get('local_path') or '').strip()
-
     if not name:
-        return jsonify({'success': False, 'message': '知识库名称不能为空'})
+        return jsonify({'success': False, 'message': '文件夹名称不能为空'})
     if len(name) > 64:
-        return jsonify({'success': False, 'message': '知识库名称不能超过64个字符'})
-    if not local_path:
-        return jsonify({'success': False, 'message': '本地目录路径不能为空'})
-    if not os.path.isdir(local_path):
-        return jsonify({'success': False, 'message': '指定的本地目录不存在'})
-    if not os.path.isabs(local_path):
-        return jsonify({'success': False, 'message': '本地目录路径必须是绝对路径'})
+        return jsonify({'success': False, 'message': '文件夹名称不能超过64个字符'})
+    if '/' in name or '\\' in name:
+        return jsonify({'success': False, 'message': '文件夹名称不能包含路径分隔符'})
+
+    ws = _get_user_workspace(user_id)
+    local_path = os.path.join(ws, name)
+    counter = 1
+    orig_name = name
+    while os.path.exists(local_path) and counter < 100:
+        name = orig_name + '_' + str(counter)
+        local_path = os.path.join(ws, name)
+        counter += 1
+    if os.path.exists(local_path):
+        return jsonify({'success': False, 'message': '无法生成唯一的文件夹名称'})
+
+    os.makedirs(local_path, exist_ok=True)
 
     db = get_db()
     kb_id = str(uuid.uuid4())
@@ -129,7 +146,65 @@ def create_kb():
 
     return jsonify({
         'success': True,
-        'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local', 'local_path': local_path}
+        'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local',
+               'local_path': local_path}
+    })
+
+
+@kb_bp.route('/copy-folder', methods=['POST'])
+def copy_folder():
+    user_id = _get_user_id()
+    if not user_id:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    data = request.get_json()
+    kb_id = (data.get('kb_id') or '').strip()
+    new_name = (data.get('new_name') or '').strip()
+
+    if not kb_id or not new_name:
+        return jsonify({'success': False, 'message': '参数不完整'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT * FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '源文件库不存在'})
+
+    src_path = kb_row['local_path']
+    if not os.path.isdir(src_path):
+        return jsonify({'success': False, 'message': '源目录不存在'})
+
+    ws = _get_user_workspace(user_id)
+    dst_path = os.path.join(ws, new_name)
+
+    counter = 1
+    orig_name = new_name
+    while os.path.exists(dst_path) and counter < 100:
+        new_name = orig_name + '_' + str(counter)
+        dst_path = os.path.join(ws, new_name)
+        counter += 1
+    if os.path.exists(dst_path):
+        return jsonify({'success': False, 'message': '无法生成唯一的名称'})
+
+    try:
+        shutil.copytree(src_path, dst_path)
+    except Exception as e:
+        return jsonify({'success': False, 'message': '复制目录失败: ' + str(e)})
+
+    new_kb_id = str(uuid.uuid4())
+    now = time.time()
+    db.execute(
+        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        (new_kb_id, new_name, user_id, dst_path, now)
+    )
+    db.execute(
+        "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
+        (new_kb_id, user_id, 'manage')
+    )
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'kb': {'id': new_kb_id, 'name': new_name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local', 'local_path': dst_path}
     })
 
 
@@ -140,30 +215,102 @@ def list_kb():
         return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
     is_admin = _is_admin(user_id)
-    visible_ids = get_visible_kb_ids(user_id, is_admin)
     db = get_db()
+    ws = _get_user_workspace(user_id)
+
+    import json
+    users = {}
+    try:
+        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+        if os.path.exists(users_path):
+            with open(users_path, 'r', encoding='utf-8') as f:
+                users = json.load(f)
+    except Exception:
+        pass
+
+    db_kbs = {}
+    rows = db.execute("SELECT * FROM knowledge_bases").fetchall()
+    for row in rows:
+        db_kbs[row['local_path']] = row
+
+    existing_paths = set(db_kbs.keys())
+    fs_paths = set()
+
+    for entry_name in sorted(os.listdir(ws)):
+        if entry_name.startswith('.') or entry_name == '已删除':
+            continue
+        entry_path = os.path.join(ws, entry_name)
+        if os.path.isdir(entry_path):
+            fs_paths.add(entry_path)
+            if entry_path not in db_kbs:
+                kb_id = str(uuid.uuid4())
+                now = time.time()
+                db.execute(
+                    "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+                    (kb_id, entry_name, user_id, entry_path, now)
+                )
+                db.execute(
+                    "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
+                    (kb_id, user_id, 'manage')
+                )
+            else:
+                row = db_kbs[entry_path]
+                if row['name'] != entry_name:
+                    db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (entry_name, row['id']))
+
+    for path in existing_paths - fs_paths:
+        row = db_kbs[path]
+        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (row['id'],))
+        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (row['id'],))
+    db.commit()
+
+    if is_admin:
+        visible_rows = db.execute("SELECT * FROM knowledge_bases").fetchall()
+    else:
+        visible_ids = get_visible_kb_ids(user_id, False)
+        visible_rows = []
+        for kb_id in visible_ids:
+            r = db.execute("SELECT * FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+            if r:
+                visible_rows.append(r)
 
     kbs = []
-    for kb_id in visible_ids:
-        row = db.execute("SELECT * FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
-        if row:
-            perm_row = db.execute(
-                "SELECT permission_level FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
-                (kb_id, user_id)
-            ).fetchone()
-            permission = 'manage' if row['owner_id'] == user_id or is_admin else (
-                perm_row['permission_level'] if perm_row else 'view'
-            )
+    for row in visible_rows:
+        perm_row = db.execute(
+            "SELECT permission_level FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
+            (row['id'], user_id)
+        ).fetchone()
+        permission = 'manage' if row['owner_id'] == user_id or is_admin else (
+            perm_row['permission_level'] if perm_row else 'view'
+        )
 
-            kbs.append({
-                'id': row['id'],
-                'name': row['name'],
-                'owner_id': row['owner_id'],
-                'created_at': row['created_at'],
-                'permission': permission,
-                'kb_type': row['kb_type'] if 'kb_type' in row.keys() else 'local',
-                'local_path': row['local_path'] if 'local_path' in row.keys() else ''
-            })
+        owner_info = users.get(row['owner_id'], {})
+        owner_username = owner_info.get('username', row['owner_id'])
+
+        local_path = row['local_path']
+        display_path = local_path
+        if local_path:
+            norm = os.path.normpath(local_path)
+            parts = norm.split(os.sep)
+            try:
+                ws_idx = [p.lower() for p in parts].index('workspaces')
+                if ws_idx + 2 < len(parts):
+                    parts[ws_idx + 1] = owner_username
+                display_path = '/'.join(parts[ws_idx + 1:])
+            except ValueError:
+                pass
+
+        kbs.append({
+            'id': row['id'],
+            'name': row['name'],
+            'owner_id': row['owner_id'],
+            'owner_username': owner_username,
+            'display_path': display_path,
+            'created_at': row['created_at'],
+            'permission': permission,
+            'kb_type': 'local',
+            'local_path': local_path
+        })
 
     return jsonify({'success': True, 'kbs': kbs})
 
@@ -177,7 +324,23 @@ def rename_kb(kb_id, _user_id=None):
         return jsonify({'success': False, 'message': '名称不能为空'})
 
     db = get_db()
-    db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (name, kb_id))
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    old_path = kb_row['local_path']
+    parent_dir = os.path.dirname(old_path)
+    new_path = os.path.join(parent_dir, name)
+
+    if os.path.exists(new_path):
+        return jsonify({'success': False, 'message': '同名目录已存在'})
+
+    try:
+        os.rename(old_path, new_path)
+    except Exception as e:
+        return jsonify({'success': False, 'message': '重命名目录失败: ' + str(e)})
+
+    db.execute("UPDATE knowledge_bases SET name = ?, local_path = ? WHERE id = ?", (name, new_path, kb_id))
     db.commit()
     return jsonify({'success': True, 'message': '重命名成功'})
 
@@ -186,10 +349,163 @@ def rename_kb(kb_id, _user_id=None):
 @_require_kb_permission('manage')
 def delete_kb(kb_id, _user_id=None):
     db = get_db()
+    row = db.execute("SELECT id, name, local_path, owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = row['local_path']
+    ws = _get_user_workspace(row['owner_id'])
+    trash_dir = os.path.join(ws, '已删除')
+
+    if local_path.startswith(trash_dir):
+        if os.path.isdir(local_path):
+            shutil.rmtree(local_path)
+        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
+        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+        db.commit()
+        return jsonify({'success': True, 'message': '文件库已彻底删除'})
+
+    kb_name = row['name']
+    timestamp = str(int(time.time()))
+    target = os.path.join(trash_dir, kb_name + '_' + timestamp)
+    os.makedirs(trash_dir, exist_ok=True)
+
+    if os.path.isdir(local_path):
+        shutil.move(local_path, target)
+
     db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
     db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
     db.commit()
-    return jsonify({'success': True, 'message': '知识库已删除'})
+    return jsonify({'success': True, 'message': '文件库已移至已删除目录'})
+
+
+@kb_bp.route('/trash', methods=['DELETE'])
+def clear_trash():
+    user_id = _get_user_id()
+    if not user_id:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    ws = _get_user_workspace(user_id)
+    trash_dir = os.path.join(ws, '已删除')
+    if not os.path.isdir(trash_dir):
+        return jsonify({'success': True, 'deleted': 0})
+
+    count = 0
+    for entry in os.listdir(trash_dir):
+        entry_path = os.path.join(trash_dir, entry)
+        try:
+            if os.path.isdir(entry_path):
+                shutil.rmtree(entry_path)
+                count += 1
+            elif os.path.isfile(entry_path):
+                os.remove(entry_path)
+                count += 1
+        except Exception:
+            pass
+
+    return jsonify({'success': True, 'deleted': count, 'message': f'已清空 {count} 个项目'})
+
+
+@kb_bp.route('/trash-list', methods=['GET'])
+def list_trash():
+    user_id = _get_user_id()
+    if not user_id:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    ws = _get_user_workspace(user_id)
+    trash_dir = os.path.join(ws, '已删除')
+    if not os.path.isdir(trash_dir):
+        return jsonify({'success': True, 'items': []})
+
+    items = []
+    for entry in os.listdir(trash_dir):
+        entry_path = os.path.join(trash_dir, entry)
+        if os.path.isdir(entry_path):
+            stat = os.stat(entry_path)
+            size = 0
+            try:
+                size = sum(os.path.getsize(os.path.join(r, f)) for r, ds, fs in os.walk(entry_path) for f in fs)
+            except Exception:
+                pass
+            items.append({'name': entry, 'path': entry_path, 'mtime': stat.st_mtime, 'size': size})
+    items.sort(key=lambda x: x['mtime'], reverse=True)
+    return jsonify({'success': True, 'items': items})
+
+
+@kb_bp.route('/trash-restore', methods=['POST'])
+def restore_from_trash():
+    user_id = _get_user_id()
+    if not user_id:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    data = request.get_json()
+    item_name = (data.get('name') or '').strip()
+    if not item_name:
+        return jsonify({'success': False, 'message': '未指定项目'})
+
+    ws = _get_user_workspace(user_id)
+    trash_dir = os.path.join(ws, '已删除')
+    src = os.path.join(trash_dir, item_name)
+    if not os.path.isdir(src):
+        return jsonify({'success': False, 'message': '项目不存在'})
+
+    dst_name = item_name.rsplit('_', 1)[0] if '_' in item_name else item_name
+    dst = os.path.join(ws, dst_name)
+    orig_dst = dst
+    counter = 1
+    while os.path.exists(dst) and counter < 100:
+        dst = orig_dst + '_' + str(counter)
+        counter += 1
+    if os.path.exists(dst):
+        return jsonify({'success': False, 'message': '目标路径已存在'})
+
+    shutil.move(src, dst)
+
+    db = get_db()
+    kb_id = str(uuid.uuid4())
+    now = time.time()
+    name = os.path.basename(dst)
+    db.execute(
+        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        (kb_id, name, user_id, dst, now)
+    )
+    db.execute(
+        "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
+        (kb_id, user_id, 'manage')
+    )
+    db.commit()
+
+    return jsonify({'success': True, 'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local', 'local_path': dst}})
+
+
+@kb_bp.route('/trash-item', methods=['DELETE'])
+def delete_trash_item():
+    user_id = _get_user_id()
+    if not user_id:
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '未指定项目'})
+
+    ws = _get_user_workspace(user_id)
+    trash_dir = os.path.join(ws, '已删除')
+    target = os.path.join(trash_dir, name)
+    if not os.path.exists(target):
+        return jsonify({'success': False, 'message': '项目不存在'})
+
+    if not target.startswith(os.path.normpath(trash_dir)):
+        return jsonify({'success': False, 'message': '路径非法'})
+
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+    return jsonify({'success': True})
 
 
 @kb_bp.route('/<kb_id>/transfer', methods=['POST'])
@@ -207,7 +523,7 @@ def transfer_kb(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     db.execute("UPDATE knowledge_bases SET owner_id = ? WHERE id = ?", (new_owner_id, kb_id))
 
@@ -430,13 +746,142 @@ def _search_local_dir(base_path, kb_id, kb_name, keywords):
 
 # ==================== 本地目录浏览 ====================
 
+def _resolve_local_path(db, kb_id, subdir=''):
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return None, None
+    local_path = kb_row['local_path']
+    target = os.path.join(local_path, subdir) if subdir else local_path
+    target = os.path.normpath(target)
+    if not target.startswith(os.path.normpath(local_path)):
+        return None, None
+    return local_path, target
+
+
+@kb_bp.route('/<kb_id>/local-files', methods=['POST'])
+@_require_kb_permission('edit')
+def upload_local_files(kb_id, _user_id=None):
+    db = get_db()
+    subdir = request.args.get('subdir', '').strip()
+    local_path, target_dir = _resolve_local_path(db, kb_id, subdir)
+    if local_path is None:
+        return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    if not os.path.isdir(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+
+    uploaded = []
+    for key in request.files:
+        for f in request.files.getlist(key):
+            if not f.filename:
+                continue
+            file_path = os.path.join(target_dir, f.filename)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            f.save(file_path)
+            stat = os.stat(file_path)
+            uploaded.append({
+                'name': f.filename,
+                'size': stat.st_size,
+                'mtime': stat.st_mtime
+            })
+
+    return jsonify({'success': True, 'uploaded': uploaded})
+
+
+@kb_bp.route('/<kb_id>/local-files/dir', methods=['POST'])
+@_require_kb_permission('edit')
+def create_local_dir(kb_id, _user_id=None):
+    db = get_db()
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    parent = (data.get('parent') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '目录名不能为空'})
+    if '/' in name or '\\' in name:
+        return jsonify({'success': False, 'message': '目录名不能包含路径分隔符'})
+
+    local_path, target_dir = _resolve_local_path(db, kb_id, parent)
+    if local_path is None:
+        return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    new_dir = os.path.join(target_dir, name)
+    counter = 1
+    orig_name = name
+    while os.path.exists(new_dir) and counter < 100:
+        name = orig_name + '_' + str(counter)
+        new_dir = os.path.join(target_dir, name)
+        counter += 1
+    if os.path.exists(new_dir):
+        return jsonify({'success': False, 'message': '无法生成唯一的目录名称'})
+
+    os.makedirs(new_dir, exist_ok=True)
+    rel = os.path.relpath(new_dir, local_path).replace('\\', '/')
+    return jsonify({'success': True, 'path': rel})
+
+
+@kb_bp.route('/<kb_id>/local-files/create', methods=['POST'])
+@_require_kb_permission('edit')
+def create_local_file(kb_id, _user_id=None):
+    db = get_db()
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    parent = (data.get('parent') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '文件名不能为空'})
+    if '/' in name or '\\' in name:
+        return jsonify({'success': False, 'message': '文件名不能包含路径分隔符'})
+
+    local_path, target_dir = _resolve_local_path(db, kb_id, parent)
+    if local_path is None:
+        return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    filename = name if name.lower().endswith('.md') else name + '.md'
+    file_path = os.path.join(target_dir, filename)
+
+    counter = 1
+    orig_name = name if not name.lower().endswith('.md') else name[:-3]
+    while os.path.exists(file_path) and counter < 100:
+        filename = orig_name + '_' + str(counter) + '.md'
+        file_path = os.path.join(target_dir, filename)
+        counter += 1
+    if os.path.exists(file_path):
+        return jsonify({'success': False, 'message': '无法生成唯一的文件名'})
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write('')
+    rel = os.path.relpath(file_path, local_path).replace('\\', '/')
+    return jsonify({'success': True, 'path': rel})
+
+
+@kb_bp.route('/<kb_id>/local-files/content', methods=['PUT'])
+@_require_kb_permission('edit')
+def save_local_file_content(kb_id, _user_id=None):
+    db = get_db()
+    data = request.get_json() or {}
+    path = (data.get('path') or '').strip()
+    content = data.get('content', '')
+
+    if not path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    local_path, target = _resolve_local_path(db, kb_id, path)
+    if local_path is None:
+        return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, 'w', encoding='utf-8') as f:
+        f.write(content)
+    stat = os.stat(target)
+    return jsonify({'success': True, 'mtime': stat.st_mtime})
+
+
 @kb_bp.route('/<kb_id>/local-files', methods=['GET'])
 @_require_kb_permission('view')
 def list_local_files(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
     if not os.path.isdir(local_path):
@@ -493,7 +938,7 @@ def list_local_categories(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
     if not os.path.isdir(local_path):
@@ -570,7 +1015,7 @@ def download_local_file(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
     rel_path = request.args.get('path', '').strip()
@@ -593,7 +1038,7 @@ def get_local_file_content(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
     rel_path = request.args.get('path', '').strip()
@@ -643,13 +1088,275 @@ def get_local_file_content(kb_id, _user_id=None):
     return jsonify({'success': False, 'message': '不支持在线查看此文件类型的内容'})
 
 
+@kb_bp.route('/<kb_id>/local-files/batch-download', methods=['POST'])
+@_require_kb_permission('view')
+def batch_download_local(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    paths = data.get('paths', [])
+
+    if not paths:
+        return jsonify({'success': False, 'message': '请选择文件'})
+
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for rel_path in paths:
+            abs_path = os.path.normpath(os.path.join(local_path, rel_path))
+            if not abs_path.startswith(os.path.normpath(local_path)):
+                continue
+            if os.path.isfile(abs_path):
+                zf.write(abs_path, os.path.basename(abs_path))
+            elif os.path.isdir(abs_path):
+                for root, dirs, files in os.walk(abs_path):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        arc = os.path.relpath(fp, os.path.dirname(abs_path)).replace('\\', '/')
+                        zf.write(fp, arc)
+
+    memory_file.seek(0)
+    return send_file(memory_file, mimetype='application/zip',
+                     as_attachment=True, download_name='files.zip')
+
+
+@kb_bp.route('/<kb_id>/local-files/replace', methods=['PUT'])
+@_require_kb_permission('edit')
+def replace_local_file(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '原文件不存在'})
+
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '请选择文件'})
+
+    upload_file = request.files['file']
+    if not upload_file.filename:
+        return jsonify({'success': False, 'message': '文件名不能为空'})
+
+    try:
+        upload_file.save(file_path)
+        new_stat = os.stat(file_path)
+        return jsonify({
+            'success': True,
+            'message': '文件已替换',
+            'size': new_stat.st_size,
+            'mtime': new_stat.st_mtime
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@kb_bp.route('/<kb_id>/local-files/move', methods=['PUT'])
+@_require_kb_permission('edit')
+def move_local_items(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    sources = data.get('sources', [])
+    dest = (data.get('dest') or '').strip()
+
+    if not sources:
+        return jsonify({'success': False, 'message': '请选择要移动的项目'})
+    if not dest:
+        return jsonify({'success': False, 'message': '请指定目标目录'})
+
+    dest_path = os.path.normpath(os.path.join(local_path, dest))
+    if not dest_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '目标目录非法'})
+
+    if not os.path.isdir(dest_path):
+        os.makedirs(dest_path, exist_ok=True)
+
+    moved = 0
+    errors = []
+    for src in sources:
+        src_path = os.path.normpath(os.path.join(local_path, src))
+        if not src_path.startswith(os.path.normpath(local_path)):
+            errors.append(f'{src}: 路径非法')
+            continue
+        if not os.path.exists(src_path):
+            errors.append(f'{src}: 不存在')
+            continue
+        target = os.path.join(dest_path, os.path.basename(src_path))
+        if os.path.exists(target):
+            errors.append(f'{src}: 目标位置已存在同名项目')
+            continue
+        try:
+            shutil.move(src_path, target)
+            moved += 1
+        except Exception as e:
+            errors.append(f'{src}: {str(e)}')
+
+    return jsonify({
+        'success': True,
+        'moved': moved,
+        'errors': errors
+    })
+
+
+@kb_bp.route('/<kb_id>/local-files', methods=['DELETE'])
+@_require_kb_permission('edit')
+def delete_local_items(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    paths = data.get('paths', [])
+    if not paths:
+        return jsonify({'success': False, 'message': '请选择要删除的项目'})
+
+    deleted = 0
+    errors = []
+    for rel in paths:
+        if not rel:
+            continue
+        target = os.path.normpath(os.path.join(local_path, rel))
+        if not target.startswith(os.path.normpath(local_path)):
+            errors.append(f'{rel}: 路径非法')
+            continue
+        try:
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            elif os.path.isfile(target):
+                os.remove(target)
+            else:
+                errors.append(f'{rel}: 文件不存在')
+                continue
+            deleted += 1
+        except Exception as e:
+            errors.append(f'{rel}: {str(e)}')
+
+    return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
+
+
+@kb_bp.route('/<kb_id>/local-files/rename', methods=['PUT'])
+@_require_kb_permission('edit')
+def rename_local_item(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    rel_path = (data.get('path') or '').strip()
+    new_name = (data.get('new_name') or '').strip()
+
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+    if not new_name:
+        return jsonify({'success': False, 'message': '新名称不能为空'})
+    if '/' in new_name or '\\' in new_name:
+        return jsonify({'success': False, 'message': '新名称不能包含路径分隔符'})
+
+    old = os.path.normpath(os.path.join(local_path, rel_path))
+    if not old.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '路径非法'})
+
+    if not os.path.exists(old):
+        return jsonify({'success': False, 'message': '文件或目录不存在'})
+
+    parent_dir = os.path.dirname(old)
+    new_path = os.path.join(parent_dir, new_name)
+    if os.path.exists(new_path):
+        return jsonify({'success': False, 'message': '同名文件或目录已存在'})
+
+    try:
+        os.rename(old, new_path)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+    new_rel = os.path.relpath(new_path, local_path).replace('\\', '/')
+    return jsonify({'success': True, 'new_path': new_rel})
+
+
+@kb_bp.route('/<kb_id>/local-files/copy', methods=['POST'])
+@_require_kb_permission('edit')
+def copy_local_items(kb_id, _user_id=None):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    sources = data.get('sources', [])
+    dest = (data.get('dest') or '').strip()
+
+    if not sources:
+        return jsonify({'success': False, 'message': '请选择要复制的项目'})
+
+    dest_dir = os.path.normpath(os.path.join(local_path, dest)) if dest else local_path
+    if not dest_dir.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '目标路径非法'})
+
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = 0
+    errors = []
+    for rel in sources:
+        if not rel:
+            continue
+        src = os.path.normpath(os.path.join(local_path, rel))
+        if not src.startswith(os.path.normpath(local_path)):
+            errors.append(f'{rel}: 路径非法')
+            continue
+        try:
+            basename = os.path.basename(src)
+            dst = os.path.join(dest_dir, basename)
+
+            counter = 1
+            orig_dst = dst
+            while os.path.exists(dst):
+                name, ext = os.path.splitext(basename)
+                dst = os.path.join(dest_dir, f'{name}_{counter}{ext}')
+                counter += 1
+
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            elif os.path.isfile(src):
+                shutil.copy2(src, dst)
+            else:
+                errors.append(f'{rel}: 文件不存在')
+                continue
+            copied += 1
+        except Exception as e:
+            errors.append(f'{rel}: {str(e)}')
+
+    return jsonify({'success': True, 'copied': copied, 'errors': errors})
+
+
 @kb_bp.route('/<kb_id>/local-files/open', methods=['GET'])
 @_require_kb_permission('view')
 def open_local_file(kb_id, _user_id=None):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
-        return jsonify({'success': False, 'message': '知识库不存在'})
+        return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
     rel_path = request.args.get('path', '').strip()
@@ -663,22 +1370,4 @@ def open_local_file(kb_id, _user_id=None):
     if not os.path.isfile(file_path):
         return jsonify({'success': False, 'message': '文件不存在'})
 
-    remote_addr = request.remote_addr or ''
-    is_local = remote_addr in ('127.0.0.1', '::1', 'localhost')
-
-    if is_local:
-        try:
-            import platform
-            import subprocess
-            system = platform.system()
-            if system == 'Windows':
-                os.startfile(file_path)
-            elif system == 'Darwin':
-                subprocess.Popen(['open', file_path])
-            else:
-                subprocess.Popen(['xdg-open', file_path])
-            return '<html><body><script>window.close()</script>已打开文件</body></html>'
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)})
-    else:
-        return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+    return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))

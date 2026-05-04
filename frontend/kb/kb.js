@@ -64,21 +64,28 @@ var KnowledgeBase = {
     renderKbList: async function() {
         this.currentKbId = null;
         this.localPath = '';
-        this.currentPath = [{ id: null, name: '知识库', type: 'home' }];
+        this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
+        localStorage.removeItem('docproc_current_kb_id');
+        localStorage.removeItem('docproc_current_kb_name');
+        localStorage.removeItem('docproc_current_kb_local_path');
+        localStorage.removeItem('docproc_current_kb_display_path');
+        localStorage.removeItem('docproc_current_kb_permission');
         var role = this.getUserRole();
 
         var h = '<div class="kb-explorer">';
-        h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 知识库</span></div>';
+        h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 文件库</span></div>';
         h += '<div class="kb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
         h += '<div class="kb-file-pane" style="width:100%">';
         h += '<div class="kb-file-toolbar">';
         h += '<input type="text" id="kb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
         h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
+        h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
         if (role === 'admin') h += '<button onclick="KnowledgeBase.showUserManage()">👥 用户</button>';
         h += '<span class="kb-toolbar-spacer"></span>';
-        h += '<button class="kb-btn-primary" onclick="KnowledgeBase.showCreateKb()">📁 新建知识库</button>';
+        h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
+        h += '<button onclick="KnowledgeBase.renderKbList()">🔄 刷新</button>';
         h += '</div>';
-        h += '<div class="kb-file-body" id="kb-grid-container"><div class="kb-empty">加载中...</div></div>';
+        h += '<div class="kb-file-body" id="kb-grid-container" oncontextmenu="KnowledgeBase.showKbListContextMenu(event)"><div class="kb-empty">加载中...</div></div>';
         h += '</div></div></div>';
 
         document.getElementById('kb-view').innerHTML = h;
@@ -86,34 +93,134 @@ var KnowledgeBase = {
         var grid = document.getElementById('kb-grid-container');
         if (!grid) return;
 
-        var kbs = [];
-        if (res.success && res.kbs) {
-            for (var i = 0; i < res.kbs.length; i++) {
-                if (res.kbs[i].kb_type === 'local') kbs.push(res.kbs[i]);
-            }
-        }
+        var kbs = res.success && res.kbs ? res.kbs : [];
 
         if (kbs.length === 0) {
-            grid.innerHTML = '<div class="kb-empty">暂无知识库，点击上方按钮创建</div>';
+            grid.innerHTML = '<div class="kb-empty">暂无文件库，点击上方按钮创建</div>';
             return;
         }
 
         var html = '<div class="kb-grid">';
         for (var i = 0; i < kbs.length; i++) {
             var kb = kbs[i];
-            var cls = kb.permission === 'manage' ? 'kb-badge-manage' : (kb.permission === 'edit' ? 'kb-badge-edit' : 'kb-badge-view');
-            var label = kb.permission === 'manage' ? '管理' : (kb.permission === 'edit' ? '编辑' : '查看');
-            html += '<div class="kb-card" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\')">';
+            html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
             html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
-            html += '<div class="kb-card-meta">' + (kb.local_path || '') + '</div>';
-            html += '<span class="kb-badge ' + cls + '">' + label + '</span>';
+            html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
             html += '</div>';
         }
         html += '</div>';
         grid.innerHTML = html;
     },
 
-    openKb: async function(kbId, permission, name, localPath) {
+    showCreateRootFolder: function() {
+        this._createRootFolder('新建文件夹');
+    },
+
+    _createRootFolder: async function(name) {
+        var self = this;
+        var res = await this.api('/api/kb/create-folder', 'POST', { name: name });
+        if (res.success) {
+            await self.renderKbList();
+        } else {
+            alert(res.message || '创建失败');
+        }
+    },
+
+    showKbListContextMenu: function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.hideContextMenu();
+
+        var target = event.target;
+        var kbCard = target.closest('.kb-card');
+
+        var menu = document.createElement('div');
+        menu.className = 'kb-context-menu';
+        menu.id = 'kb-context-menu';
+
+        if (kbCard) {
+            var kbId = kbCard.getAttribute('data-kb-id');
+            var kbName = kbCard.getAttribute('data-kb-name');
+            var kbPermission = kbCard.getAttribute('data-kb-permission');
+            var kbLocalPath = kbCard.getAttribute('data-kb-local-path');
+            var kbDisplayPath = kbCard.getAttribute('data-kb-display-path');
+            menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
+        } else {
+            menu.innerHTML = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+        }
+
+        menu.style.left = Math.min(event.clientX, window.innerWidth - 180) + 'px';
+        menu.style.top = Math.min(event.clientY, window.innerHeight - 160) + 'px';
+        document.body.appendChild(menu);
+
+        this._hideContextMenuHandler = function() { KnowledgeBase.hideContextMenu(); };
+        setTimeout(function() {
+            document.addEventListener('click', KnowledgeBase._hideContextMenuHandler);
+        }, 0);
+    },
+
+    _buildKbCardContextMenu: function(kbId, kbName, permission, localPath, displayPath) {
+        var escId = kbId.replace(/'/g, "\\'");
+        var escName = (kbName || '').replace(/'/g, "\\'");
+        var escLocalPath = (localPath || '').replace(/'/g, "\\'");
+        var escDisplayPath = (displayPath || '').replace(/'/g, "\\'");
+
+        var h = '';
+        if (permission === 'manage') {
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
+            h += '<div class="kb-menu-divider"></div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon">🗑️</span> 删除</div>';
+        }
+        return h;
+    },
+
+    kbListManage: function(kbId) {
+        this.hideContextMenu();
+        this.currentKbId = kbId;
+        this.showSettings();
+    },
+
+    kbListRename: async function(kbId, oldName) {
+        this.hideContextMenu();
+        var newName = prompt('重命名文件库：', oldName);
+        if (!newName || !newName.trim() || newName.trim() === oldName) return;
+        var res = await this.api('/api/kb/' + kbId, 'PUT', { name: newName.trim() });
+        if (res.success) {
+            await this.renderKbList();
+        } else {
+            alert(res.message || '重命名失败');
+        }
+    },
+
+    kbListCopy: async function(kbId, kbName) {
+        this.hideContextMenu();
+        var newName = prompt('复制文件库为：', kbName + '_副本');
+        if (!newName || !newName.trim()) return;
+        var res = await this.api('/api/kb/copy-folder', 'POST', {
+            kb_id: kbId,
+            new_name: newName.trim()
+        });
+        if (res.success) {
+            await this.renderKbList();
+        } else {
+            alert(res.message || '复制失败');
+        }
+    },
+
+    kbListDelete: async function(kbId, kbName) {
+        this.hideContextMenu();
+        if (!confirm('确定删除文件库 "' + kbName + '" 吗？')) return;
+        var res = await this.api('/api/kb/' + kbId, 'DELETE');
+        if (res.success) {
+            await this.renderKbList();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    },
+
+    openKb: async function(kbId, permission, name, localPath, displayPath) {
         this.currentKbId = kbId;
         this.currentPermission = permission;
         this.canEdit = permission === 'edit' || permission === 'manage';
@@ -121,11 +228,19 @@ var KnowledgeBase = {
         this.selectedDocs = {};
         this.kbName = name || '';
         this.localPath = localPath || '';
+        this.displayPath = displayPath || '';
         this.localCurrentSubdir = '';
-        this.currentPath = [{ id: kbId, name: name || '未知知识库', type: 'kb' }];
+        this.currentPath = [{ id: kbId, name: name || '未知文件库', type: 'kb' }];
         this.currentSort = { field: 'mtime', asc: false };
         this._categoryTree = null;
         this._treeLoaded = false;
+
+        localStorage.setItem('docproc_current_kb_id', kbId);
+        localStorage.setItem('docproc_current_kb_permission', permission);
+        localStorage.setItem('docproc_current_kb_name', name || '');
+        localStorage.setItem('docproc_current_kb_local_path', localPath || '');
+        localStorage.setItem('docproc_current_kb_display_path', displayPath || '');
+
         await this.renderDetail();
     },
 
@@ -135,20 +250,39 @@ var KnowledgeBase = {
         var h = '<div class="kb-explorer">';
         h += '<div class="kb-breadcrumb" id="kb-breadcrumb"></div>';
         h += '<div class="kb-explorer-body">';
-        h += '<div class="kb-tree-pane" id="kb-tree-pane"><button class="kb-tree-toggle-btn" onclick="KnowledgeBase.toggleTreePane()" title="折叠/展开">◀</button><div class="kb-tree-title">目录</div></div>';
-        h += '<div class="kb-file-pane" id="kb-file-pane">';
         h += '<div class="kb-file-toolbar" id="kb-file-toolbar">';
-        h += '<span style="color:#888;font-size:12px">📁 ' + escapeHtmlText(this.localPath || '') + '</span>';
-        h += '<span class="kb-toolbar-spacer"></span>';
-        h += '<input type="text" id="kb-search-input" placeholder="在当前知识库中搜索..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
-        h += '<button onclick="KnowledgeBase.search()">🔍</button>';
-        if (this.canManage) h += '<button onclick="KnowledgeBase.showSettings()">⚙ 设置</button>';
+        h += '<button class="kb-tree-toggle-btn" onclick="KnowledgeBase.toggleTreePane()" title="折叠/展开"></button>';
+        h += '<div class="kb-upload-wrap">';
+        h += '<button onclick="KnowledgeBase.toggleUploadMenu(event)">📤 上传</button>';
+        h += '<div class="kb-upload-menu" style="display:none">';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
         h += '</div>';
-        h += '<div class="kb-file-body" id="kb-file-body">';
+        h += '</div>';
+        h += '<button onclick="KnowledgeBase.showCreateFolderDialog()">📁 新建文件夹</button>';
+        h += '<button onclick="KnowledgeBase.showCreateMdDialog()">📝 新建MD文件</button>';
+        h += '<span class="kb-toolbar-spacer"></span>';
+        h += '<input type="text" id="kb-search-input" placeholder="搜索..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
+        h += '<button onclick="KnowledgeBase.search()">🔍</button>';
+        h += '<button onclick="KnowledgeBase.downloadAction()">📥 下载</button>';
+        h += '<button onclick="KnowledgeBase.showMoveDialog()">📦 移动</button>';
+        h += '<button onclick="KnowledgeBase.batchDelete()">🗑️ 删除</button>';
+        h += '<input type="file" id="kb-file-upload-input" multiple style="display:none" onchange="KnowledgeBase.handleFileUpload(this)">';
+        h += '<input type="file" id="kb-folder-upload-input" webkitdirectory style="display:none" onchange="KnowledgeBase.handleFolderUpload(this)">';
+        h += '<input type="file" id="kb-replace-input" style="display:none" onchange="KnowledgeBase.handleReplace(this)">';
+        h += '</div>';
+        h += '<div class="kb-body-row">';
+        h += '<div class="kb-tree-pane" id="kb-tree-pane"><div class="kb-tree-title">目录</div><div id="kb-tree-content"></div></div>';
+        h += '<div class="kb-tree-resize-handle" id="kb-tree-resize-handle"></div>';
+        h += '<div class="kb-file-pane" id="kb-file-pane">';
+        h += '<div class="kb-file-body" id="kb-file-body" oncontextmenu="KnowledgeBase.showContextMenu(event)">';
         h += '<div id="kb-file-content"><div class="kb-empty">加载中...</div></div>';
         h += '</div></div></div></div>';
 
         document.getElementById('kb-view').innerHTML = h;
+        if (localStorage.getItem('kb_tree_collapsed') === '1') {
+            document.querySelector('.kb-explorer-body').classList.add('collapsed');
+        }
         this.renderBreadcrumb();
 
         if (!this._treeLoaded) {
@@ -158,12 +292,13 @@ var KnowledgeBase = {
         }
         this.renderCategoryTree();
         await this.loadFiles();
+        this.initTreeResize();
     },
 
     renderBreadcrumb: function() {
         var el = document.getElementById('kb-breadcrumb');
         if (!el) return;
-        var h = '<span class="kb-bc-home" onclick="KnowledgeBase.currentKbId=null;KnowledgeBase.renderKbList()">🏠 知识库</span>';
+        var h = '<span class="kb-bc-home" onclick="KnowledgeBase.currentKbId=null;KnowledgeBase.renderKbList()">🏠 文件库</span>';
         for (var i = 0; i < this.currentPath.length; i++) {
             var p = this.currentPath[i];
             h += '<span class="kb-bc-sep">›</span>';
@@ -187,19 +322,18 @@ var KnowledgeBase = {
     },
 
     renderCategoryTree: function() {
-        var pane = document.getElementById('kb-tree-pane');
-        if (!pane) return;
+        var content = document.getElementById('kb-tree-content');
+        if (!content) return;
 
         var curPathNorm = (this.localCurrentSubdir || '').replace(/\\/g, '/');
         var pathParts = curPathNorm ? ('/' + curPathNorm).replace(/\/+/g, '/') : '/';
 
-        var h = '<div class="kb-tree-title">目录</div>';
-        h += '<div class="kb-tree-node">';
-        h += '<div class="kb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="KnowledgeBase.goToRoot()">📂 全部文件</div>';
+        var h = '<div class="kb-tree-node">';
+        h += '<div class="kb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="KnowledgeBase.goToRoot()">📂 ' + (escapeHtmlText(this.kbName) || '文件库') + '</div>';
         h += '</div>';
 
         h += this._renderTreeNodes(this._categoryTree, 0, pathParts);
-        pane.innerHTML = h;
+        content.innerHTML = h;
     },
 
     _renderTreeNodes: function(nodes, depth, activePath) {
@@ -244,7 +378,7 @@ var KnowledgeBase = {
         this.localCurrentSubdir = subdir || '';
         this.currentSort = { field: 'mtime', asc: false };
         this.selectedDocs = {};
-        this.currentPath = [{ id: this.currentKbId, name: this.kbName || '未知知识库', type: 'kb' }];
+        this.currentPath = [{ id: this.currentKbId, name: this.kbName || '未知文件库', type: 'kb' }];
         if (subdir) {
             var parts = subdir.replace(/\\/g, '/').split('/');
             for (var i = 0; i < parts.length; i++) {
@@ -284,6 +418,7 @@ var KnowledgeBase = {
 
         var self = this;
         var h = '<table class="kb-file-table"><thead><tr>';
+        h += '<th class="col-check"><input type="checkbox" id="kb-select-all" onchange="KnowledgeBase.toggleSelectAll(this)" title="全选/取消"></th>';
         h += '<th class="col-icon"></th>';
         h += '<th class="col-name" onclick="KnowledgeBase.setSort(\'name\')">名称<span class="sort-arrow">' + (sf === 'name' ? (sa ? '▲' : '▼') : '') + '</span></th>';
         h += '<th class="col-date" onclick="KnowledgeBase.setSort(\'mtime\')">修改时间<span class="sort-arrow">' + (sf === 'mtime' ? (sa ? '▲' : '▼') : '') + '</span></th>';
@@ -293,9 +428,11 @@ var KnowledgeBase = {
 
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
-            h += '<tr class="kb-file-row kb-local-dir" onclick="KnowledgeBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')" style="cursor:pointer">';
+            var catEscPathAttr = cat.path.replace(/'/g, "\\'");
+            h += '<tr class="kb-file-row kb-local-dir" data-local-path="' + catEscPathAttr + '">';
+            h += '<td class="col-check"><input type="checkbox" class="kb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
             h += '<td class="col-icon"><span class="kb-file-icon">📁</span></td>';
-            h += '<td class="col-name"><div class="kb-file-name">' + escapeHtmlText(cat.name) + '</div></td>';
+            h += '<td class="col-name"><div class="kb-file-name" onclick="KnowledgeBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
             h += '<td class="col-type">文件夹</td>';
             h += '<td class="col-size"></td>';
@@ -310,20 +447,472 @@ var KnowledgeBase = {
             var date = self.formatDate(f.mtime);
             var fname = escapeHtmlText(f.name);
             var escPath = f.path.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
+            var escPathAttr = f.path.replace(/'/g, "\\'");
 
             h += '<tr class="kb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '">';
+            h += '<td class="col-check"><input type="checkbox" class="kb-item-check" data-path="' + escPathAttr + '" data-type="file" onclick="event.stopPropagation()"></td>';
             h += '<td class="col-icon"><span class="kb-file-icon">' + icon + '</span></td>';
             h += '<td class="col-name"><div class="kb-file-name" ondblclick="KnowledgeBase.dblClickFile(event)" onclick="event.stopPropagation()">' + fname + '<span class="kb-file-type-tag">' + ext + '</span></div></td>';
             h += '<td class="col-date"><span class="kb-file-date">' + date + '</span></td>';
             h += '<td class="col-type">' + ext + '</td>';
             h += '<td class="col-size"><span class="kb-file-size">' + size + '</span></td>';
             h += '<td class="col-actions"><span class="kb-file-actions">';
-            h += '<a href="' + url.replace('local-files', 'local-files/download') + '&path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(authToken) + '" onclick="event.stopPropagation()">下载</a>';
+            h += '<a href="#" onclick="KnowledgeBase.triggerReplace(\'' + escPathAttr + '\');return false">替换</a>';
             h += '<a href="#" onclick="KnowledgeBase.openFile(\'' + escPath + '\');return false">打开</a>';
             h += '</span></td></tr>';
         }
         h += '</tbody></table>';
         div.innerHTML = h;
+    },
+
+    toggleSelectAll: function(el) {
+        var checks = document.querySelectorAll('.kb-item-check');
+        for (var i = 0; i < checks.length; i++) {
+            checks[i].checked = el.checked;
+        }
+    },
+
+    getSelectedPaths: function() {
+        var checks = document.querySelectorAll('.kb-item-check:checked');
+        var paths = [];
+        for (var i = 0; i < checks.length; i++) {
+            var chk = checks[i];
+            paths.push({ path: chk.getAttribute('data-path'), type: chk.getAttribute('data-type') });
+        }
+        return paths;
+    },
+
+    downloadAction: async function() {
+        var items = this.getSelectedPaths();
+        if (items.length === 0) {
+            alert('请至少选择一个文件或文件夹');
+            return;
+        }
+        if (items.length === 1 && items[0].type === 'file') {
+            window.open('/api/kb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
+        } else {
+            var paths = [];
+            for (var i = 0; i < items.length; i++) {
+                paths.push(items[i].path);
+            }
+            if (paths.length === 0) {
+                alert('请至少选择一个文件或文件夹');
+                return;
+            }
+            var url = '/api/kb/' + this.currentKbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
+            try {
+                var resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: paths })
+                });
+                if (!resp.ok) { alert('下载失败'); return; }
+                var blob = await resp.blob();
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'files.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+            } catch (e) {
+                alert('下载失败');
+            }
+        }
+    },
+
+    batchDelete: async function() {
+        var items = this.getSelectedPaths();
+        if (items.length === 0) {
+            alert('请至少选择一个文件或文件夹');
+            return;
+        }
+        if (!confirm('确定删除选中的 ' + items.length + ' 个项目吗？（此操作不可恢复）')) return;
+        var paths = [];
+        for (var i = 0; i < items.length; i++) paths.push(items[i].path);
+        var self = this;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files', 'DELETE', { paths: paths });
+        if (res.success) {
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            if (res.errors && res.errors.length > 0) {
+                alert('成功删除 ' + res.deleted + ' 个，失败: ' + res.errors.join(', '));
+            }
+            await self.renderDetail();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    },
+
+    triggerReplace: function(relPath) {
+        this._replacePath = relPath;
+        var inp = document.getElementById('kb-replace-input');
+        if (inp) inp.click();
+    },
+
+    handleReplace: async function(fileInput) {
+        var relPath = this._replacePath;
+        if (!relPath || !fileInput.files || !fileInput.files[0]) return;
+        this._replacePath = null;
+
+        var formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        var url = '/api/kb/' + this.currentKbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var resp = await fetch(url, { method: 'PUT', body: formData });
+        var res = await resp.json();
+        fileInput.value = '';
+
+        if (res.success) {
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            await this.renderDetail();
+        } else {
+            alert(res.message || '替换失败');
+        }
+    },
+
+    toggleUploadMenu: function(e) {
+        e.stopPropagation();
+        var menu = document.querySelector('.kb-upload-menu');
+        if (!menu) return;
+        var isVisible = menu.style.display === 'block';
+        this._hideAllMenus();
+        if (!isVisible) {
+            menu.style.display = 'block';
+            var self = this;
+            this._hideUploadMenuHandler = function() { self._hideAllMenus(); };
+            setTimeout(function() {
+                document.addEventListener('click', self._hideUploadMenuHandler);
+            }, 0);
+        }
+    },
+
+    _hideAllMenus: function() {
+        var menus = document.querySelectorAll('.kb-upload-menu');
+        for (var i = 0; i < menus.length; i++) {
+            menus[i].style.display = 'none';
+        }
+        if (this._hideUploadMenuHandler) {
+            document.removeEventListener('click', this._hideUploadMenuHandler);
+            this._hideUploadMenuHandler = null;
+        }
+    },
+
+    triggerFileUpload: function() {
+        this._hideAllMenus();
+        var inp = document.getElementById('kb-file-upload-input');
+        if (inp) inp.click();
+    },
+
+    triggerFolderUpload: function() {
+        this._hideAllMenus();
+        var inp = document.getElementById('kb-folder-upload-input');
+        if (inp) inp.click();
+    },
+
+    triggerUpload: function() {
+        var inp = document.getElementById('kb-file-upload-input');
+        if (inp) inp.click();
+    },
+
+    handleFileUpload: async function(fileInput) {
+        if (!fileInput.files || fileInput.files.length === 0) return;
+        var self = this;
+        var formData = new FormData();
+        for (var i = 0; i < fileInput.files.length; i++) {
+            formData.append('files', fileInput.files[i]);
+        }
+
+        var subdir = this.localCurrentSubdir || '';
+        var url = '/api/kb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var resp = await fetch(url, { method: 'POST', body: formData });
+        var res = await resp.json();
+        fileInput.value = '';
+
+        if (res.success) {
+            self._categoryTree = null;
+            self._treeLoaded = false;
+            await self.renderDetail();
+        } else {
+            alert(res.message || '上传失败');
+        }
+    },
+
+    handleFolderUpload: async function(fileInput) {
+        if (!fileInput.files || fileInput.files.length === 0) return;
+        var self = this;
+        var formData = new FormData();
+        for (var i = 0; i < fileInput.files.length; i++) {
+            var f = fileInput.files[i];
+            var relativePath = f.webkitRelativePath || f.name;
+            formData.append('files', f, relativePath);
+        }
+
+        var subdir = this.localCurrentSubdir || '';
+        var url = '/api/kb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var resp = await fetch(url, { method: 'POST', body: formData });
+        var res = await resp.json();
+        fileInput.value = '';
+
+        if (res.success) {
+            self._categoryTree = null;
+            self._treeLoaded = false;
+            await self.renderDetail();
+        } else {
+            alert(res.message || '上传失败');
+        }
+    },
+
+    showCreateFolderDialog: function() {
+        this._createFolder('新建文件夹');
+    },
+
+    _createFolder: async function(name) {
+        var self = this;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/dir', 'POST', {
+            name: name,
+            parent: this.localCurrentSubdir || ''
+        });
+        if (res.success) {
+            self._categoryTree = null;
+            self._treeLoaded = false;
+            await self.renderDetail();
+        } else {
+            alert(res.message || '创建失败');
+        }
+    },
+
+    showCreateMdDialog: function() {
+        this._createMdFile('新建文件');
+    },
+
+    _createMdFile: async function(name) {
+        var self = this;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/create', 'POST', {
+            name: name,
+            parent: this.localCurrentSubdir || ''
+        });
+        if (res.success) {
+            self._categoryTree = null;
+            self._treeLoaded = false;
+            self.openMarkdownEditor(res.path);
+        } else {
+            alert(res.message || '创建失败');
+        }
+    },
+
+    showContextMenu: function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.hideContextMenu();
+
+        var target = event.target;
+        var fileRow = target.closest('.kb-file-row');
+
+        var menu = document.createElement('div');
+        menu.className = 'kb-context-menu';
+        menu.id = 'kb-context-menu';
+        menu.style.zIndex = '4000';
+
+        if (fileRow) {
+            var path = fileRow.getAttribute('data-local-path') || '';
+            var isDir = fileRow.classList.contains('kb-local-dir');
+            menu.innerHTML = this._buildFileContextMenu(path, isDir);
+        } else {
+            menu.innerHTML = this._buildEmptyContextMenu();
+        }
+
+        menu.style.left = Math.min(event.clientX, window.innerWidth - 180) + 'px';
+        menu.style.top = Math.min(event.clientY, window.innerHeight - 220) + 'px';
+        document.body.appendChild(menu);
+
+        this._hideContextMenuHandler = function() { KnowledgeBase.hideContextMenu(); };
+        setTimeout(function() {
+            document.addEventListener('click', KnowledgeBase._hideContextMenuHandler);
+        }, 0);
+    },
+
+    hideContextMenu: function() {
+        var menu = document.getElementById('kb-context-menu');
+        if (menu) menu.remove();
+        if (this._hideContextMenuHandler) {
+            document.removeEventListener('click', this._hideContextMenuHandler);
+            this._hideContextMenuHandler = null;
+        }
+    },
+
+    _buildFileContextMenu: function(path, isDir) {
+        var escPath = path.replace(/'/g, "\\'");
+        var h = '';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextRename(\'' + escPath + '\')"><span class="icon">✏️</span> 重命名</div>';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextCopyOne(\'' + escPath + '\')"><span class="icon">📋</span> 复制</div>';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextMoveOne(\'' + escPath + '\')"><span class="icon">📦</span> 移动</div>';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon">📥</span> 下载</div>';
+        h += '<div class="kb-menu-divider"></div>';
+        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon">🗑️</span> 删除</div>';
+        return h;
+    },
+
+    _buildEmptyContextMenu: function() {
+        return '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateFolderDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
+               '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateMdDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
+    },
+
+    contextRename: async function(path) {
+        this.hideContextMenu();
+        var oldName = path.split('/').pop();
+        var newName = prompt('重命名为：', oldName);
+        if (!newName || !newName.trim() || newName.trim() === oldName) return;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/rename', 'PUT', {
+            path: path,
+            new_name: newName.trim()
+        });
+        if (res.success) {
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            await this.renderDetail();
+        } else {
+            alert(res.message || '重命名失败');
+        }
+    },
+
+    contextCopyOne: async function(path) {
+        this.hideContextMenu();
+        var self = this;
+        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        h += '<h3>📋 复制到</h3>';
+        h += '<p style="color:#666;font-size:12px">' + escapeHtmlText(path) + '</p>';
+        h += '<div class="kb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="kb-tree-node"><div class="kb-tree-label active" onclick="KnowledgeBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this._categoryTree, 0);
+        h += '</div>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="kb-move-dest-label">根目录</span></div>';
+        h += '<div class="kb-modal-actions">';
+        h += '<button class="btn" onclick="KnowledgeBase.doCopyOne()">复制</button>';
+        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        this._copySource = path;
+        this._moveDest = '';
+        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+    },
+
+    doCopyOne: async function() {
+        var src = this._copySource;
+        var dest = this._moveDest || '';
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/copy', 'POST', {
+            sources: [src],
+            dest: dest
+        });
+        this.closeModal();
+        if (res.success) {
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            await this.renderDetail();
+        } else {
+            alert(res.message || '复制失败');
+        }
+    },
+
+    contextMoveOne: function(path) {
+        this.hideContextMenu();
+        var row = document.querySelector('.kb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        if (row) {
+            var chk = row.querySelector('.kb-item-check');
+            if (chk) chk.checked = true;
+        }
+        this.showMoveDialog();
+    },
+
+    contextDownloadOne: function(path) {
+        this.hideContextMenu();
+        window.open('/api/kb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+    },
+
+    contextDeleteOne: async function(path) {
+        this.hideContextMenu();
+        if (!confirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）')) return;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files', 'DELETE', { paths: [path] });
+        if (res.success) {
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            await this.renderDetail();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    },
+
+    showMoveDialog: function() {
+        var items = this.getSelectedPaths();
+        if (items.length === 0) {
+            alert('请至少选择一个文件或文件夹');
+            return;
+        }
+        var self = this;
+        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        h += '<h3>📦 移动到</h3>';
+        h += '<p style="color:#666;font-size:12px">已选择 ' + items.length + ' 个项目</p>';
+        h += '<div class="kb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="kb-tree-node"><div class="kb-tree-label active" onclick="KnowledgeBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this._categoryTree, 0);
+        h += '</div>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="kb-move-dest-label">根目录</span></div>';
+        h += '<div class="kb-modal-actions">';
+        h += '<button class="btn" onclick="KnowledgeBase.doMove()">移动</button>';
+        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        this._moveDest = '';
+        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+    },
+
+    _renderMoveTree: function(nodes, depth) {
+        var h = '';
+        var ml = depth * 12 + 8;
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            var hasChildren = n.children && n.children.length > 0;
+            h += '<div class="kb-tree-node">';
+            h += '<div class="kb-tree-label" style="padding-left:' + ml + 'px" onclick="KnowledgeBase._selectMoveDest(\'' + (n.path || '').replace(/'/g, "\\'") + '\', this)" data-dest="' + (n.path || '') + '">📁 ' + escapeHtmlText(n.name) + '</div>';
+            if (hasChildren) {
+                h += '<div style="display:block">';
+                h += this._renderMoveTree(n.children, depth + 1);
+                h += '</div>';
+            }
+            h += '</div>';
+        }
+        return h;
+    },
+
+    _selectMoveDest: function(dest, el) {
+        this._moveDest = dest;
+        var labels = document.querySelectorAll('#kb-modal-overlay .kb-tree-label');
+        for (var i = 0; i < labels.length; i++) labels[i].classList.remove('active');
+        el.classList.add('active');
+        var label = document.getElementById('kb-move-dest-label');
+        if (label) label.textContent = dest || '根目录';
+    },
+
+    doMove: async function() {
+        var items = this.getSelectedPaths();
+        if (items.length === 0) return;
+        var sources = [];
+        for (var i = 0; i < items.length; i++) sources.push(items[i].path);
+        var dest = this._moveDest || '';
+
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
+        this.closeModal();
+        if (res.success) {
+            if (res.errors && res.errors.length > 0) {
+                alert('成功移动 ' + res.moved + ' 个，失败: ' + res.errors.join(', '));
+            }
+            this._categoryTree = null;
+            this._treeLoaded = false;
+            await this.renderDetail();
+        } else {
+            alert(res.message || '移动失败');
+        }
     },
 
     dblClickFile: function(event) {
@@ -334,7 +923,88 @@ var KnowledgeBase = {
     },
 
     openFile: function(relPath) {
-        window.open('/api/kb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
+        var ext = relPath.split('.').pop().toLowerCase();
+        if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
+            this.openMarkdownEditor(relPath);
+        } else {
+            window.open('/api/kb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
+        }
+    },
+
+    openMarkdownEditor: async function(relPath) {
+        var self = this;
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/content?path=' + encodeURIComponent(relPath), 'GET');
+        var content = res.success ? (res.content || '') : '';
+        var fileName = relPath.split('/').pop();
+
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-md-editor-overlay';
+        overlay.id = 'kb-md-editor-overlay';
+        overlay.innerHTML =
+            '<div class="kb-md-editor-container">' +
+            '<div class="kb-md-editor-header">' +
+            '<span class="kb-md-editor-title">📝 ' + escapeHtmlText(fileName) + '</span>' +
+            '<div class="kb-md-editor-actions">' +
+            '<button class="kb-md-btn-save" onclick="KnowledgeBase._saveMdContent()">💾 保存</button>' +
+            '<button class="kb-md-btn-close" onclick="KnowledgeBase._closeMdEditor()">✖ 关闭</button>' +
+            '</div></div>' +
+            '<textarea id="kb-md-editor-textarea"></textarea>' +
+            '</div>';
+        document.body.appendChild(overlay);
+
+        this._mdEditorRelPath = relPath;
+
+        var textarea = document.getElementById('kb-md-editor-textarea');
+        if (typeof EasyMDE !== 'undefined') {
+            var easyMDE = new EasyMDE({
+                element: textarea,
+                spellChecker: false,
+                autosave: { enabled: false },
+                placeholder: '开始编写 Markdown...',
+                toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|', 'link', 'image', '|', 'preview', 'side-by-side', 'fullscreen', '|', 'guide'],
+                initialValue: content,
+                sideBySideFullscreen: false
+            });
+            this._mdEditorInstance = easyMDE;
+        } else {
+            textarea.value = content;
+        }
+
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) self._closeMdEditor();
+        });
+    },
+
+    _saveMdContent: async function() {
+        var content = '';
+        if (this._mdEditorInstance && typeof this._mdEditorInstance.value === 'function') {
+            content = this._mdEditorInstance.value();
+        } else {
+            var ta = document.getElementById('kb-md-editor-textarea');
+            if (ta) content = ta.value;
+        }
+
+        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/content', 'PUT', {
+            path: this._mdEditorRelPath,
+            content: content
+        });
+
+        if (res.success) {
+            this._closeMdEditor();
+            this.renderDetail();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    },
+
+    _closeMdEditor: function() {
+        if (this._mdEditorInstance && typeof this._mdEditorInstance.toTextArea === 'function') {
+            this._mdEditorInstance.toTextArea();
+        }
+        this._mdEditorInstance = null;
+        this._mdEditorRelPath = null;
+        var overlay = document.getElementById('kb-md-editor-overlay');
+        if (overlay) overlay.remove();
     },
 
     setSort: async function(field) {
@@ -348,56 +1018,56 @@ var KnowledgeBase = {
     },
 
     toggleTreePane: function() {
+        var body = document.querySelector('.kb-explorer-body');
+        if (!body) return;
+        body.classList.toggle('collapsed');
+        localStorage.setItem('kb_tree_collapsed', body.classList.contains('collapsed') ? '1' : '0');
+    },
+
+    initTreeResize: function() {
+        var handle = document.getElementById('kb-tree-resize-handle');
         var pane = document.getElementById('kb-tree-pane');
-        if (!pane) return;
-        var btn = pane.querySelector('.kb-tree-toggle-btn');
-        if (pane.classList.contains('collapsed')) {
-            pane.classList.remove('collapsed');
-            if (btn) btn.textContent = '◀';
-        } else {
-            pane.classList.add('collapsed');
-            if (btn) btn.textContent = '▶';
-        }
+        if (!handle || !pane) return;
+
+        var saved = localStorage.getItem('kb_tree_width');
+        if (saved) { pane.style.width = saved + 'px'; }
+
+        var startX, startW;
+
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            startX = e.clientX;
+            startW = pane.offsetWidth;
+            document.body.classList.add('kb-resizing');
+            handle.classList.add('active');
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!startW) return;
+            var dx = e.clientX - startX;
+            var newW = Math.max(80, Math.min(500, startW + dx));
+            pane.style.width = newW + 'px';
+        });
+
+        document.addEventListener('mouseup', function() {
+            if (startW) {
+                localStorage.setItem('kb_tree_width', pane.offsetWidth);
+                startW = null;
+                document.body.classList.remove('kb-resizing');
+                handle.classList.remove('active');
+            }
+        });
     },
 
-    showCreateKb: async function() {
-        var self = this;
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
-        h += '<h3>📁 新建知识库</h3>';
-        h += '<div class="form-group"><label>知识库名称</label><input type="text" id="kb-local-name" placeholder="输入名称"></div>';
-        h += '<div class="form-group"><label>本地目录路径（绝对路径）</label>';
-        h += '<div style="display:flex;gap:8px"><input type="text" id="kb-local-path" placeholder="例如: D:\\文档库" style="flex:1">';
-        h += '<button class="btn" onclick="KnowledgeBase._pickFolder()" style="width:auto;padding:8px 12px">选择...</button></div></div>';
-        h += '<div class="kb-modal-actions">';
-        h += '<button class="btn" onclick="KnowledgeBase._createAct()">创建</button>';
-        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
-        h += '</div></div></div>';
-        document.body.insertAdjacentHTML('beforeend', h);
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
-    },
-
-    _pickFolder: async function() {
-        var res = await this.api('/select_folder', 'POST');
-        if (res.success && res.path) {
-            document.getElementById('kb-local-path').value = res.path;
-        }
-    },
-
-    _createAct: async function() {
-        var name = document.getElementById('kb-local-name').value.trim();
-        var localPath = document.getElementById('kb-local-path').value.trim();
-        if (!name) { alert('请输入知识库名称'); return; }
-        if (!localPath) { alert('请指定本地目录路径'); return; }
-        var res = await this.api('/api/kb/list', 'POST', { name: name, kb_type: 'local', local_path: localPath });
-        if (res.success) { this.closeModal(); await this.renderKbList(); }
-        else alert(res.message || '创建失败');
+    _displayLocalPath: function() {
+        return this.displayPath || this.localPath || '';
     },
 
     showSettings: async function() {
         var self = this;
         var res = await this.api('/api/kb/' + this.currentKbId + '/members', 'GET');
         var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
-        h += '<h3>⚙ 知识库设置</h3><h4>成员管理</h4>';
+        h += '<h3>⚙ 文件库设置</h3><h4>成员管理</h4>';
         if (res.success && res.members) {
             h += '<table class="kb-member-table"><thead><tr><th>用户名</th><th>权限</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < res.members.length; i++) {
@@ -418,9 +1088,33 @@ var KnowledgeBase = {
             h += '</tbody></table>';
         }
         h += '<div class="kb-add-member"><input type="text" id="kb-new-member" placeholder="用户名"><select id="kb-new-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select><button onclick="KnowledgeBase._addMemberAct()">添加</button></div>';
+        h += '<hr style="margin:16px 0"><h4>批量设置用户权限</h4>';
+        h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
+        h += '<select id="kb-batch-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select>';
+        h += '<button onclick="KnowledgeBase._batchSetUsers()">应用到所选用户</button>';
+        h += '<button onclick="KnowledgeBase._batchSetAllUsers()">应用到所有用户</button>';
+        h += '</div>';
+        h += '<div class="kb-batch-user-list" style="max-height:200px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px">';
+        var allUsers = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
+        var memberMap = {};
+        if (res.success && res.members) {
+            for (var j = 0; j < res.members.length; j++) {
+                memberMap[res.members[j].username] = res.members[j];
+            }
+        }
+        for (var k = 0; k < allUsers.length; k++) {
+            var u = allUsers[k];
+            if (u.username === authUsername) continue;
+            var curPerm = memberMap[u.username] ? memberMap[u.username].permission : '';
+            var checked = curPerm ? ' checked' : '';
+            h += '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer">';
+            h += '<input type="checkbox" class="kb-batch-user-chk" data-username="' + escapeHtmlText(u.username) + '"' + checked + '>';
+            h += escapeHtmlText(u.username) + (curPerm ? ' <span style="color:#888;font-size:11px">(' + (curPerm === 'manage' ? '管理' : curPerm === 'edit' ? '编辑' : '查看') + ')</span>' : '');
+            h += '</label>';
+        }
+        h += '</div>';
         h += '<hr style="margin:16px 0"><h4>转让所有权</h4>';
         h += '<div class="kb-add-member"><input type="text" id="kb-transfer-user" placeholder="新所有者用户名"><button onclick="KnowledgeBase._transferAct()">转让</button></div>';
-        h += '<hr style="margin:16px 0"><button class="kb-btn-danger" onclick="KnowledgeBase._deleteKbAct()">删除知识库</button>';
         h += '<div class="kb-modal-actions"><button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -451,10 +1145,32 @@ var KnowledgeBase = {
         else alert(res.message);
     },
 
+    _batchSetUsers: async function() {
+        var perm = document.getElementById('kb-batch-perm').value;
+        var chks = document.querySelectorAll('.kb-batch-user-chk:checked');
+        var count = 0;
+        for (var i = 0; i < chks.length; i++) {
+            var uname = chks[i].getAttribute('data-username');
+            try {
+                await this.api('/api/kb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
+                count++;
+            } catch (e) {}
+        }
+        this.closeModal();
+        this.showSettings();
+        if (count > 0) alert('已为 ' + count + ' 个用户设置权限');
+    },
+
+    _batchSetAllUsers: async function() {
+        var chks = document.querySelectorAll('.kb-batch-user-chk');
+        for (var i = 0; i < chks.length; i++) chks[i].checked = true;
+        await this._batchSetUsers();
+    },
+
     _transferAct: async function() {
         var uname = document.getElementById('kb-transfer-user').value.trim();
         if (!uname) return;
-        if (!confirm('确定将知识库所有权转让给 ' + uname + ' 吗？')) return;
+        if (!confirm('确定将文件库所有权转让给 ' + uname + ' 吗？')) return;
         var users = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
         var tid = null;
         for (var i = 0; i < users.length; i++) {
@@ -467,7 +1183,7 @@ var KnowledgeBase = {
     },
 
     _deleteKbAct: async function() {
-        if (!confirm('确定要删除此知识库吗？（不会删除本地文件）')) return;
+        if (!confirm('确定要删除此文件库吗？')) return;
         var res = await this.api('/api/kb/' + this.currentKbId, 'DELETE');
         if (res.success) { this.closeModal(); this.currentKbId = null; await this.renderKbList(); }
         else alert(res.message);
@@ -511,7 +1227,7 @@ var KnowledgeBase = {
         var h = '<h3>🔍 搜索: ' + escapeHtmlText(q) + '</h3>';
         h += '<button onclick="KnowledgeBase.init()" style="margin-bottom:8px">← 返回</button>';
         if (res.success && res.results && res.results.length > 0) {
-            h += '<table class="kb-file-table"><thead><tr><th>知识库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
+            h += '<table class="kb-file-table"><thead><tr><th>文件库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < res.results.length; i++) {
                 var r = res.results[i];
                 if (!r.rel_path && !r.kb_type) continue;
@@ -549,19 +1265,85 @@ var KnowledgeBase = {
             }
         }
         this.currentSort = { field: 'mtime', asc: false };
+
+        localStorage.setItem('docproc_current_kb_id', kbId);
+        localStorage.setItem('docproc_current_kb_permission', 'view');
+        localStorage.setItem('docproc_current_kb_name', kbName);
+        localStorage.setItem('docproc_current_kb_local_path', '');
+        localStorage.setItem('docproc_current_kb_display_path', '');
+
         await this.renderDetail();
+    },
+
+    showTrash: async function() {
+        var self = this;
+        var res = await this.api('/api/kb/trash-list', 'GET');
+        var items = res.success ? (res.items || []) : [];
+
+        var h = '<div class="kb-explorer"><div class="kb-breadcrumb">';
+        h += '<span class="kb-bc-home" onclick="KnowledgeBase.renderKbList()">📁 文件库首页</span>';
+        h += '<span class="kb-bc-sep">›</span><span class="kb-bc-current">🗑️ 回收站</span>';
+        h += '</div><div class="kb-explorer-body" style="flex-direction:column;border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
+
+        if (items.length === 0) {
+            h += '<div class="kb-empty">回收站为空</div>';
+        } else {
+            h += '<div style="display:flex;padding:8px 12px;gap:8px;border-bottom:1px solid #e1e4e8;background:#fafbfc">';
+            h += '<button onclick="KnowledgeBase.clearTrash()" class="kb-btn-danger" style="padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px">🧹 清空回收站</button>';
+            h += '</div>';
+            h += '<div style="padding:0;overflow-y:auto;flex:1">';
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                var escName = it.name.replace(/'/g, "\\'");
+                h += '<div class="kb-trash-item" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #f0f0f0">';
+                h += '<div><strong>🗑️ ' + escapeHtmlText(it.name) + '</strong><br><small style="color:#888">' + new Date(it.mtime * 1000).toLocaleString('zh-CN') + '</small></div>';
+                h += '<div style="display:flex;gap:8px">';
+                h += '<button onclick="KnowledgeBase.restoreTrashItem(\'' + escName + '\')" style="padding:5px 14px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:4px;cursor:pointer;font-size:12px">↩ 恢复</button>';
+                h += '<button onclick="KnowledgeBase.deleteTrashItem(\'' + escName + '\')" class="kb-btn-remove" style="padding:5px 14px;border-radius:4px;cursor:pointer;font-size:12px">彻底删除</button>';
+                h += '</div></div>';
+            }
+            h += '</div>';
+        }
+
+        h += '</div></div>';
+        document.getElementById('kb-view').innerHTML = h;
+    },
+
+    restoreTrashItem: async function(name) {
+        var res = await this.api('/api/kb/trash-restore', 'POST', { name: name });
+        if (res.success) {
+            await this.renderKbList();
+        } else {
+            alert(res.message || '恢复失败');
+        }
+    },
+
+    deleteTrashItem: async function(name) {
+        if (!confirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！')) return;
+        var url = '/api/kb/trash-item?name=' + encodeURIComponent(name) + '&token=' + encodeURIComponent(authToken);
+        await fetch(url, { method: 'DELETE' });
+        await this.showTrash();
+    },
+
+    clearTrash: async function() {
+        if (!confirm('确定清空回收站吗？此操作不可恢复！')) return;
+        await this.api('/api/kb/trash', 'DELETE');
+        await this.renderKbList();
     },
 
     getFileIcon: function(ext) {
         var e = (ext || '').toLowerCase();
-        if (e === '.docx' || e === '.doc') return '📄';
-        if (e === '.xlsx' || e === '.xls') return '📊';
-        if (e === '.pptx' || e === '.ppt') return '📽️';
-        if (e === '.pdf') return '📕';
-        if (e === '.md') return '📝';
-        if (e === '.txt') return '📃';
-        if (e === '.html' || e === '.htm') return '🌐';
-        return '📎';
+        var cls = 'kb-file-icon-file kb-icon-other', label = '?';
+        if (e === '.doc' || e === '.docx') { cls = 'kb-file-icon-file kb-icon-doc'; label = 'W'; }
+        else if (e === '.xls' || e === '.xlsx') { cls = 'kb-file-icon-file kb-icon-xls'; label = 'X'; }
+        else if (e === '.ppt' || e === '.pptx') { cls = 'kb-file-icon-file kb-icon-ppt'; label = 'P'; }
+        else if (e === '.pdf') { cls = 'kb-file-icon-file kb-icon-pdf'; label = 'P'; }
+        else if (e === '.md') { cls = 'kb-file-icon-file kb-icon-md'; label = 'M'; }
+        else if (e === '.txt') { cls = 'kb-file-icon-file kb-icon-txt'; label = 'T'; }
+        else if (e === '.html' || e === '.htm') { cls = 'kb-file-icon-file kb-icon-html'; label = 'H'; }
+        else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-img'; label = 'I'; }
+        else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-zip'; label = 'Z'; }
+        return '<span class="' + cls + '">' + label + '</span>';
     },
 
     formatSize: function(bytes) {

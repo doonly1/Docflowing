@@ -1178,10 +1178,6 @@
             }
 
             await initConfig();
-
-            if (isRemoteMode()) {
-                document.getElementById('workdir').value = (authUsername || 'default').slice(0, 8) + '/workdir';
-            }
         }
 
         document.addEventListener('DOMContentLoaded', async function() {
@@ -1189,6 +1185,32 @@
                 document.getElementById('authOverlay').style.display = 'none';
                 updateSidebarUser(authUsername);
                 initApp();
+
+                var savedView = localStorage.getItem('docproc_current_view');
+                if (savedView === 'kb') {
+                    var savedKbId = localStorage.getItem('docproc_current_kb_id');
+                    if (savedKbId) {
+                        if (typeof KnowledgeBase !== 'undefined') {
+                            KnowledgeBase.currentKbId = savedKbId;
+                            KnowledgeBase.currentPermission = localStorage.getItem('docproc_current_kb_permission') || 'view';
+                            KnowledgeBase.kbName = localStorage.getItem('docproc_current_kb_name') || '';
+                            KnowledgeBase.localPath = localStorage.getItem('docproc_current_kb_local_path') || '';
+                            KnowledgeBase.displayPath = localStorage.getItem('docproc_current_kb_display_path') || '';
+                            KnowledgeBase.canEdit = KnowledgeBase.currentPermission === 'edit' || KnowledgeBase.currentPermission === 'manage';
+                            KnowledgeBase.canManage = KnowledgeBase.currentPermission === 'manage';
+                        }
+                        document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
+                        var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
+                        if (navItem) navItem.classList.add('active');
+                        var homeView = document.getElementById('home-view');
+                        var kbView = document.getElementById('kb-view');
+                        if (homeView) homeView.style.display = 'none';
+                        if (kbView) kbView.style.display = '';
+                        if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.init();
+                    } else {
+                        navigateTo('kb');
+                    }
+                }
             } else {
                 document.getElementById('authOverlay').style.display = 'flex';
                 document.getElementById('authUsername').focus();
@@ -1235,6 +1257,8 @@ document.addEventListener('click', function(e) {
 });
 
 function navigateTo(view) {
+    localStorage.setItem('docproc_current_view', view);
+
     document.querySelectorAll('.sidebar-nav-item').forEach(function(el) {
         el.classList.remove('active');
     });
@@ -1245,6 +1269,11 @@ function navigateTo(view) {
     var homeView = document.getElementById('home-view');
 
     if (view === 'home') {
+        localStorage.removeItem('docproc_current_kb_id');
+        localStorage.removeItem('docproc_current_kb_name');
+        localStorage.removeItem('docproc_current_kb_local_path');
+        localStorage.removeItem('docproc_current_kb_display_path');
+        localStorage.removeItem('docproc_current_kb_permission');
         if (kbView) kbView.style.display = 'none';
         if (homeView) homeView.style.display = '';
         if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.currentKbId = null;
@@ -1252,7 +1281,7 @@ function navigateTo(view) {
         if (!authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
-        if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.init();
+        if (typeof KnowledgeBase !== 'undefined') { KnowledgeBase.currentKbId = null; KnowledgeBase.init(); }
     } else if (view === 'config') {
         if (typeof openConfig !== 'undefined') openConfig();
     } else if (view === 'about') {

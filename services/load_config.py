@@ -42,7 +42,7 @@ def load_user_config():
             pass
 
     # 项目模板（只读默认配置）
-    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    template_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  'config', 'config.yaml')
     try:
         with open(template_path, 'r', encoding='utf-8') as f:
