@@ -26,7 +26,7 @@ from kb.routes import kb_bp
 setup_logging()
 logger = get_logger(__name__)
 
-app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
+app = Flask(__name__, template_folder='frontend', static_folder='frontend', static_url_path='')
 CORS(app)
 app.register_blueprint(kb_bp)
 

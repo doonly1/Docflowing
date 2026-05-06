@@ -1,4 +1,4 @@
-﻿﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -700,8 +700,103 @@
             align-items: center;
             gap: 6px;
         }
+
+        .kb-selector-group {
+            margin-bottom: 12px;
+        }
+
+        .kb-selector-group-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .kb-selector-item {
+            padding: 8px 12px;
+            margin: 4px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .kb-selector-item:hover {
+            border-color: #e94560;
+            background: #fff5f5;
+        }
+
+        .kb-selector-item.selected {
+            border-color: #e94560;
+            background: #fff0f3;
+        }
+
+        .kb-selector-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #f5f5f5;
+        }
+
+        .kb-selector-subdirs {
+            margin-left: 24px;
+            border-left: 2px solid #eee;
+            padding-left: 12px;
+        }
+
+        .kb-subdir-item {
+            padding: 6px 10px;
+            margin: 2px 0;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.15s;
+        }
+
+        .kb-subdir-item:hover {
+            background: #f0f2f5;
+        }
+
+        .kb-subdir-item.selected {
+            background: #fff0f3;
+            border-color: #e94560;
+        }
+
+        .kb-selector-breadcrumb {
+            padding: 8px 12px;
+            background: #f9f9f9;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+
+        .kb-selector-breadcrumb span {
+            color: #999;
+        }
+
+        .kb-selector-breadcrumb span.active {
+            color: #333;
+            font-weight: bold;
+        }
+
+        .kb-selector-breadcrumb a {
+            color: #e94560;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .kb-selector-hint {
+            font-size: 11px;
+            color: #999;
+            padding: 4px 0;
+        }
     </style>
-    <link rel="stylesheet" href="frontend/kb/kb.css">
+    <link rel="stylesheet" href="js/kb.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
 </head>
 <body>
@@ -798,6 +893,7 @@
                 <div style="display: flex; gap: 8px;">
                     <input type="text" id="workdir" placeholder="选择文件夹" readonly style="flex:1;">
                     <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">选择文件夹</button>
+                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">📚 从文件库选择</button>
                 </div>
             </div>
 
@@ -932,9 +1028,23 @@
         </div>
     </div>
 
-    <script src="frontend/js/main.js"></script>
+    <script src="js/main.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="frontend/kb/kb.js"></script>
+    <script src="js/kb.js"></script>
+
+    <!-- KB选择器弹窗 -->
+    <div class="modal-overlay" id="kbSelectorModal">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>选择文件库目录</h2>
+                <button class="modal-close" onclick="closeKbSelector()">&times;</button>
+            </div>
+            <div id="kbSelectorList" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
+            <div class="config-actions">
+                <button class="btn" onclick="confirmKbSelection()" style="width: auto;">确认</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

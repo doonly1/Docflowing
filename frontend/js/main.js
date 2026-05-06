@@ -259,6 +259,13 @@
             }
         }
 
+        function getKbInfoFromWorkdir() {
+            var el = document.getElementById('workdir');
+            var kbId = el ? el.getAttribute('data-kb-id') : null;
+            var subdir = el ? el.getAttribute('data-kb-subdir') || '' : '';
+            return { kbId: kbId, subdir: subdir, isKbMode: !!kbId };
+        }
+
         // ==================== 文件列表面板（统一双列） ====================
         async function loadFileList(workdir, tool) {
             if (!tool) return;
@@ -271,16 +278,36 @@
             const isCompare = (tool === 'to_compare');
             label.textContent = isIndex ? '📂目录文件：' : isCompare ? '👇原稿 / 终稿：' : '📂目录文件：';
 
-            const body = isRemoteMode()
-                ? {tool}
-                : {workdir, tool};
+            let filesData;
+            const kbInfo = getKbInfoFromWorkdir();
 
-            const filesRes = await apiFetch('/list_files', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
-            });
-            const filesData = await filesRes.json();
+            if (kbInfo.isKbMode) {
+                let url = '/api/kb/' + kbInfo.kbId + '/local-files';
+                if (kbInfo.subdir) url += '?subdir=' + encodeURIComponent(kbInfo.subdir);
+
+                const filesRes = await apiFetch(url, { method: 'GET' });
+                const kbData = await filesRes.json();
+
+                if (!kbData.success || !kbData.files || kbData.files.length === 0) {
+                    leftList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">目录中无匹配文件</div>';
+                    rightList.innerHTML = '';
+                    panel.style.display = 'block';
+                    return;
+                }
+
+                filesData = { success: true, files: kbData.files };
+            } else {
+                const body = isRemoteMode()
+                    ? {tool}
+                    : {workdir, tool};
+
+                const filesRes = await apiFetch('/list_files', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                filesData = await filesRes.json();
+            }
 
             if (!filesData.success || !filesData.files || filesData.files.length === 0) {
                 leftList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">目录中无匹配文件</div>';
@@ -442,6 +469,14 @@
             const formData = new FormData();
             let uploadCount = 0;
             for (const file of files) {
+                const relativePath = file.webkitRelativePath || file.name;
+                const pathParts = relativePath.split('/');
+
+                // 只保留选定目录下的直接文件，跳过子目录中的文件
+                if (pathParts.length > 2) {
+                    continue;
+                }
+
                 const ext = '.' + file.name.split('.').pop().toLowerCase();
                 if (allowedExt.length === 0 || allowedExt.includes(ext)) {
                     formData.append('files', file);
@@ -580,8 +615,9 @@
         async function runTool() {
             const workdir = document.getElementById('workdir').value.trim();
             const resultDiv = document.getElementById('result');
+            const kbInfo = getKbInfoFromWorkdir();
 
-            if (!isRemoteMode() && !workdir) {
+            if (!isRemoteMode() && !kbInfo.isKbMode && !workdir) {
                 resultDiv.className = 'error';
                 resultDiv.textContent = '请选择工作目录';
                 resultDiv.style.display = 'block';
@@ -608,24 +644,39 @@
             resultDiv.style.display = 'block';
 
             const userConfig = getUserConfig();
-            const bodyData = {
-                tool: currentTool
-            };
-            if (isRemoteMode()) {
-                // token will be in header
-            } else {
-                bodyData.workdir = workdir;
-            }
-            if (selectedFiles.length > 0) bodyData.files = selectedFiles;
-            if (userConfig) bodyData.userConfig = userConfig;
+            let response;
 
-            try {
-                const response = await apiFetch('/run_tool_with_config', {
+            if (kbInfo.isKbMode) {
+                const bodyData = {
+                    tool: currentTool,
+                    subdir: kbInfo.subdir
+                };
+                if (selectedFiles.length > 0) bodyData.files = selectedFiles;
+                if (userConfig) bodyData.userConfig = userConfig;
+
+                response = await apiFetch('/api/kb/' + kbInfo.kbId + '/run-tool', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(bodyData)
                 });
+            } else {
+                const bodyData = { tool: currentTool };
+                if (isRemoteMode()) {
+                    // token will be in header
+                } else {
+                    bodyData.workdir = workdir;
+                }
+                if (selectedFiles.length > 0) bodyData.files = selectedFiles;
+                if (userConfig) bodyData.userConfig = userConfig;
 
+                response = await apiFetch('/run_tool_with_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(bodyData)
+                });
+            }
+
+            try {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 const outputLog = document.getElementById('outputLog');
@@ -659,7 +710,6 @@
                         }
                     }
                 }
-                // 刷新文件列表
                 if (workdir) loadFileList(workdir, currentTool);
             } catch (error) {
                 resultDiv.className = 'error';
@@ -1288,3 +1338,240 @@ function navigateTo(view) {
         if (typeof showAbout !== 'undefined') showAbout();
     }
 }
+
+// ==================== 文件库选择器 ====================
+
+var kbSelectorState = {
+    kbList: [],
+    selectedKbId: null,
+    selectedKbName: '',
+    selectedDisplayPath: '',
+    selectedKbPermission: '',
+    selectedSubdir: '',
+    currentBreadcrumbs: []
+};
+
+window.showKbSelector = async function() {
+    var modal = document.getElementById('kbSelectorModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    requestAnimationFrame(function() { modal.classList.add('show'); });
+
+    kbSelectorState.selectedKbId = null;
+    kbSelectorState.selectedSubdir = '';
+    kbSelectorState.currentBreadcrumbs = [];
+
+    await loadKbSelectorList();
+};
+
+window.closeKbSelector = function() {
+    var modal = document.getElementById('kbSelectorModal');
+    if (!modal) return;
+    modal.classList.remove('show');
+    setTimeout(function() { modal.style.display = 'none'; }, 250);
+};
+
+async function loadKbSelectorList() {
+    var listDiv = document.getElementById('kbSelectorList');
+    if (!listDiv) return;
+    listDiv.innerHTML = '<div style="text-align:center;padding:20px;">加载中...</div>';
+
+    try {
+        var resp = await apiFetch('/api/kb/list', { method: 'GET' });
+        var data = await resp.json();
+
+        if (!data.success || !data.kbs || data.kbs.length === 0) {
+            listDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#999;">暂无文件库</div>';
+            return;
+        }
+
+        kbSelectorState.kbList = data.kbs || [];
+        renderKbSelector();
+    } catch (e) {
+        listDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#dc3545;">加载失败: ' + e.message + '</div>';
+    }
+}
+
+function renderKbSelector() {
+    var listDiv = document.getElementById('kbSelectorList');
+    if (!listDiv) return;
+
+    var h = '';
+
+    if (kbSelectorState.selectedKbId) {
+        h += renderKbSubdirSelector();
+    } else {
+        var myKbs = [];
+        var sharedKbs = [];
+        for (var i = 0; i < kbSelectorState.kbList.length; i++) {
+            var kb = kbSelectorState.kbList[i];
+            if (kb.permission === 'manage') {
+                myKbs.push(kb);
+            } else {
+                sharedKbs.push(kb);
+            }
+        }
+
+        h += '<div class="kb-selector-hint" style="margin-bottom:10px;">选择一个文件库以浏览其目录</div>';
+
+        if (myKbs.length > 0) {
+            h += '<div class="kb-selector-group"><div class="kb-selector-group-title">我的文件库</div>';
+            for (var i = 0; i < myKbs.length; i++) {
+                h += renderKbSelectorItem(myKbs[i]);
+            }
+            h += '</div>';
+        }
+
+        if (sharedKbs.length > 0) {
+            h += '<div class="kb-selector-group"><div class="kb-selector-group-title">共享的文件库</div>';
+            for (var i = 0; i < sharedKbs.length; i++) {
+                h += renderKbSelectorItem(sharedKbs[i]);
+            }
+            h += '</div>';
+        }
+    }
+
+    listDiv.innerHTML = h;
+}
+
+function renderKbSelectorItem(kb) {
+    var canEdit = (kb.permission === 'edit' || kb.permission === 'manage');
+    var disabledClass = canEdit ? '' : ' disabled';
+    var title = canEdit ? (kb.name + ' (' + (kb.permission === 'manage' ? '管理' : '编辑') + ')') : (kb.name + ' (只读)');
+    return '<div class="kb-selector-item' + disabledClass + '" onclick="' + (canEdit ? 'selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')' : '') + '" title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
+}
+
+function escapeHtmlJs(str) {
+    if (!str) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+window.selectKbForProcessing = async function(kbId, kbName, displayPath, permission) {
+    kbSelectorState.selectedKbId = kbId;
+    kbSelectorState.selectedKbName = kbName;
+    kbSelectorState.selectedDisplayPath = displayPath;
+    kbSelectorState.selectedKbPermission = permission;
+    kbSelectorState.selectedSubdir = '';
+    kbSelectorState.currentBreadcrumbs = [{ name: kbName, subdir: '' }];
+
+    await loadKbSubdirs('');
+};
+
+async function loadKbSubdirs(subdir) {
+    kbSelectorState.selectedSubdir = subdir;
+
+    if (!subdir) {
+        kbSelectorState.currentBreadcrumbs = [{ name: kbSelectorState.selectedKbName, subdir: '' }];
+    }
+
+    var listDiv = document.getElementById('kbSelectorList');
+    if (!listDiv) return;
+    listDiv.innerHTML = '<div style="text-align:center;padding:20px;">加载子目录...</div>';
+
+    try {
+        var url = '/api/kb/' + kbSelectorState.selectedKbId + '/local-files';
+        if (subdir) url += '?subdir=' + encodeURIComponent(subdir);
+
+        var resp = await apiFetch(url, { method: 'GET' });
+        var data = await resp.json();
+
+        if (!data.success) {
+            listDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#dc3545;">' + (data.message || '加载失败') + '</div>';
+            return;
+        }
+
+        var categories = data.categories || [];
+        renderKbSubdirView(categories);
+    } catch (e) {
+        listDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#dc3545;">加载失败: ' + e.message + '</div>';
+    }
+}
+
+function renderKbSubdirView(categories) {
+    var listDiv = document.getElementById('kbSelectorList');
+    if (!listDiv) return;
+
+    var h = '';
+
+    // 面包屑导航
+    h += '<div class="kb-selector-breadcrumb">';
+    for (var i = 0; i < kbSelectorState.currentBreadcrumbs.length; i++) {
+        var crumb = kbSelectorState.currentBreadcrumbs[i];
+        var isLast = (i === kbSelectorState.currentBreadcrumbs.length - 1);
+        if (isLast) {
+            h += '<span class="active">' + escapeHtml(crumb.name) + '</span>';
+        } else {
+            h += '<a onclick="navigateKbBreadcrumb(' + i + ')">' + escapeHtml(crumb.name) + '</a><span> / </span>';
+        }
+    }
+    h += '</div>';
+
+    // 提示
+    h += '<div class="kb-selector-hint">选择要处理的目录（选中的目录下的文件将被处理）</div>';
+
+    // 根目录选项
+    var rootSelected = (kbSelectorState.selectedSubdir === '');
+    h += '<div class="kb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')">📂 根目录（全部文件）</div>';
+
+    // 子目录列表
+    if (categories.length > 0) {
+        for (var i = 0; i < categories.length; i++) {
+            var cat = categories[i];
+            var selClass = (kbSelectorState.selectedSubdir === cat.path) ? ' selected' : '';
+            h += '<div class="kb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">📁 ' + escapeHtml(cat.name) + '</div>';
+        }
+    } else {
+        h += '<div style="text-align:center;padding:10px;color:#999;font-size:12px;">无子目录</div>';
+    }
+
+    listDiv.innerHTML = h;
+}
+
+window.selectKbSubdir = function(subdir) {
+    kbSelectorState.selectedSubdir = subdir || '';
+
+    if (subdir) {
+        var parts = subdir.split('/');
+        kbSelectorState.currentBreadcrumbs = [{ name: kbSelectorState.selectedKbName, subdir: '' }];
+        for (var i = 0; i < parts.length; i++) {
+            kbSelectorState.currentBreadcrumbs.push({ name: parts[i], subdir: parts.slice(0, i + 1).join('/') });
+        }
+    } else {
+        kbSelectorState.currentBreadcrumbs = [{ name: kbSelectorState.selectedKbName, subdir: '' }];
+    }
+
+    loadKbSubdirs(subdir);
+};
+
+window.navigateKbBreadcrumb = async function(index) {
+    var crumb = kbSelectorState.currentBreadcrumbs[index];
+    kbSelectorState.currentBreadcrumbs = kbSelectorState.currentBreadcrumbs.slice(0, index + 1);
+    kbSelectorState.selectedSubdir = crumb.subdir || '';
+    await loadKbSubdirs(kbSelectorState.selectedSubdir);
+};
+
+window.confirmKbSelection = function() {
+    if (!kbSelectorState.selectedKbId) {
+        alert('请先选择一个文件库');
+        return;
+    }
+
+    var displayText = kbSelectorState.selectedDisplayPath;
+    if (kbSelectorState.selectedSubdir) {
+        displayText += '/' + kbSelectorState.selectedSubdir;
+    }
+
+    var workdirInput = document.getElementById('workdir');
+    workdirInput.value = displayText;
+    workdirInput.setAttribute('data-kb-id', kbSelectorState.selectedKbId);
+    workdirInput.setAttribute('data-kb-subdir', kbSelectorState.selectedSubdir);
+
+    closeKbSelector();
+
+    if (currentTool) loadFileList(workdirInput.value, currentTool);
+};

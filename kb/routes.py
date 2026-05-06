@@ -1,11 +1,15 @@
 import os
+import sys
 import uuid
 import time
 import zipfile
 import io
 import shutil
+import tempfile
+import subprocess
+import json
 
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response
 from functools import wraps
 
 from kb.database import get_db, get_visible_kb_ids, get_user_role
@@ -1030,6 +1034,128 @@ def download_local_file(kb_id, _user_id=None):
         return jsonify({'success': False, 'message': '文件不存在'})
 
     return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+
+
+TOOL_SCRIPTS = {
+    'to_docx': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_docx.py'),
+    'to_index': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_index.py'),
+    'to_compare': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_compare.py'),
+    'to_pdf': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_pdf.py'),
+    'to_pageNum': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_pageNum.py'),
+    'to_redhead': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_redhead.py')
+}
+
+TOOL_EXTENSIONS = {
+    'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
+    'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
+    'to_compare': ('.docx', '.doc'),
+    'to_pdf': ('.docx', '.doc'),
+    'to_pageNum': ('.docx', '.doc'),
+    'to_redhead': ('.docx',)
+}
+
+
+@kb_bp.route('/<kb_id>/run-tool', methods=['POST'])
+@_require_kb_permission('edit')
+def run_tool_on_kb(kb_id, _user_id=None):
+    data = request.get_json()
+    tool = data.get('tool')
+    subdir = data.get('subdir', '').strip()
+    files = data.get('files')
+    user_config = data.get('userConfig')
+
+    if not tool:
+        return jsonify({'success': False, 'message': '未指定工具'})
+
+    if tool not in TOOL_SCRIPTS:
+        return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
+
+    script_path = TOOL_SCRIPTS[tool]
+    if not os.path.exists(script_path):
+        return jsonify({'success': False, 'message': f'脚本不存在: {tool}'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    target_path = os.path.normpath(os.path.join(local_path, subdir)) if subdir else local_path
+
+    if not target_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问的路径'})
+
+    if not os.path.isdir(target_path):
+        return jsonify({'success': False, 'message': f'目录不存在: {subdir or "根目录"}'})
+
+    if not files:
+        extensions = TOOL_EXTENSIONS.get(tool, ('.docx',))
+        files = []
+        for f in os.listdir(target_path):
+            full = os.path.join(target_path, f)
+            if os.path.isfile(full) and f.lower().endswith(extensions):
+                files.append(f)
+
+    def generate():
+        temp_config_path = None
+        try:
+            env = os.environ.copy()
+            env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
+
+            if user_config:
+                try:
+                    temp_dir = tempfile.mkdtemp()
+                    temp_config_path = os.path.join(temp_dir, 'config.yaml')
+                    with open(temp_config_path, 'w', encoding='utf-8') as f:
+                        import yaml
+                        yaml.dump(user_config, f, allow_unicode=True, default_flow_style=False)
+                    env['USER_CONFIG_PATH'] = temp_config_path
+                except Exception as e:
+                    yield f'data: {json.dumps({"type": "end", "success": False, "error": f"创建临时配置文件失败: {str(e)}"})}\n\n'
+                    return
+
+            cmd_args = [sys.executable, "-u", script_path]
+            for f in files:
+                full_path = os.path.join(target_path, f)
+                cmd_args.append(full_path)
+
+            process = subprocess.Popen(
+                cmd_args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=target_path,
+                env=env
+            )
+
+            output_lines = []
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    content = line.rstrip()
+                    output_lines.append(content)
+                    yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
+
+            process.stdout.close()
+            process.wait()
+
+            if temp_config_path and os.path.exists(os.path.dirname(temp_config_path)):
+                try:
+                    shutil.rmtree(os.path.dirname(temp_config_path))
+                except Exception:
+                    pass
+
+            success = process.returncode == 0
+            if not success:
+                error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
+                yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
+            else:
+                yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+
+        except Exception as e:
+            yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @kb_bp.route('/<kb_id>/local-files/content', methods=['GET'])
