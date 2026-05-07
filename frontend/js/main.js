@@ -154,12 +154,12 @@
             const downloadBtn = document.getElementById('downloadBtn');
 
             if (remote) {
-                selectBtn.textContent = '选择文件夹';
+                selectBtn.textContent = '从本地选择';
                 remoteGroup.style.display = 'block';
                 openBtn.style.display = 'none';
                 downloadBtn.style.display = 'inline-block';
             } else {
-                selectBtn.textContent = '选择文件夹';
+                selectBtn.textContent = '从本地选择';
                 remoteGroup.style.display = 'none';
                 openBtn.style.display = 'inline-block';
                 downloadBtn.style.display = 'none';

@@ -892,8 +892,8 @@
             <div class="form-group" id="folderSelectGroup">
                 <div style="display: flex; gap: 8px;">
                     <input type="text" id="workdir" placeholder="选择文件夹" readonly style="flex:1;">
-                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">选择文件夹</button>
-                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">📚 从文件库选择</button>
+                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">从本地选择</button>
+                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">从文件库选择</button>
                 </div>
             </div>
 
@@ -1037,7 +1037,7 @@
     <div class="modal-overlay" id="kbSelectorModal">
         <div class="modal" style="max-width: 800px;">
             <div class="modal-header">
-                <h2>选择文件库目录</h2>
+                <h2>文件库目录</h2>
                 <button class="modal-close" onclick="closeKbSelector()">&times;</button>
             </div>
             <div id="kbSelectorList" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
