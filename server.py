@@ -800,8 +800,12 @@ def api_upload_files(_user_id=None):
             return jsonify({'success': False, 'message':
                 f'工作区总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
 
-        filename = os.path.basename(file.filename)
+        filename = file.filename  # 保留相对路径，如 "test/sub/file.docx"
+        # 清理路径，防止路径遍历攻击
+        filename = os.path.normpath('/' + filename).lstrip('/')
         save_path = os.path.join(workdir, filename)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
         with open(save_path, 'wb') as f:
             f.write(file_content)
         workspace_used += file_size

@@ -483,14 +483,9 @@
                 const relativePath = file.webkitRelativePath || file.name;
                 const pathParts = relativePath.split('/');
 
-                // 只保留选定目录下的直接文件，跳过子目录中的文件
-                if (pathParts.length > 2) {
-                    continue;
-                }
-
                 const ext = '.' + file.name.split('.').pop().toLowerCase();
                 if (allowedExt.length === 0 || allowedExt.includes(ext)) {
-                    formData.append('files', file);
+                    formData.append('files', file, relativePath);
                     uploadCount++;
                 }
             }
