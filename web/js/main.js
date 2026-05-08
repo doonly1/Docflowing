@@ -1491,6 +1491,18 @@ window.markKbSelected = function(kbId) {
         items[i].classList.remove('selected');
     }
     event.currentTarget.classList.add('selected');
+
+    // 同步更新显示路径
+    var allKbs = kbSelectorState.kbList || [];
+    for (var i = 0; i < allKbs.length; i++) {
+        if (allKbs[i].id === kbId) {
+            kbSelectorState.selectedKbName = allKbs[i].name;
+            kbSelectorState.selectedDisplayPath = allKbs[i].display_path || allKbs[i].name;
+            kbSelectorState.selectedKbPermission = allKbs[i].permission;
+            break;
+        }
+    }
+    _updateWorkdirFromKbState();
 };
 
 function escapeHtmlJs(str) {
