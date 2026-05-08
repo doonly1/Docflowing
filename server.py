@@ -203,6 +203,10 @@ def _ensure_user_config(user_id):
                 config = yaml.safe_load(f) or {}
             if 'last_workdir' in config:
                 del config['last_workdir']
+            if 'knowledge_base' in config:
+                del config['knowledge_base']
+            if 'fb' in config:
+                del config['fb']
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         except Exception:
@@ -405,9 +409,11 @@ def api_list_files(_user_id=None):
     token = data.get('token') or data.get('client_id')
     show_all = data.get('show_all', False)
 
-    if not workdir and (token or _user_id):
-        _update_workspace_activity(_user_id)
-        workdir = _get_workspace_workdir(_user_id)
+    # 如果 workdir 是相对路径（如 "workdir/test" 或 "test"），拼接到用户工作区根目录
+    if workdir and not os.path.isabs(workdir):
+        ws_root = _get_workspace_dir(_user_id)
+        workdir = os.path.join(ws_root, workdir)
+        workdir = os.path.normpath(workdir)
 
     if not workdir or not os.path.isdir(workdir):
         return jsonify({'success': False, 'message': '目录不存在'})
@@ -602,6 +608,9 @@ def api_get_config(_user_id=None):
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
+        # 不返回系统级配置给前端
+        config.pop('knowledge_base', None)
+        config.pop('fb', None)
         return jsonify({'success': True, 'config': config})
     except Exception as e:
         return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
@@ -617,6 +626,9 @@ def api_save_config(_user_id=None):
 
     config_path = _ensure_user_config(_user_id)
     try:
+        # 过滤系统级配置，防止前端覆写
+        config.pop('knowledge_base', None)
+        config.pop('fb', None)
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         return jsonify({'success': True})
@@ -633,6 +645,8 @@ def api_save_workdir(_user_id=None):
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
+        config.pop('knowledge_base', None)
+        config.pop('fb', None)
         config['last_workdir'] = workdir
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
@@ -654,6 +668,11 @@ def api_run_tool_with_config(_user_id=None):
     
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
+    
+    # 支持相对路径 workdir/test 或 test
+    if workdir and not os.path.isabs(workdir):
+        ws_root = _get_workspace_dir(_user_id)
+        workdir = os.path.normpath(os.path.join(ws_root, workdir))
     
     if not workdir and (token or _user_id):
         _update_workspace_activity(_user_id)
@@ -861,9 +880,15 @@ def api_download_results(_user_id=None):
 
     data = request.get_json()
     folder_name = data.get('folder_name', 'results')
+    workdir_param = data.get('workdir')
 
-    _update_workspace_activity(_user_id)
-    workdir = _get_workspace_workdir(_user_id)
+    # 支持相对路径 workdir/test 或 test
+    if workdir_param and not os.path.isabs(workdir_param):
+        ws_root = _get_workspace_dir(_user_id)
+        workdir = os.path.normpath(os.path.join(ws_root, workdir_param))
+    else:
+        _update_workspace_activity(_user_id)
+        workdir = _get_workspace_workdir(_user_id)
 
     if not os.path.exists(workdir) or not os.listdir(workdir):
         return jsonify({'success': False, 'message': '无文件可供下载'})
@@ -892,7 +917,16 @@ def api_download_results(_user_id=None):
 @app.route('/clear_workspace', methods=['POST'])
 @_login_required
 def api_clear_workspace(_user_id=None):
-    workdir = _get_workspace_workdir(_user_id)
+    data = request.get_json() or {}
+    workdir = data.get('workdir')
+    
+    # 支持相对路径 workdir/test 或 test
+    if workdir and not os.path.isabs(workdir):
+        ws_root = _get_workspace_dir(_user_id)
+        workdir = os.path.normpath(os.path.join(ws_root, workdir))
+    else:
+        workdir = _get_workspace_workdir(_user_id)
+    
     if not os.path.exists(workdir):
         return jsonify({'success': True, 'message': '目录为空'})
 

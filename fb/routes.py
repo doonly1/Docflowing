@@ -300,7 +300,8 @@ def list_kb():
                 ws_idx = [p.lower() for p in parts].index('workspaces')
                 if ws_idx + 2 < len(parts):
                     parts[ws_idx + 1] = owner_username
-                display_path = '/'.join(parts[ws_idx + 1:])
+                path_parts = parts[ws_idx + 1:]
+                display_path = '/'.join(path_parts)
             except ValueError:
                 pass
 

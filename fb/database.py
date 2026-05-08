@@ -1,31 +1,13 @@
 import os
 import sqlite3
 import threading
-import yaml
 
 from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS
 
 _local = threading.local()
 
 
-def _load_kb_config():
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                               'config', 'config.yaml')
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f) or {}
-        return config.get('knowledge_base', {})
-    except Exception:
-        return {}
-
-
 def get_db_path():
-    kb_config = _load_kb_config()
-    db_path = kb_config.get('db_path', '')
-    if db_path and os.path.isabs(db_path):
-        return db_path
-    if db_path:
-        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), db_path)
     data_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'fb')
     os.makedirs(data_dir, exist_ok=True)
     return os.path.join(data_dir, 'fb.db')

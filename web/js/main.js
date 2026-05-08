@@ -300,10 +300,7 @@
 
                 filesData = { success: true, files: kbData.files };
             } else {
-                // 远程模式用 client_id，本地模式用 workdir
-                const body = isRemoteMode()
-                    ? { client_id: getClientId(), tool }
-                    : { workdir, tool };
+                const body = { workdir: toActualWorkdir(workdir), tool };
 
                 const filesRes = await apiFetch('/list_files', {
                     method: 'POST',
@@ -369,15 +366,27 @@
                         .map(t => t.dataset.filename);
         }
 
+        // 显示路径转后端路径：{username}/workdir/xxx → workdir/xxx
+        // 后端 base 是 workspaces/{uid}，传 workdir/xxx 或 xxx
+        function toActualWorkdir(displayPath) {
+            var path = displayPath || '';
+            if (authUsername && path.startsWith(authUsername + '/')) {
+                path = path.substring(authUsername.length + 1);
+            }
+            return path;
+        }
+
         // 清理工作区文件
         window.clearWorkspace = async function() {
             if (isRemoteMode()) {
                 if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
                 try {
+                    const workdir = document.getElementById('workdir').value.trim();
+                    const body = workdir ? { workdir: toActualWorkdir(workdir) } : {};
                     const res = await apiFetch('/clear_workspace', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({})
+                        body: JSON.stringify(body)
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -522,10 +531,12 @@
                 const data = await response.json();
                 if (data.success) {
                     progress.innerHTML = `<span style="color: #28a745;">✓ 上传完成 ${data.file_count} 个文件</span>`;
-                    // 更新 workdir 显示
+                    // 更新 workdir 显示（完整路径：workspaces/{user_id}/workdir/test）
                     const workdirInput = document.getElementById('workdir');
                     const folderName = (event.target.files[0]?.webkitRelativePath || '').split('/')[0] || 'uploads';
-                    workdirInput.value = folderName;
+                    // 远程模式下，文件路径是 workspaces/{user_id}/workdir/{folderName}
+                    // 但输入框应显示相对路径：workdir/{folderName}
+                    workdirInput.value = authUsername + '/workdir/' + folderName;
                     await loadFileList(null, currentTool);
                     setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
@@ -609,10 +620,16 @@
         window.downloadResults = async function() {
             var folderName = document.getElementById('workdir').value.trim() || 'results';
             try {
+                var body = { folder_name: folderName };
+                // 如果 workdir 是子目录，传入后端
+                var actualWorkdir = toActualWorkdir(folderName);
+                if (actualWorkdir.startsWith('workdir/')) {
+                    body.workdir = actualWorkdir;
+                }
                 var response = await apiFetch('/download_results', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({folder_name: folderName})
+                    body: JSON.stringify(body)
                 });
                 if (response.ok) {
                     var blob = await response.blob();
@@ -1462,8 +1479,19 @@ function renderKbSelectorItem(kb) {
     var canEdit = (kb.permission === 'edit' || kb.permission === 'manage');
     var disabledClass = canEdit ? '' : ' disabled';
     var title = canEdit ? (kb.name + ' (' + (kb.permission === 'manage' ? '管理' : '编辑') + ')') : (kb.name + ' (只读)');
-    return '<div class="kb-selector-item' + disabledClass + '" onclick="' + (canEdit ? 'selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')' : '') + '" title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
+    var selClass = (kbSelectorState.selectedKbId === kb.id) ? ' selected' : '';
+    var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + kb.id.replace(/'/g, "\\'") + '\')" ondblclick="selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
+    return '<div class="kb-selector-item' + disabledClass + selClass + '"' + clickHandler + ' title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
 }
+
+window.markKbSelected = function(kbId) {
+    kbSelectorState.selectedKbId = kbId;
+    var items = document.querySelectorAll('.kb-selector-item');
+    for (var i = 0; i < items.length; i++) {
+        items[i].classList.remove('selected');
+    }
+    event.currentTarget.classList.add('selected');
+};
 
 function escapeHtmlJs(str) {
     if (!str) return '';
@@ -1483,6 +1511,7 @@ window.selectKbForProcessing = async function(kbId, kbName, displayPath, permiss
     kbSelectorState.selectedSubdir = '';
     kbSelectorState.currentBreadcrumbs = [{ name: kbName, subdir: '' }];
 
+    _updateWorkdirFromKbState();
     await loadKbSubdirs('');
 };
 
@@ -1523,11 +1552,6 @@ function renderKbSubdirView(categories) {
 
     var h = '';
 
-    var rootSelected = (kbSelectorState.selectedSubdir === '');
-    h += '<div class="kb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')" ondblclick="selectKbSubdir(\'\')">';
-    h += '<span>📂 根目录（全部文件）</span>';
-    h += '</div>';
-
     if (categories.length > 0) {
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
@@ -1537,7 +1561,10 @@ function renderKbSubdirView(categories) {
             h += '</div>';
         }
     } else {
-        h += '<div style="text-align:center;padding:10px;color:#999;font-size:12px;">无子目录</div>';
+        var rootSelected = (kbSelectorState.selectedSubdir === '');
+        h += '<div class="kb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')">';
+        h += '<span>📂 根目录</span>';
+        h += '</div>';
     }
 
     listDiv.innerHTML = h;
@@ -1580,6 +1607,7 @@ window.selectKbSubdir = function(subdir) {
     }
 
     renderKbBreadcrumb();
+    _updateWorkdirFromKbState();
 
     var items = document.querySelectorAll('.kb-subdir-item');
     for (var i = 0; i < items.length; i++) {
@@ -1596,21 +1624,26 @@ window.navigateKbBreadcrumb = async function(index) {
     await loadKbSubdirs(kbSelectorState.selectedSubdir);
 };
 
+// 实时更新输入框显示当前文件库选择路径
+function _updateWorkdirFromKbState() {
+    if (!kbSelectorState.selectedKbId) return;
+    var displayText = kbSelectorState.selectedDisplayPath;
+    if (kbSelectorState.selectedSubdir) {
+        displayText += '/' + kbSelectorState.selectedSubdir;
+    }
+    var workdirInput = document.getElementById('workdir');
+    workdirInput.value = displayText;
+    workdirInput.setAttribute('data-kb-id', kbSelectorState.selectedKbId);
+    workdirInput.setAttribute('data-kb-subdir', kbSelectorState.selectedSubdir);
+}
+
 window.confirmKbSelection = function() {
     if (!kbSelectorState.selectedKbId) {
         alert('请先选择一个文件库');
         return;
     }
 
-    var displayText = kbSelectorState.selectedDisplayPath;
-    if (kbSelectorState.selectedSubdir) {
-        displayText += '/' + kbSelectorState.selectedSubdir;
-    }
-
-    var workdirInput = document.getElementById('workdir');
-    workdirInput.value = displayText;
-    workdirInput.setAttribute('data-kb-id', kbSelectorState.selectedKbId);
-    workdirInput.setAttribute('data-kb-subdir', kbSelectorState.selectedSubdir);
+    _updateWorkdirFromKbState();
 
     closeKbSelector();
 

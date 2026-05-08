@@ -528,7 +528,6 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
                         break  # 一个方向找到一个就够
     
     # ---- E. 拆分升级检测：已1:1匹配 + 相邻未匹配终稿句子 → 拆分 ----
-    # 场景：原稿 "江门是…节点城市、中国侨都。" → 终稿 "江门是…节点城市，" + "中国侨都。"
     # 1:1匹配: orig[0]↔final[0](0.89)，final[1]未匹配
     # 拆分升级: orig[0] ↔ final[0]+final[1] 拼接后ratio更高
     if sentence_match and unmatched_final:
