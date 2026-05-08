@@ -1,0 +1,304 @@
+.wiki-container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 32px);
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.wiki-main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.wiki-sidebar {
+    width: 280px;
+    min-width: 220px;
+    border-right: 1px solid #e8e8e8;
+    display: flex;
+    flex-direction: column;
+    background: #fafafa;
+}
+
+.wiki-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fff;
+}
+
+.wiki-sidebar-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #333;
+}
+
+.wiki-sidebar-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.wiki-sidebar-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 16px;
+    color: #666;
+    transition: background 0.15s;
+}
+
+.wiki-sidebar-actions button:hover {
+    background: #f0f0f0;
+}
+
+.wiki-tree {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.wiki-tree-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #333;
+    transition: background 0.1s;
+    user-select: none;
+}
+
+.wiki-tree-item:hover {
+    background: #f0f2f5;
+}
+
+.wiki-tree-item.active {
+    background: #fff0f3;
+    color: #e94560;
+}
+
+.wiki-tree-item .icon {
+    margin-right: 8px;
+    font-size: 14px;
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.wiki-tree-item .name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wiki-tree-item.folder {
+    font-weight: 500;
+}
+
+.wiki-tree-children {
+    padding-left: 16px;
+}
+
+.wiki-editor-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.wiki-editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fff;
+}
+
+.wiki-editor-toolbar button {
+    padding: 5px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    color: #333;
+    transition: all 0.15s;
+}
+
+.wiki-editor-toolbar button:hover {
+    background: #f0f2f5;
+    border-color: #ccc;
+}
+
+.wiki-editor-toolbar button.primary {
+    background: #e94560;
+    color: #fff;
+    border-color: #e94560;
+}
+
+.wiki-editor-toolbar button.primary:hover {
+    background: #c41e3a;
+}
+
+.wiki-editor-toolbar .filename {
+    flex: 1;
+    font-size: 13px;
+    color: #666;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wiki-editor-wrapper {
+    flex: 1;
+    overflow: hidden;
+}
+
+.wiki-editor-wrapper .EasyMDEContainer {
+    border: none;
+    border-radius: 0;
+}
+
+.wiki-editor-wrapper .editor-toolbar {
+    border-bottom: 1px solid #e8e8e8;
+}
+
+.wiki-editor-wrapper .CodeMirror {
+    border: none;
+    min-height: 300px;
+}
+
+.wiki-search-bar {
+    border-top: 1px solid #e8e8e8;
+    background: #fff;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wiki-search-bar input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.wiki-search-bar input:focus {
+    border-color: #e94560;
+}
+
+.wiki-search-bar button {
+    padding: 5px 10px;
+    background: #e94560;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.wiki-search-results {
+    max-height: 200px;
+    overflow-y: auto;
+    border-top: 1px solid #eee;
+    display: none;
+}
+
+.wiki-search-results.show {
+    display: block;
+}
+
+.wiki-search-result-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.1s;
+}
+
+.wiki-search-result-item:hover {
+    background: #f8f8f8;
+}
+
+.wiki-search-result-item .title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.wiki-search-result-item .snippet {
+    font-size: 12px;
+    color: #666;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wiki-search-result-item mark {
+    background: #fff3cd;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.wiki-empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: #999;
+    font-size: 14px;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wiki-empty-state .icon {
+    font-size: 48px;
+    opacity: 0.5;
+}
+
+.wiki-new-input {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fff;
+}
+
+.wiki-new-input input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+}
+
+.wiki-new-input input:focus {
+    border-color: #e94560;
+}
+
+.wiki-new-input button {
+    padding: 4px 8px;
+    background: #e94560;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.wiki-new-input .cancel {
+    background: #999;
+}
