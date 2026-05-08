@@ -18,15 +18,15 @@ from functools import wraps
 from flask import Flask, request, jsonify, g, Response
 from flask_cors import CORS
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'services'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tools'))
 
 from logging_config import setup_logging, set_request_id, get_logger
-from kb.routes import kb_bp
+from fb.routes import kb_bp
 
 setup_logging()
 logger = get_logger(__name__)
 
-app = Flask(__name__, template_folder='frontend', static_folder='frontend', static_url_path='')
+app = Flask(__name__, template_folder='web', static_folder='web', static_url_path='')
 CORS(app)
 app.register_blueprint(kb_bp)
 
@@ -53,12 +53,12 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE  # Flask 请求体大小限�
 
 # 工具脚本映射
 TOOL_SCRIPTS = {
-    'to_docx': os.path.join('services', 'to_docx.py'),
-    'to_index': os.path.join('services', 'to_index.py'),
-    'to_compare': os.path.join('services', 'to_compare.py'),
-    'to_pdf': os.path.join('services', 'to_pdf.py'),
-    'to_pageNum': os.path.join('services', 'to_pageNum.py'),
-    'to_redhead': os.path.join('services', 'to_redhead.py')
+    'to_docx': os.path.join('tools', 'to_docx.py'),
+    'to_index': os.path.join('tools', 'to_index.py'),
+    'to_compare': os.path.join('tools', 'to_compare.py'),
+    'to_pdf': os.path.join('tools', 'to_pdf.py'),
+    'to_pageNum': os.path.join('tools', 'to_pageNum.py'),
+    'to_redhead': os.path.join('tools', 'to_redhead.py')
 }
 
 # ==================== Token 认证系统 ====================
@@ -901,7 +901,7 @@ def api_clear_workspace(_user_id=None):
 @app.route('/build_index_from_metadata', methods=['POST'])
 @_login_required
 def api_build_index_from_metadata(_user_id=None):
-    from services.to_index import build_index_from_metadata
+    from tools.to_index import build_index_from_metadata
 
     data = request.get_json()
     metadata_list = data.get('metadata', [])

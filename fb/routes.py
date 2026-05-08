@@ -12,7 +12,7 @@ import json
 from flask import Blueprint, request, jsonify, send_file, Response
 from functools import wraps
 
-from kb.database import get_db, get_visible_kb_ids, get_user_role
+from fb.database import get_db, get_visible_kb_ids, get_user_role
 
 kb_bp = Blueprint('kb', __name__, url_prefix='/api/kb')
 
@@ -892,6 +892,7 @@ def list_local_files(kb_id, _user_id=None):
         return jsonify({'success': False, 'message': '本地目录不存在', 'files': [], 'categories': []})
 
     subdir = request.args.get('subdir', '').strip()
+    tool = request.args.get('tool', '').strip()
     target_path = os.path.join(local_path, subdir) if subdir else local_path
     target_path = os.path.normpath(target_path)
 
@@ -900,6 +901,16 @@ def list_local_files(kb_id, _user_id=None):
 
     if not os.path.isdir(target_path):
         return jsonify({'success': False, 'message': '目录不存在'})
+
+    tool_extensions = {
+        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
+        'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
+        'to_compare': ('.docx', '.doc'),
+        'to_pdf': ('.docx', '.doc'),
+        'to_pageNum': ('.docx', '.doc'),
+        'to_redhead': ('.docx',)
+    }
+    extensions = tool_extensions.get(tool) if tool else None
 
     files = []
     categories = []
@@ -915,6 +926,8 @@ def list_local_files(kb_id, _user_id=None):
                 })
             elif entry.is_file():
                 _, ext = os.path.splitext(entry.name)
+                if extensions and ext.lower() not in extensions:
+                    continue
                 files.append({
                     'name': entry.name,
                     'path': os.path.relpath(entry.path, local_path).replace('\\', '/'),
@@ -1037,12 +1050,12 @@ def download_local_file(kb_id, _user_id=None):
 
 
 TOOL_SCRIPTS = {
-    'to_docx': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_docx.py'),
-    'to_index': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_index.py'),
-    'to_compare': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_compare.py'),
-    'to_pdf': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_pdf.py'),
-    'to_pageNum': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_pageNum.py'),
-    'to_redhead': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'services', 'to_redhead.py')
+    'to_docx': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_docx.py'),
+    'to_index': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_index.py'),
+    'to_compare': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_compare.py'),
+    'to_pdf': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pdf.py'),
+    'to_pageNum': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pageNum.py'),
+    'to_redhead': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_redhead.py')
 }
 
 TOOL_EXTENSIONS = {

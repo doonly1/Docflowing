@@ -715,8 +715,8 @@
         }
 
         .kb-selector-item {
-            padding: 8px 12px;
-            margin: 4px 0;
+            padding: 5px 8px;
+            margin: 2px 0;
             border: 1px solid #e0e0e0;
             border-radius: 6px;
             cursor: pointer;
@@ -749,13 +749,15 @@
         }
 
         .kb-subdir-item {
-            padding: 6px 10px;
-            margin: 2px 0;
+            padding: 4px 8px;
+            margin: 1px 0;
             border: 1px solid transparent;
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
             transition: all 0.15s;
+            display: flex;
+            align-items: center;
         }
 
         .kb-subdir-item:hover {
@@ -769,8 +771,8 @@
 
         .kb-selector-breadcrumb {
             padding: 8px 12px;
-            background: #f9f9f9;
-            border-radius: 6px;
+            background: transparent;
+            border-radius: 4px;
             margin-bottom: 10px;
             font-size: 12px;
         }
@@ -796,7 +798,7 @@
             padding: 4px 0;
         }
     </style>
-    <link rel="stylesheet" href="js/kb.css">
+    <link rel="stylesheet" href="js/fb.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
 </head>
 <body>
@@ -833,7 +835,8 @@
         </div>
         <div class="sidebar-section">
             <div class="sidebar-nav-item active" data-view="home" data-label="主页" onclick="navigateTo('home')">🏠</div>
-            <div class="sidebar-nav-item" data-view="kb" data-label="文件库" onclick="navigateTo('kb')">📚</div>
+            <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="navigateTo('fb')">📚</div>
+            <div class="sidebar-nav-item" data-view="kb" data-label="知识库" onclick="navigateTo('kb')">📖</div>
         </div>
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom" id="sidebar-more-btn" onclick="toggleSidebarMenu(event)">
@@ -1031,16 +1034,17 @@
     <script src="js/main.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="js/kb.js"></script>
+    <script src="js/fb.js"></script>
 
     <!-- KB选择器弹窗 -->
     <div class="modal-overlay" id="kbSelectorModal">
-        <div class="modal" style="max-width: 800px;">
+        <div class="modal" style="max-width: 520px; height: 45vh; max-height: 380px;">
             <div class="modal-header">
-                <h2>文件库目录</h2>
+                <h3>从文件库选择</h3>
                 <button class="modal-close" onclick="closeKbSelector()">&times;</button>
             </div>
-            <div id="kbSelectorList" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
+            <div id="kbSelectorBreadcrumb" class="kb-selector-breadcrumb" style="margin:0 8px;border-bottom:1px solid #eee;padding:8px 12px;"></div>
+            <div id="kbSelectorList" style="flex: 1; overflow-y: auto; padding: 8px;"></div>
             <div class="config-actions">
                 <button class="btn" onclick="confirmKbSelection()" style="width: auto;">确认</button>
             </div>

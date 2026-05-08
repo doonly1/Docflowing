@@ -54,7 +54,7 @@ var KnowledgeBase = {
             document.getElementById('kb-view').style.display = 'none';
             document.getElementById('home-view').style.display = '';
             this.currentKbId = null;
-        } else if (view === 'kb') {
+        } else if (view === 'fb') {
             document.getElementById('home-view').style.display = 'none';
             document.getElementById('kb-view').style.display = '';
             this.init();
@@ -72,25 +72,28 @@ var KnowledgeBase = {
         localStorage.removeItem('docproc_current_kb_permission');
         var role = this.getUserRole();
 
-        var h = '<div class="kb-explorer">';
-        h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 文件库</span></div>';
-        h += '<div class="kb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
-        h += '<div class="kb-file-pane" style="width:100%">';
-        h += '<div class="kb-file-toolbar">';
-        h += '<input type="text" id="kb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
-        h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
-        h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
-        if (role === 'admin') h += '<button onclick="KnowledgeBase.showUserManage()">👥 用户</button>';
-        h += '<span class="kb-toolbar-spacer"></span>';
-        h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
-        h += '<button onclick="KnowledgeBase.renderKbList()">🔄 刷新</button>';
-        h += '</div>';
-        h += '<div class="kb-file-body" id="kb-grid-container" oncontextmenu="KnowledgeBase.showKbListContextMenu(event)"><div class="kb-empty">加载中...</div></div>';
-        h += '</div></div></div>';
-
-        document.getElementById('kb-view').innerHTML = h;
-        var res = await this.api('/api/kb/list', 'GET');
         var grid = document.getElementById('kb-grid-container');
+        if (!grid) {
+            var h = '<div class="kb-explorer">';
+            h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 文件库</span></div>';
+            h += '<div class="kb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
+            h += '<div class="kb-file-pane" style="width:100%">';
+            h += '<div class="kb-file-toolbar">';
+            h += '<input type="text" id="kb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
+            h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
+            h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
+            if (role === 'admin') h += '<button onclick="KnowledgeBase.showUserManage()">👥 用户</button>';
+            h += '<span class="kb-toolbar-spacer"></span>';
+            h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
+            h += '<button onclick="KnowledgeBase.renderKbList()">🔄 刷新</button>';
+            h += '</div>';
+            h += '<div class="kb-file-body" id="kb-grid-container" oncontextmenu="KnowledgeBase.showKbListContextMenu(event)"></div>';
+            h += '</div></div></div>';
+            document.getElementById('kb-view').innerHTML = h;
+            grid = document.getElementById('kb-grid-container');
+        }
+
+        var res = await this.api('/api/fb/list', 'GET');
         if (!grid) return;
 
         var kbs = res.success && res.kbs ? res.kbs : [];
@@ -118,7 +121,7 @@ var KnowledgeBase = {
 
     _createRootFolder: async function(name) {
         var self = this;
-        var res = await this.api('/api/kb/create-folder', 'POST', { name: name });
+        var res = await this.api('/api/fb/create-folder', 'POST', { name: name });
         if (res.success) {
             await self.renderKbList();
         } else {
@@ -186,7 +189,7 @@ var KnowledgeBase = {
         this.hideContextMenu();
         var newName = prompt('重命名文件库：', oldName);
         if (!newName || !newName.trim() || newName.trim() === oldName) return;
-        var res = await this.api('/api/kb/' + kbId, 'PUT', { name: newName.trim() });
+        var res = await this.api('/api/fb/' + kbId, 'PUT', { name: newName.trim() });
         if (res.success) {
             await this.renderKbList();
         } else {
@@ -198,7 +201,7 @@ var KnowledgeBase = {
         this.hideContextMenu();
         var newName = prompt('复制文件库为：', kbName + '_副本');
         if (!newName || !newName.trim()) return;
-        var res = await this.api('/api/kb/copy-folder', 'POST', {
+        var res = await this.api('/api/fb/copy-folder', 'POST', {
             kb_id: kbId,
             new_name: newName.trim()
         });
@@ -212,7 +215,7 @@ var KnowledgeBase = {
     kbListDelete: async function(kbId, kbName) {
         this.hideContextMenu();
         if (!confirm('确定删除文件库 "' + kbName + '" 吗？')) return;
-        var res = await this.api('/api/kb/' + kbId, 'DELETE');
+        var res = await this.api('/api/fb/' + kbId, 'DELETE');
         if (res.success) {
             await this.renderKbList();
         } else {
@@ -247,46 +250,50 @@ var KnowledgeBase = {
     renderDetail: async function() {
         var self = this;
 
-        var h = '<div class="kb-explorer">';
-        h += '<div class="kb-breadcrumb" id="kb-breadcrumb"></div>';
-        h += '<div class="kb-explorer-body">';
-        h += '<div class="kb-file-toolbar" id="kb-file-toolbar">';
-        h += '<button class="kb-tree-toggle-btn" onclick="KnowledgeBase.toggleTreePane()" title="折叠/展开"></button>';
-        h += '<div class="kb-upload-wrap">';
-        h += '<button onclick="KnowledgeBase.toggleUploadMenu(event)">📤 上传</button>';
-        h += '<div class="kb-upload-menu" style="display:none">';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
-        h += '</div>';
-        h += '</div>';
-        h += '<button onclick="KnowledgeBase.showCreateFolderDialog()">📁 新建文件夹</button>';
-        h += '<button onclick="KnowledgeBase.showCreateMdDialog()">📝 新建MD文件</button>';
-        h += '<span class="kb-toolbar-spacer"></span>';
-        h += '<input type="text" id="kb-search-input" placeholder="搜索..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
-        h += '<button onclick="KnowledgeBase.search()">🔍</button>';
-        h += '<button onclick="KnowledgeBase.downloadAction()">📥 下载</button>';
-        h += '<button onclick="KnowledgeBase.showMoveDialog()">📦 移动</button>';
-        h += '<button onclick="KnowledgeBase.batchDelete()">🗑️ 删除</button>';
-        h += '<input type="file" id="kb-file-upload-input" multiple style="display:none" onchange="KnowledgeBase.handleFileUpload(this)">';
-        h += '<input type="file" id="kb-folder-upload-input" webkitdirectory style="display:none" onchange="KnowledgeBase.handleFolderUpload(this)">';
-        h += '<input type="file" id="kb-replace-input" style="display:none" onchange="KnowledgeBase.handleReplace(this)">';
-        h += '</div>';
-        h += '<div class="kb-body-row">';
-        h += '<div class="kb-tree-pane" id="kb-tree-pane"><div class="kb-tree-title">目录</div><div id="kb-tree-content"></div></div>';
-        h += '<div class="kb-tree-resize-handle" id="kb-tree-resize-handle"></div>';
-        h += '<div class="kb-file-pane" id="kb-file-pane">';
-        h += '<div class="kb-file-body" id="kb-file-body" oncontextmenu="KnowledgeBase.showContextMenu(event)">';
-        h += '<div id="kb-file-content"><div class="kb-empty">加载中...</div></div>';
-        h += '</div></div></div></div>';
+        var fileContent = document.getElementById('kb-file-content');
+        if (!fileContent) {
+            var h = '<div class="kb-explorer">';
+            h += '<div class="kb-breadcrumb" id="kb-breadcrumb"></div>';
+            h += '<div class="kb-explorer-body">';
+            h += '<div class="kb-file-toolbar" id="kb-file-toolbar">';
+            h += '<button class="kb-tree-toggle-btn" onclick="KnowledgeBase.toggleTreePane()" title="折叠/展开"></button>';
+            h += '<div class="kb-upload-wrap">';
+            h += '<button onclick="KnowledgeBase.toggleUploadMenu(event)">📤 上传</button>';
+            h += '<div class="kb-upload-menu" style="display:none">';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
+            h += '</div>';
+            h += '</div>';
+            h += '<button onclick="KnowledgeBase.showCreateFolderDialog()">📁 新建文件夹</button>';
+            h += '<button onclick="KnowledgeBase.showCreateMdDialog()">📝 新建MD文件</button>';
+            h += '<span class="kb-toolbar-spacer"></span>';
+            h += '<input type="text" id="kb-search-input" placeholder="搜索..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
+            h += '<button onclick="KnowledgeBase.search()">🔍</button>';
+            h += '<button onclick="KnowledgeBase.downloadAction()">📥 下载</button>';
+            h += '<button onclick="KnowledgeBase.showMoveDialog()">📦 移动</button>';
+            h += '<button onclick="KnowledgeBase.batchDelete()">🗑️ 删除</button>';
+            h += '<input type="file" id="kb-file-upload-input" multiple style="display:none" onchange="KnowledgeBase.handleFileUpload(this)">';
+            h += '<input type="file" id="kb-folder-upload-input" webkitdirectory style="display:none" onchange="KnowledgeBase.handleFolderUpload(this)">';
+            h += '<input type="file" id="kb-replace-input" style="display:none" onchange="KnowledgeBase.handleReplace(this)">';
+            h += '</div>';
+            h += '<div class="kb-body-row">';
+            h += '<div class="kb-tree-pane" id="kb-tree-pane"><div class="kb-tree-title">目录</div><div id="kb-tree-content"></div></div>';
+            h += '<div class="kb-tree-resize-handle" id="kb-tree-resize-handle"></div>';
+            h += '<div class="kb-file-pane" id="kb-file-pane">';
+            h += '<div class="kb-file-body" id="kb-file-body" oncontextmenu="KnowledgeBase.showContextMenu(event)">';
+            h += '<div id="kb-file-content"></div>';
+            h += '</div></div></div></div>';
 
-        document.getElementById('kb-view').innerHTML = h;
-        if (localStorage.getItem('kb_tree_collapsed') === '1') {
-            document.querySelector('.kb-explorer-body').classList.add('collapsed');
+            document.getElementById('kb-view').innerHTML = h;
+            if (localStorage.getItem('kb_tree_collapsed') === '1') {
+                document.querySelector('.kb-explorer-body').classList.add('collapsed');
+            }
+            this.initTreeResize();
         }
         this.renderBreadcrumb();
 
         if (!this._treeLoaded) {
-            var res = await this.api('/api/kb/' + this.currentKbId + '/local-categories?recursive=1', 'GET');
+            var res = await this.api('/api/fb/' + this.currentKbId + '/local-categories?recursive=1', 'GET');
             this._categoryTree = res.success ? (res.categories || []) : [];
             this._treeLoaded = true;
         }
@@ -391,7 +398,7 @@ var KnowledgeBase = {
     loadFiles: async function() {
         var div = document.getElementById('kb-file-content');
         if (!div) return;
-        var url = '/api/kb/' + this.currentKbId + '/local-files';
+        var url = '/api/fb/' + this.currentKbId + '/local-files';
         if (this.localCurrentSubdir) url += '?subdir=' + encodeURIComponent(this.localCurrentSubdir);
         var res = await this.api(url, 'GET');
 
@@ -489,7 +496,7 @@ var KnowledgeBase = {
             return;
         }
         if (items.length === 1 && items[0].type === 'file') {
-            window.open('/api/kb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
+            window.open('/api/fb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
         } else {
             var paths = [];
             for (var i = 0; i < items.length; i++) {
@@ -499,7 +506,7 @@ var KnowledgeBase = {
                 alert('请至少选择一个文件或文件夹');
                 return;
             }
-            var url = '/api/kb/' + this.currentKbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
+            var url = '/api/fb/' + this.currentKbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
             try {
                 var resp = await fetch(url, {
                     method: 'POST',
@@ -531,7 +538,7 @@ var KnowledgeBase = {
         var paths = [];
         for (var i = 0; i < items.length; i++) paths.push(items[i].path);
         var self = this;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files', 'DELETE', { paths: paths });
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files', 'DELETE', { paths: paths });
         if (res.success) {
             this._categoryTree = null;
             this._treeLoaded = false;
@@ -558,7 +565,7 @@ var KnowledgeBase = {
         var formData = new FormData();
         formData.append('file', fileInput.files[0]);
 
-        var url = '/api/kb/' + this.currentKbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentKbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'PUT', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -625,7 +632,7 @@ var KnowledgeBase = {
         }
 
         var subdir = this.localCurrentSubdir || '';
-        var url = '/api/kb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -650,7 +657,7 @@ var KnowledgeBase = {
         }
 
         var subdir = this.localCurrentSubdir || '';
-        var url = '/api/kb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -670,7 +677,7 @@ var KnowledgeBase = {
 
     _createFolder: async function(name) {
         var self = this;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/dir', 'POST', {
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/dir', 'POST', {
             name: name,
             parent: this.localCurrentSubdir || ''
         });
@@ -689,7 +696,7 @@ var KnowledgeBase = {
 
     _createMdFile: async function(name) {
         var self = this;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/create', 'POST', {
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/create', 'POST', {
             name: name,
             parent: this.localCurrentSubdir || ''
         });
@@ -764,7 +771,7 @@ var KnowledgeBase = {
         var oldName = path.split('/').pop();
         var newName = prompt('重命名为：', oldName);
         if (!newName || !newName.trim() || newName.trim() === oldName) return;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/rename', 'PUT', {
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/rename', 'PUT', {
             path: path,
             new_name: newName.trim()
         });
@@ -801,7 +808,7 @@ var KnowledgeBase = {
     doCopyOne: async function() {
         var src = this._copySource;
         var dest = this._moveDest || '';
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/copy', 'POST', {
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/copy', 'POST', {
             sources: [src],
             dest: dest
         });
@@ -827,13 +834,13 @@ var KnowledgeBase = {
 
     contextDownloadOne: function(path) {
         this.hideContextMenu();
-        window.open('/api/kb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+        window.open('/api/fb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
     },
 
     contextDeleteOne: async function(path) {
         this.hideContextMenu();
         if (!confirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）')) return;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files', 'DELETE', { paths: [path] });
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files', 'DELETE', { paths: [path] });
         if (res.success) {
             this._categoryTree = null;
             this._treeLoaded = false;
@@ -901,7 +908,7 @@ var KnowledgeBase = {
         for (var i = 0; i < items.length; i++) sources.push(items[i].path);
         var dest = this._moveDest || '';
 
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
         this.closeModal();
         if (res.success) {
             if (res.errors && res.errors.length > 0) {
@@ -927,13 +934,13 @@ var KnowledgeBase = {
         if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
             this.openMarkdownEditor(relPath);
         } else {
-            window.open('/api/kb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
+            window.open('/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
         }
     },
 
     openMarkdownEditor: async function(relPath) {
         var self = this;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/content?path=' + encodeURIComponent(relPath), 'GET');
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/content?path=' + encodeURIComponent(relPath), 'GET');
         var content = res.success ? (res.content || '') : '';
         var fileName = relPath.split('/').pop();
 
@@ -984,7 +991,7 @@ var KnowledgeBase = {
             if (ta) content = ta.value;
         }
 
-        var res = await this.api('/api/kb/' + this.currentKbId + '/local-files/content', 'PUT', {
+        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/content', 'PUT', {
             path: this._mdEditorRelPath,
             content: content
         });
@@ -1065,7 +1072,7 @@ var KnowledgeBase = {
 
     showSettings: async function() {
         var self = this;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/members', 'GET');
+        var res = await this.api('/api/fb/' + this.currentKbId + '/members', 'GET');
         var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
         h += '<h3>⚙ 文件库设置</h3><h4>成员管理</h4>';
         if (res.success && res.members) {
@@ -1127,12 +1134,12 @@ var KnowledgeBase = {
     },
 
     _updateMemberPerm: async function(uid, perm) {
-        await this.api('/api/kb/' + this.currentKbId + '/members/' + uid, 'PUT', { permission: perm });
+        await this.api('/api/fb/' + this.currentKbId + '/members/' + uid, 'PUT', { permission: perm });
     },
 
     _removeMemberAct: async function(uid) {
         if (!confirm('确定要移除该成员吗？')) return;
-        await this.api('/api/kb/' + this.currentKbId + '/members/' + uid, 'DELETE');
+        await this.api('/api/fb/' + this.currentKbId + '/members/' + uid, 'DELETE');
         var self = this; self.closeModal(); await self.showSettings();
     },
 
@@ -1140,7 +1147,7 @@ var KnowledgeBase = {
         var uname = document.getElementById('kb-new-member').value.trim();
         var perm = document.getElementById('kb-new-perm').value;
         if (!uname) return;
-        var res = await this.api('/api/kb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
+        var res = await this.api('/api/fb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
         if (res.success) { var self = this; self.closeModal(); await self.showSettings(); }
         else alert(res.message);
     },
@@ -1152,7 +1159,7 @@ var KnowledgeBase = {
         for (var i = 0; i < chks.length; i++) {
             var uname = chks[i].getAttribute('data-username');
             try {
-                await this.api('/api/kb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
+                await this.api('/api/fb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
                 count++;
             } catch (e) {}
         }
@@ -1177,14 +1184,14 @@ var KnowledgeBase = {
             if (users[i].username === uname) { tid = users[i].user_id; break; }
         }
         if (!tid) { alert('用户不存在'); return; }
-        var res = await this.api('/api/kb/' + this.currentKbId + '/transfer', 'POST', { new_owner_id: tid });
+        var res = await this.api('/api/fb/' + this.currentKbId + '/transfer', 'POST', { new_owner_id: tid });
         if (res.success) { this.closeModal(); this.currentKbId = null; await this.renderKbList(); }
         else alert(res.message);
     },
 
     _deleteKbAct: async function() {
         if (!confirm('确定要删除此文件库吗？')) return;
-        var res = await this.api('/api/kb/' + this.currentKbId, 'DELETE');
+        var res = await this.api('/api/fb/' + this.currentKbId, 'DELETE');
         if (res.success) { this.closeModal(); this.currentKbId = null; await this.renderKbList(); }
         else alert(res.message);
     },
@@ -1223,7 +1230,7 @@ var KnowledgeBase = {
         var q = qEl ? qEl.value.trim() : '';
         if (!q) return;
 
-        var res = await this.api('/api/kb/search?q=' + encodeURIComponent(q), 'GET');
+        var res = await this.api('/api/fb/search?q=' + encodeURIComponent(q), 'GET');
         var h = '<h3>🔍 搜索: ' + escapeHtmlText(q) + '</h3>';
         h += '<button onclick="KnowledgeBase.init()" style="margin-bottom:8px">← 返回</button>';
         if (res.success && res.results && res.results.length > 0) {
@@ -1233,7 +1240,7 @@ var KnowledgeBase = {
                 if (!r.rel_path && !r.kb_type) continue;
                 var dirPath = r.rel_path ? r.rel_path.replace(/\\/g, '/').replace(/\/[^\/]+$/, '') : '';
                 var clickAction = 'KnowledgeBase._openFromSearch(\'' + r.kb_id + '\',\'' + escapeHtmlText(r.kb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
-                var downloadUrl = '/api/kb/' + r.kb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);
+                var downloadUrl = '/api/fb/' + r.kb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);
                 h += '<tr>';
                 h += '<td>' + escapeHtmlText(r.kb_name) + '</td>';
                 h += '<td><span class="kb-file-name" onclick="' + clickAction + '">' + escapeHtmlText(r.filename) + '</span></td>';
@@ -1277,7 +1284,7 @@ var KnowledgeBase = {
 
     showTrash: async function() {
         var self = this;
-        var res = await this.api('/api/kb/trash-list', 'GET');
+        var res = await this.api('/api/fb/trash-list', 'GET');
         var items = res.success ? (res.items || []) : [];
 
         var h = '<div class="kb-explorer"><div class="kb-breadcrumb">';
@@ -1310,7 +1317,7 @@ var KnowledgeBase = {
     },
 
     restoreTrashItem: async function(name) {
-        var res = await this.api('/api/kb/trash-restore', 'POST', { name: name });
+        var res = await this.api('/api/fb/trash-restore', 'POST', { name: name });
         if (res.success) {
             await this.renderKbList();
         } else {
@@ -1320,14 +1327,14 @@ var KnowledgeBase = {
 
     deleteTrashItem: async function(name) {
         if (!confirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！')) return;
-        var url = '/api/kb/trash-item?name=' + encodeURIComponent(name) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/trash-item?name=' + encodeURIComponent(name) + '&token=' + encodeURIComponent(authToken);
         await fetch(url, { method: 'DELETE' });
         await this.showTrash();
     },
 
     clearTrash: async function() {
         if (!confirm('确定清空回收站吗？此操作不可恢复！')) return;
-        await this.api('/api/kb/trash', 'DELETE');
+        await this.api('/api/fb/trash', 'DELETE');
         await this.renderKbList();
     },
 
