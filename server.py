@@ -781,6 +781,17 @@ def api_upload_files(_user_id=None):
             if os.path.isfile(fpath):
                 workspace_used += os.path.getsize(fpath)
 
+    # 提取文件夹名称（从第一个文件的相对路径中获取）
+    folder_name = None
+    for file in uploaded_files:
+        if file.filename and '/' in file.filename:
+            folder_name = file.filename.split('/')[0]
+            break
+
+    # 确定保存根目录：如果有文件夹结构，创建子目录
+    save_root = os.path.join(workdir, folder_name) if folder_name else workdir
+    os.makedirs(save_root, exist_ok=True)
+
     for file in uploaded_files:
         if not file.filename:
             continue
@@ -800,8 +811,9 @@ def api_upload_files(_user_id=None):
             return jsonify({'success': False, 'message':
                 f'工作区总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
 
+        # 只保留文件名，不保留子目录
         filename = os.path.basename(file.filename)
-        save_path = os.path.join(workdir, filename)
+        save_path = os.path.join(save_root, filename)
         with open(save_path, 'wb') as f:
             f.write(file_content)
         workspace_used += file_size
