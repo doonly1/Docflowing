@@ -14,7 +14,7 @@ from functools import wraps
 
 from fb.database import get_db, get_visible_kb_ids, get_user_role
 
-kb_bp = Blueprint('kb', __name__, url_prefix='/api/kb')
+kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
