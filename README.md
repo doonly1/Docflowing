@@ -146,7 +146,22 @@ DocProc（文枢）——本项目源码仅供学习参考，未经授权禁止�
 
 ### 第三方声明
 
-本项目知识库进化模块（kb/）吸收了 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) 的部分设计思想与代码逻辑，包括但不限于：上下文压缩、技能审查（curator）、会话洞察（insights）、文件安全（file_safety）等。该部分原始代码遵循 MIT 许可证：
+本项目使用了以下开源组件，感谢它们的作者：
+
+| 组件 | 许可证 | 用途 |
+|------|--------|------|
+| [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) | MIT | 知识库进化模块设计思想与代码逻辑（上下文压缩、技能审查、会话洞察、文件安全等） |
+| [EasyMDE](https://github.com/Ionaru/easy-markdown-editor) | MIT | Markdown 编辑器 |
+| [Marked.js](https://github.com/markedjs/marked) | MIT | Markdown 渲染 |
+| [Flask](https://github.com/pallets/flask) | BSD-3-Clause | Web 框架 |
+| [python-docx](https://github.com/python-openxml/python-docx) | MIT | Word 文档处理 |
+| [openpyxl](https://github.com/theorchard/openpyxl) | MIT | Excel 文档处理 |
+| [pdfplumber](https://github.com/jsvine/pdfplumber) | MIT | PDF 文本提取 |
+| [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) | MIT | HTML 解析 |
+| [PyYAML](https://github.com/yaml/pyyaml) | MIT | YAML 解析 |
+| [Flask-CORS](https://github.com/corydolphin/flask-cors) | MIT | 跨域请求支持 |
+
+以上组件的原始许可证文本可在各自仓库中查看。其中 Hermes Agent 的 MIT 许可证要求如下：
 
 > MIT License
 > Copyright (c) 2025 Nous Research
