@@ -1,29 +1,19 @@
 var WikiKnowledge = {
     messages: [],
     isLoading: false,
-    wikiName: 'AI助手',
     sessionId: null,
     memoryUsage: null,
 
     init: function() {
-        this._renderView();
-        this._loadInfo();
-        this._loadMemoryUsage();
-    },
-
-    _loadInfo: function() {
-        var self = this;
-        apiFetch('/api/kb/info', { method: 'GET' }).then(function(resp) {
-            return resp.json();
-        }).then(function(data) {
-            if (data.success && data.info) {
-                self.wikiName = data.info.name || 'AI助手';
-                var titleEl = document.getElementById('kb-chat-title');
-                if (titleEl) titleEl.textContent = self.wikiName;
+        if (!document.getElementById('kb-messages')) {
+            this._renderView();
+            // 从内存恢复会话（文件库 KnowledgeBase 会清空 #kb-view DOM）
+            if (this.messages.length > 0) {
+                this._switchToActive();
+                this._renderMessages();
             }
-        }).catch(function(e) {
-            console.error('加载知识库信息失败:', e);
-        });
+        }
+        this._loadMemoryUsage();
     },
 
     _loadMemoryUsage: function() {
@@ -57,6 +47,7 @@ var WikiKnowledge = {
     },
 
     _sendMessageInternal: function(content) {
+        this._switchToActive();
         this.messages.push({
             role: 'user',
             content: content,
@@ -97,29 +88,37 @@ var WikiKnowledge = {
         if (!viewEl) return;
 
         viewEl.innerHTML =
-            '<div class="kb-chat-container">' +
-                '<div class="kb-chat-header">' +
-                    '<div class="kb-chat-header-title">' +
-                        '<span class="icon">✨</span>' +
-                        '<h3 id="kb-chat-title">AI助手</h3>' +
-                    '</div>' +
+            '<div class="kb-chat-container" id="kb-container">' +
+                // 头部（初始隐藏，对话后显示）
+                '<div class="kb-chat-header" id="kb-header" style="display:none">' +
                     '<div class="kb-chat-header-actions">' +
-                        '<button onclick="WikiKnowledge.newSession()" title="新建会话">➕ 新对话</button>' +
                         '<button onclick="WikiKnowledge.showSessions()" title="历史会话">💬 会话</button>' +
                         '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆">🧠 记忆</button>' +
-                        '<button onclick="WikiKnowledge.showSkills()" title="技能库">📚 技能</button>' +
+                        '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置">⚙️</button>' +
                     '</div>' +
                 '</div>' +
-                '<div class="kb-chat-messages" id="kb-messages">' +
+                // 消息区（初始隐藏）
+                '<div class="kb-chat-messages" id="kb-messages" style="display:none">' +
                     '<div class="kb-chat-empty" id="kb-empty-state">' +
                         '<div class="icon">💬</div>' +
                         '<div class="title">开始对话</div>' +
                         '<div class="desc">与AI助手对话，它将基于记忆与技能持续进化</div>' +
                     '</div>' +
                 '</div>' +
+                // 初始居中区
+                '<div class="kb-chat-initial-area" id="kb-initial-area">' +
+                    '<div class="kb-chat-greeting-title">开始对话</div>' +
+                    '<div class="kb-chat-greeting-desc">输入消息或选择快捷操作</div>' +
+                    '<div class="kb-chat-shortcuts">' +
+                        '<button onclick="WikiKnowledge.showSessions()" class="kb-shortcut-btn">💬 历史会话</button>' +
+                        '<button onclick="WikiKnowledge.showMemory()" class="kb-shortcut-btn">🧠 持久化记忆</button>' +
+                        '<button onclick="WikiKnowledge.showLLMSettings()" class="kb-shortcut-btn">⚙️ LLM 设置</button>' +
+                    '</div>' +
+                '</div>' +
+                // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +
                     '<div class="kb-chat-input-wrapper">' +
-                        '<textarea id="kb-input" rows="1" placeholder="输入消息，与AI助手对话..." onkeydown="WikiKnowledge.handleKeyDown(event)" oninput="WikiKnowledge.autoResize(this)"></textarea>' +
+                        '<textarea id="kb-input" rows="1" placeholder="输入消息，开始对话..." onkeydown="WikiKnowledge.handleKeyDown(event)" oninput="WikiKnowledge.autoResize(this)"></textarea>' +
                         '<div class="kb-chat-input-actions">' +
                             '<button class="kb-chat-send-btn" onclick="WikiKnowledge.sendMessage()" title="发送">' +
                                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z"/></svg>' +
@@ -136,6 +135,26 @@ var WikiKnowledge = {
                 '</div>' +
                 '<div class="kb-sidebar-content" id="kb-sidebar-content"></div>' +
             '</div>';
+    },
+
+    _switchToActive: function() {
+        var initialArea = document.getElementById('kb-initial-area');
+        var header = document.getElementById('kb-header');
+        var messages = document.getElementById('kb-messages');
+        if (!initialArea) return;
+        initialArea.style.display = 'none';
+        if (header) header.style.display = '';
+        if (messages) messages.style.display = 'flex';
+    },
+
+    _switchToInitial: function() {
+        var initialArea = document.getElementById('kb-initial-area');
+        var header = document.getElementById('kb-header');
+        var messages = document.getElementById('kb-messages');
+        if (!initialArea) return;
+        initialArea.style.display = 'flex';
+        if (header) header.style.display = 'none';
+        if (messages) messages.style.display = 'none';
     },
 
     handleKeyDown: function(event) {
@@ -339,12 +358,23 @@ var WikiKnowledge = {
     },
 
     newSession: function() {
-        this.sessionId = null;
-        this.messages = [];
-        this._renderMessages();
+        var self = this;
+        apiFetch('/api/kb/session/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                self.sessionId = data.session_id;
+            }
+        }).catch(function(e) {
+            console.error('创建会话失败:', e);
+        });
 
-        var emptyEl = document.getElementById('kb-empty-state');
-        if (emptyEl) emptyEl.style.display = 'flex';
+        this.messages = [];
+        this._switchToInitial();
     },
 
     viewSource: function(path) {
@@ -617,6 +647,280 @@ var WikiKnowledge = {
     _escapeHtml: function(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+
+    // ==================== LLM 设置 ====================
+
+    LLM_PROVIDERS: [
+        { name: 'OpenAI', base_url: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
+        { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+        { name: '硅基流动', base_url: 'https://api.siliconflow.cn/v1', models: ['Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-14B-Instruct', 'Pro/Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V3'] },
+        { name: '阿里百炼', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen-long'] },
+        { name: 'Moonshot', base_url: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+        { name: 'Groq', base_url: 'https://api.groq.com/openai/v1', models: ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'] },
+        { name: '智谱', base_url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-air', 'glm-4-flash'] },
+        { name: '自定义', base_url: '', models: [] },
+    ],
+
+    showLLMSettings: function() {
+        var self = this;
+        apiFetch('/api/kb/llm-config', { method: 'GET' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (!data.success) {
+                self.openSidebar('LLM 设置', '<div style="padding: 20px; text-align: center; color: #c00;">加载配置失败</div>');
+                return;
+            }
+            self._renderLLMSettings(data.config || {});
+        }).catch(function(e) {
+            self.openSidebar('LLM 设置', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
+        });
+    },
+
+    _renderLLMSettings: function(config) {
+        var self = this;
+        var enabled = config.enabled ? 'checked' : '';
+        var apiKey = config.api_key || '';
+        var baseUrl = config.base_url || '';
+        var model = config.model || '';
+        var temperature = config.temperature !== undefined ? config.temperature : 0.7;
+        var maxTokens = config.max_tokens !== undefined ? config.max_tokens : 4096;
+
+        // 根据 base_url 匹配提供商
+        var matchedProvider = '';
+        for (var i = 0; i < this.LLM_PROVIDERS.length; i++) {
+            var p = this.LLM_PROVIDERS[i];
+            if (p.base_url && baseUrl.indexOf(p.base_url) >= 0) {
+                matchedProvider = p.name;
+                break;
+            }
+        }
+
+        var providerOptions = '';
+        for (var i = 0; i < this.LLM_PROVIDERS.length; i++) {
+            var p = this.LLM_PROVIDERS[i];
+            var selected = (p.name === matchedProvider) ? 'selected' : '';
+            providerOptions += '<option value="' + self._escapeHtml(p.name) + '" data-base_url="' + self._escapeHtml(p.base_url) + '" ' + selected + '>' + self._escapeHtml(p.name) + '</option>';
+        }
+
+        // 生成模型选项
+        var modelOptions = '';
+        if (matchedProvider) {
+            var provider = null;
+            for (var i = 0; i < this.LLM_PROVIDERS.length; i++) {
+                if (this.LLM_PROVIDERS[i].name === matchedProvider) {
+                    provider = this.LLM_PROVIDERS[i];
+                    break;
+                }
+            }
+            if (provider && provider.models.length > 0) {
+                modelOptions += '<option value="">-- 选择模型 --</option>';
+                for (var i = 0; i < provider.models.length; i++) {
+                    var m = provider.models[i];
+                    var sel = (m === model) ? 'selected' : '';
+                    modelOptions += '<option value="' + self._escapeHtml(m) + '" ' + sel + '>' + self._escapeHtml(m) + '</option>';
+                }
+            }
+        }
+        if (!modelOptions) {
+            modelOptions = '<option value="">-- 手动输入 --</option>';
+        }
+
+        var html =
+            '<div style="padding: 16px;">' +
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">启用 LLM</label>' +
+                    '<label class="kb-settings-toggle">' +
+                        '<input type="checkbox" id="kb-llm-enabled" ' + enabled + '>' +
+                        '<span class="kb-settings-toggle-slider"></span>' +
+                    '</label>' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">模型提供商</label>' +
+                    '<select id="kb-llm-provider" onchange="WikiKnowledge._onProviderChange()" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
+                        providerOptions +
+                    '</select>' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">API 地址</label>' +
+                    '<input id="kb-llm-base-url" type="text" value="' + self._escapeHtml(baseUrl) + '" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">API Key</label>' +
+                    '<div style="display:flex;gap:8px;">' +
+                        '<input id="kb-llm-api-key" type="text" value="' + self._escapeHtml(apiKey) + '" placeholder="sk-..." style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;font-family:monospace;">' +
+                        '<button onclick="WikiKnowledge._toggleApiKeyVisibility()" style="padding:8px 10px;border:1px solid #d9d9d9;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;" title="切换可见性">👁</button>' +
+                    '</div>' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">模型</label>' +
+                    '<select id="kb-llm-model-select" onchange="WikiKnowledge._onModelSelectChange()" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;' + (modelOptions.indexOf('选择模型') >= 0 ? '' : 'display:none;') + '">' +
+                        modelOptions +
+                    '</select>' +
+                    '<input id="kb-llm-model-input" type="text" value="' + self._escapeHtml(model) + '" placeholder="gpt-4o-mini" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;' + (modelOptions.indexOf('选择模型') >= 0 ? 'display:none;' : '') + '" ' + (modelOptions.indexOf('选择模型') >= 0 ? '' : '') + '>' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">温度: <span id="kb-llm-temp-value">' + temperature + '</span></label>' +
+                    '<input id="kb-llm-temperature" type="range" min="0" max="2" step="0.1" value="' + temperature + '" oninput="WikiKnowledge._updateTempValue(this.value)" style="width:100%;">' +
+                    '<div style="display:flex;justify-content:space-between;font-size:11px;color:#999;"><span>精确 (0)</span><span>创意 (2)</span></div>' +
+                '</div>' +
+
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">最大 Token</label>' +
+                    '<input id="kb-llm-max-tokens" type="number" value="' + maxTokens + '" min="1" max="131072" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                '</div>' +
+
+                '<div style="display:flex;gap:8px;margin-top:20px;">' +
+                    '<button onclick="WikiKnowledge.testLLMConnection()" id="kb-llm-test-btn" style="flex:1;padding:10px;border:1px solid #4a90d9;border-radius:8px;background:white;color:#4a90d9;cursor:pointer;font-size:13px;">🔌 测试连接</button>' +
+                    '<button onclick="WikiKnowledge.saveLLMConfig()" id="kb-llm-save-btn" style="flex:1;padding:10px;border:none;border-radius:8px;background:#4a90d9;color:white;cursor:pointer;font-size:13px;">💾 保存设置</button>' +
+                '</div>' +
+                '<div id="kb-llm-status" style="margin-top:12px;font-size:13px;text-align:center;"></div>' +
+            '</div>';
+
+        self.openSidebar('⚙️ LLM 设置', html);
+    },
+
+    _onProviderChange: function() {
+        var providerSelect = document.getElementById('kb-llm-provider');
+        var baseUrlInput = document.getElementById('kb-llm-base-url');
+        var modelSelect = document.getElementById('kb-llm-model-select');
+        var modelInput = document.getElementById('kb-llm-model-input');
+        if (!providerSelect || !baseUrlInput) return;
+
+        var name = providerSelect.value;
+        for (var i = 0; i < this.LLM_PROVIDERS.length; i++) {
+            var p = this.LLM_PROVIDERS[i];
+            if (p.name === name) {
+                baseUrlInput.value = p.base_url;
+                // 更新模型下拉
+                var opts = '<option value="">-- 选择模型 --</option>';
+                for (var j = 0; j < p.models.length; j++) {
+                    opts += '<option value="' + this._escapeHtml(p.models[j]) + '">' + this._escapeHtml(p.models[j]) + '</option>';
+                }
+                if (p.models.length > 0) {
+                    modelSelect.innerHTML = opts;
+                    modelSelect.style.display = '';
+                    modelInput.style.display = 'none';
+                    modelInput.value = '';
+                } else {
+                    modelSelect.style.display = 'none';
+                    modelInput.style.display = '';
+                }
+                break;
+            }
+        }
+    },
+
+    _onModelSelectChange: function() {
+        var select = document.getElementById('kb-llm-model-select');
+        var input = document.getElementById('kb-llm-model-input');
+        if (select && input) {
+            input.value = select.value;
+        }
+    },
+
+    _toggleApiKeyVisibility: function() {
+        var input = document.getElementById('kb-llm-api-key');
+        if (input) {
+            input.type = (input.type === 'password') ? 'text' : 'password';
+        }
+    },
+
+    _updateTempValue: function(val) {
+        var span = document.getElementById('kb-llm-temp-value');
+        if (span) span.textContent = val;
+    },
+
+    testLLMConnection: function() {
+        var self = this;
+        var btn = document.getElementById('kb-llm-test-btn');
+        var statusEl = document.getElementById('kb-llm-status');
+        if (!btn || !statusEl) return;
+
+        btn.disabled = true;
+        btn.textContent = '⏳ 测试中...';
+        statusEl.innerHTML = '<span style="color:#999;">正在测试连接...</span>';
+
+        var llm = self._collectLLMFormData();
+        if (!llm.api_key || !llm.base_url || !llm.model) {
+            statusEl.innerHTML = '<span style="color:#c00;">请先填写 API Key、API 地址和模型名称</span>';
+            btn.disabled = false;
+            btn.textContent = '🔌 测试连接';
+            return;
+        }
+
+        apiFetch('/api/kb/llm-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ llm: llm })
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                statusEl.innerHTML = '<span style="color:#090;">✓ ' + self._escapeHtml(data.message) + '</span>';
+            } else {
+                statusEl.innerHTML = '<span style="color:#c00;">✗ ' + self._escapeHtml(data.message) + '</span>';
+            }
+        }).catch(function(e) {
+            statusEl.innerHTML = '<span style="color:#c00;">请求失败: ' + self._escapeHtml(e.message) + '</span>';
+        }).finally(function() {
+            btn.disabled = false;
+            btn.textContent = '🔌 测试连接';
+        });
+    },
+
+    saveLLMConfig: function() {
+        var self = this;
+        var btn = document.getElementById('kb-llm-save-btn');
+        var statusEl = document.getElementById('kb-llm-status');
+        if (!btn || !statusEl) return;
+
+        btn.disabled = true;
+        btn.textContent = '⏳ 保存中...';
+        statusEl.innerHTML = '';
+
+        var llm = self._collectLLMFormData();
+
+        apiFetch('/api/kb/llm-config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ llm: llm })
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                statusEl.innerHTML = '<span style="color:#090;">✓ 配置已保存！</span>';
+                // 刷新 LLM 可用状态
+                self._checkLLMStatus();
+            } else {
+                statusEl.innerHTML = '<span style="color:#c00;">✗ ' + self._escapeHtml(data.message) + '</span>';
+            }
+        }).catch(function(e) {
+            statusEl.innerHTML = '<span style="color:#c00;">保存失败: ' + self._escapeHtml(e.message) + '</span>';
+        }).finally(function() {
+            btn.disabled = false;
+            btn.textContent = '💾 保存设置';
+        });
+    },
+
+    _collectLLMFormData: function() {
+        return {
+            enabled: document.getElementById('kb-llm-enabled') ? document.getElementById('kb-llm-enabled').checked : false,
+            base_url: document.getElementById('kb-llm-base-url') ? document.getElementById('kb-llm-base-url').value.trim() : '',
+            api_key: document.getElementById('kb-llm-api-key') ? document.getElementById('kb-llm-api-key').value.trim() : '',
+            model: document.getElementById('kb-llm-model-input') ? document.getElementById('kb-llm-model-input').value.trim() : '',
+            temperature: document.getElementById('kb-llm-temperature') ? parseFloat(document.getElementById('kb-llm-temperature').value) : 0.7,
+            max_tokens: document.getElementById('kb-llm-max-tokens') ? parseInt(document.getElementById('kb-llm-max-tokens').value) || 4096 : 4096,
+        };
+    },
+
+    _checkLLMStatus: function() {
+        // 刷新后重新检查 LLM 可用性（下次对话时会自动检查）
     }
 };
 

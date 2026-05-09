@@ -786,9 +786,7 @@ body.kb-resizing {
 
 .kb-editor-body { flex: 1; overflow: hidden; }
 
-.kb-editor-body .EasyMDEContainer { height: 100% !important; }
-
-.kb-editor-body .CodeMirror { height: calc(100vh - 240px) !important; }
+.kb-editor-body .ql-editor { height: 100%; }
 
 .kb-preview-frame {
     width: 100%;
@@ -911,56 +909,44 @@ body.kb-resizing {
     background: #c82333;
 }
 
-#kb-md-editor-textarea {
-    display: none;
-}
-
-.kb-md-editor-container .EasyMDEContainer {
+#kb-wysiwyg-editor {
     flex: 1;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-.kb-md-editor-container .CodeMirror {
-    height: 100% !important;
-    font-size: 14px;
-    line-height: 1.6;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-}
-
-.kb-md-editor-container .editor-toolbar {
+#kb-wysiwyg-editor .ql-toolbar {
     border: none;
     border-bottom: 1px solid #e0e0e0;
-    border-radius: 0;
     background: #fafafa;
+    flex-shrink: 0;
 }
 
-.kb-md-editor-container .editor-toolbar button {
-    color: #555;
-}
-
-.kb-md-editor-container .editor-toolbar button:hover {
-    color: #333;
-    background: #e8e8e8;
-}
-
-.kb-md-editor-container .editor-preview {
-    background: #fff;
-    padding: 20px;
+#kb-wysiwyg-editor .ql-container {
+    flex: 1;
+    overflow-y: auto;
+    border: none;
+    font-size: 15px;
     line-height: 1.7;
 }
 
-.kb-md-editor-container .editor-preview table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 10px 0;
+#kb-wysiwyg-editor .ql-editor {
+    padding: 24px 32px;
+    min-height: 100%;
 }
 
-.kb-md-editor-container .editor-preview td,
-.kb-md-editor-container .editor-preview th {
-    border: 1px solid #ddd;
-    padding: 6px 10px;
+#kb-wysiwyg-editor .ql-editor h1 { font-size: 28px; margin: 0 0 16px; }
+#kb-wysiwyg-editor .ql-editor h2 { font-size: 22px; margin: 0 0 12px; }
+#kb-wysiwyg-editor .ql-editor h3 { font-size: 18px; margin: 0 0 10px; }
+#kb-wysiwyg-editor .ql-editor p { margin: 0 0 10px; }
+#kb-wysiwyg-editor .ql-editor blockquote {
+    border-left: 3px solid #ccc;
+    margin: 0 0 10px;
+    padding-left: 12px;
+    color: #666;
 }
-
-.kb-md-editor-container .editor-preview th {
-    background: #f0f2f5;
-}
+#kb-wysiwyg-editor .ql-editor ul,
+#kb-wysiwyg-editor .ql-editor ol { margin: 0 0 10px; padding-left: 24px; }
+#kb-wysiwyg-editor .ql-editor a { color: #0066cc; }
+#kb-wysiwyg-editor .ql-editor img { max-width: 100%; }

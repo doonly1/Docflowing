@@ -575,6 +575,106 @@ def agent_context(_user_id=None):
     })
 
 
+# --- LLM 配置接口 ---
+
+LLM_PROVIDERS = [
+    {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]},
+    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "models": ["deepseek-chat", "deepseek-reasoner"]},
+    {"name": "硅基流动", "base_url": "https://api.siliconflow.cn/v1", "models": ["Qwen/Qwen2.5-7B-Instruct", "Qwen/Qwen2.5-14B-Instruct", "Pro/Qwen/Qwen2.5-7B-Instruct", "deepseek-ai/DeepSeek-V3"]},
+    {"name": "阿里百炼", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "models": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"]},
+    {"name": "Moonshot", "base_url": "https://api.moonshot.cn/v1", "models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]},
+    {"name": "Groq", "base_url": "https://api.groq.com/openai/v1", "models": ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]},
+    {"name": "智谱", "base_url": "https://open.bigmodel.cn/api/paas/v4", "models": ["glm-4-plus", "glm-4-air", "glm-4-flash"]},
+    {"name": "自定义", "base_url": "", "models": []},
+]
+
+
+@wiki_bp.route('/llm-config', methods=['GET'])
+@_require_wiki_permission('view')
+def get_llm_config_route(_user_id=None):
+    from .config import get_llm_config, _mask_api_key
+    cfg = get_llm_config()
+    masked = dict(cfg)
+    if masked.get('api_key'):
+        masked['api_key'] = _mask_api_key(masked['api_key'])
+    return jsonify({'success': True, 'config': masked})
+
+
+@wiki_bp.route('/llm-config', methods=['PUT'])
+@_require_wiki_permission('manage')
+def update_llm_config_route(_user_id=None):
+    from .config import save_llm_config, get_llm_config
+    data = request.get_json() or {}
+    llm_cfg = data.get('llm', {})
+
+    # 如果 api_key 为空或为脱敏值，保留现有加密值
+    api_key = llm_cfg.get('api_key', '')
+    if not api_key or '****' in api_key:
+        current = get_llm_config()
+        existing = current.get('api_key', '')
+        # 重新加密保存（从内存中的明文重新加密）
+        llm_cfg['api_key'] = existing
+
+    ok = save_llm_config(llm_cfg)
+    if ok:
+        return jsonify({'success': True, 'message': 'LLM 配置已保存'})
+    return jsonify({'success': False, 'message': '保存配置失败'}), 500
+
+
+@wiki_bp.route('/llm-providers', methods=['GET'])
+def get_llm_providers(_user_id=None):
+    return jsonify({'success': True, 'providers': LLM_PROVIDERS})
+
+
+@wiki_bp.route('/llm-test', methods=['POST'])
+@_require_wiki_permission('manage')
+def test_llm_connection(_user_id=None):
+    """测试 LLM 连接：发送一条简单消息验证配置是否可用"""
+    from .llm import call_llm
+    data = request.get_json() or {}
+    test_cfg = data.get('llm', {})
+
+    # 临时配置覆盖
+    from .config import get_llm_config
+    current = dict(get_llm_config())
+    for k in ('api_key', 'base_url', 'model'):
+        if k in test_cfg and test_cfg[k]:
+            if '****' not in test_cfg[k]:
+                current[k] = test_cfg[k]
+
+    if not current.get('api_key') or not current.get('base_url') or not current.get('model'):
+        return jsonify({'success': False, 'message': '请先填写 API Key、API 地址和模型名称'})
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        import requests
+        url = current['base_url'].rstrip('/') + '/chat/completions'
+        headers = {
+            'Authorization': f"Bearer {current['api_key']}",
+            'Content-Type': 'application/json',
+        }
+        payload = {
+            'model': current['model'],
+            'messages': [{'role': 'user', 'content': 'hi'}],
+            'max_tokens': 10,
+            'temperature': 0.1,
+        }
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        if resp.status_code == 200:
+            return jsonify({'success': True, 'message': '连接成功！模型响应正常。'})
+        else:
+            detail = resp.text[:200]
+            return jsonify({'success': False, 'message': f'连接失败 (HTTP {resp.status_code}): {detail}'})
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'message': '连接超时，请检查 API 地址是否正确'})
+    except requests.exceptions.ConnectionError:
+        return jsonify({'success': False, 'message': '无法连接，请检查 API 地址和网络设置'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'连接异常: {str(e)}'})
+
+
 # --- Memory system endpoints ---
 from .routes_memory import register_memory_routes
 register_memory_routes(wiki_bp)

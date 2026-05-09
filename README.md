@@ -18,43 +18,6 @@
 | `server.py` | Web 服务器（Flask，提供文档处理在线服务） |
 | `index.html` | 前端页面 |
 
-## 文档比对（to_compare.py）
-
-三级比对架构，从粗到细：
-
-```
-段落级匹配 → 句子级匹配 → 字符级 diff
-```
-
-### 标记规则
-
-| 标记 | 颜色 | 删除线 | 含义 |
-|------|------|--------|------|
-| 红色 | RGB(255,0,0) | 无 | 新增内容 |
-| 蓝色 | RGB(0,0,255) | ✓ | 删除内容 |
-
-### 支持的比对场景
-
-| 场景 | 处理方式 |
-|------|---------|
-| 纯新增段落 | 整段红色 |
-| 纯删除段落 | 整段蓝色+删除线 |
-| 段落内字符修改 | 字符级 diff 精确标记 |
-| 段落内句子互换 | 逆序对检测，原位蓝删 + 新位红增 |
-| 段落顺序调整 | 段落级逆序对检测，原位蓝删占位 + 新位保留内部差异 |
-| 多段落合并为一 | 拼接合并检测，内部走句子/字符级 diff |
-| 一段落拆分为多 | 拆分检测，按终稿段落边界切割 diff |
-| 中英文标点混用 | 统一支持中英文逗号、句号、叹号、问号、分号、冒号分句 |
-
-### 匹配阈值设置
-
-`config/config.yaml` 中的 `compare` 段：
-
-```yaml
-compare:
-  sentence_similarity_threshold: 0.40  # 句子相似度阈值（低于此值直接标新增+删除）
-  para_similarity_threshold: 0.40      # 段落相似度阈值
-```
 
 ## 快速开始
 
@@ -62,37 +25,12 @@ compare:
 # 安装依赖
 pip install -r requirements.txt
 
-# 文档比对
-python to_compare.py                          # 处理脚本所在目录，交互选择文件
-python to_compare.py [目录]                    # 指定目录，交互选择文件
-python to_compare.py [原稿.docx] [终稿.docx]   # 直接指定两个文件
-
-# 转换文档为公文格式（支持 pdf/doc/docx/txt/html/md）
-python to_docx.py                  # 处理脚本目录
-python to_docx.py [目录]           # 处理指定目录
-
-# 添加页码
-python to_pageNum.py [目录]
-
-# 生成红头文件
-python to_redhead.py [目录]
-
-# 转 PDF
-python to_pdf.py [目录]
-
-# 生成目录索引
-python to_index.py [目录]
-
 # 启动 Web 服务
 python server.py
 ```
 
-## 配置说明
 
-服务端配置文件位于 `config/` 目录下 
-用户端自动创建`~/.config/doc_tool/config.yaml`
-
-### 发文字号与印章配置 (config.yaml)
+### 配置 (config.yaml)
 
 ```yaml
 公司名称:
@@ -108,11 +46,6 @@ compare:
 last_workdir: ""
 ```
 
-### 印章图片
-
-将印章图片放入“印章位置”对应的目录：
-- 文件名需与 `config.yaml` 中配置的公司名称一致
-- 格式：PNG
 
 ## 项目结构
 
@@ -151,7 +84,8 @@ DocProc（文枢）——本项目源码仅供学习参考，未经授权禁止�
 | 组件 | 许可证 | 用途 |
 |------|--------|------|
 | [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) | MIT | 知识库进化模块设计思想与代码逻辑（上下文压缩、技能审查、会话洞察、文件安全等） |
-| [EasyMDE](https://github.com/Ionaru/easy-markdown-editor) | MIT | Markdown 编辑器 |
+| [Quill](https://github.com/slab/quill) | BSD-3-Clause | 富文本编辑器 |
+| [Turndown](https://github.com/mixmark-io/turndown) | MIT | HTML 转 Markdown |
 | [Marked.js](https://github.com/markedjs/marked) | MIT | Markdown 渲染 |
 | [Flask](https://github.com/pallets/flask) | BSD-3-Clause | Web 框架 |
 | [python-docx](https://github.com/python-openxml/python-docx) | MIT | Word 文档处理 |

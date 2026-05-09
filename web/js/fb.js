@@ -955,26 +955,41 @@ var KnowledgeBase = {
             '<button class="kb-md-btn-save" onclick="KnowledgeBase._saveMdContent()">💾 保存</button>' +
             '<button class="kb-md-btn-close" onclick="KnowledgeBase._closeMdEditor()">✖ 关闭</button>' +
             '</div></div>' +
-            '<textarea id="kb-md-editor-textarea"></textarea>' +
+            '<div id="kb-wysiwyg-editor"></div>' +
             '</div>';
         document.body.appendChild(overlay);
 
         this._mdEditorRelPath = relPath;
 
-        var textarea = document.getElementById('kb-md-editor-textarea');
-        if (typeof EasyMDE !== 'undefined') {
-            var easyMDE = new EasyMDE({
-                element: textarea,
-                spellChecker: false,
-                autosave: { enabled: false },
-                placeholder: '开始编写 Markdown...',
-                toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|', 'link', 'image', '|', 'preview', 'side-by-side', 'fullscreen', '|', 'guide'],
-                initialValue: content,
-                sideBySideFullscreen: false
+        var editorEl = document.getElementById('kb-wysiwyg-editor');
+        if (typeof Quill !== 'undefined') {
+            var quill = new Quill(editorEl, {
+                theme: 'snow',
+                placeholder: '开始编写...',
+                modules: {
+                    toolbar: [
+                        [{ 'header': [1, 2, 3, false] }],
+                        ['bold', 'italic', 'underline', 'strike'],
+                        [{ 'color': [] }, { 'background': [] }],
+                        [{ 'align': [] }],
+                        ['blockquote', { 'list': 'ordered' }, { 'list': 'bullet' }],
+                        ['link', 'image'],
+                        ['clean']
+                    ]
+                }
             });
-            this._mdEditorInstance = easyMDE;
+
+            if (content) {
+                var html = '';
+                if (typeof marked !== 'undefined') {
+                    html = marked.parse(content);
+                }
+                quill.clipboard.dangerouslyPasteHTML(html);
+            }
+
+            this._mdEditorInstance = quill;
         } else {
-            textarea.value = content;
+            editorEl.innerHTML = '<div style="padding:20px;color:#999;">编辑器加载失败，请刷新页面重试</div>';
         }
 
         overlay.addEventListener('click', function(e) {
@@ -984,11 +999,22 @@ var KnowledgeBase = {
 
     _saveMdContent: async function() {
         var content = '';
-        if (this._mdEditorInstance && typeof this._mdEditorInstance.value === 'function') {
-            content = this._mdEditorInstance.value();
-        } else {
-            var ta = document.getElementById('kb-md-editor-textarea');
-            if (ta) content = ta.value;
+        if (this._mdEditorInstance && typeof this._mdEditorInstance.root !== 'undefined') {
+            var html = this._mdEditorInstance.root.innerHTML;
+            if (typeof TurndownService !== 'undefined') {
+                var turndownService = new TurndownService({
+                    headingStyle: 'atx',
+                    bulletListMarker: '-',
+                    codeBlockStyle: 'fenced'
+                });
+                turndownService.addRule('strikethrough', {
+                    filter: ['s', 'del'],
+                    replacement: function(content) { return '~~' + content + '~~'; }
+                });
+                content = turndownService.turndown(html);
+            } else {
+                content = html;
+            }
         }
 
         var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/content', 'PUT', {
@@ -1005,9 +1031,6 @@ var KnowledgeBase = {
     },
 
     _closeMdEditor: function() {
-        if (this._mdEditorInstance && typeof this._mdEditorInstance.toTextArea === 'function') {
-            this._mdEditorInstance.toTextArea();
-        }
         this._mdEditorInstance = null;
         this._mdEditorRelPath = null;
         var overlay = document.getElementById('kb-md-editor-overlay');
