@@ -1,304 +1,703 @@
-.wiki-container {
+.kb-chat-container {
     display: flex;
     flex-direction: column;
     height: calc(100vh - 32px);
-    background: #fff;
+    background: #fafaf8;
     border-radius: 8px;
     overflow: hidden;
+    font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", -apple-system, sans-serif;
 }
 
-.wiki-main {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-}
-
-.wiki-sidebar {
-    width: 280px;
-    min-width: 220px;
-    border-right: 1px solid #e8e8e8;
-    display: flex;
-    flex-direction: column;
-    background: #fafafa;
-}
-
-.wiki-sidebar-header {
+.kb-chat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid #e8e8e8;
+    padding: 14px 20px;
     background: #fff;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
 }
 
-.wiki-sidebar-header h3 {
+.kb-chat-header-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.kb-chat-header-title h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c2c2c;
+    letter-spacing: 0.02em;
+}
+
+.kb-chat-header-title .icon {
+    font-size: 20px;
+    opacity: 0.9;
+}
+
+.kb-chat-header-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.kb-chat-header-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #666;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.kb-chat-header-actions button:hover {
+    background: #f5f5f5;
     color: #333;
 }
 
-.wiki-sidebar-actions {
+.kb-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.kb-chat-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    color: #999;
+    gap: 16px;
+}
+
+.kb-chat-empty .icon {
+    font-size: 48px;
+    opacity: 0.6;
+}
+
+.kb-chat-empty .title {
+    font-size: 18px;
+    font-weight: 500;
+    color: #555;
+}
+
+.kb-chat-empty .desc {
+    font-size: 14px;
+    color: #999;
+    max-width: 320px;
+    line-height: 1.6;
+}
+
+.kb-chat-message {
+    display: flex;
+    gap: 12px;
+    max-width: 85%;
+    animation: messageSlideIn 0.3s ease;
+}
+
+@keyframes messageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.kb-chat-message.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+}
+
+.kb-chat-message.assistant {
+    align-self: flex-start;
+}
+
+.kb-chat-message-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.kb-chat-message.user .kb-chat-message-avatar {
+    background: linear-gradient(135deg, #e94560, #c41e3a);
+    color: #fff;
+}
+
+.kb-chat-message.assistant .kb-chat-message-avatar {
+    background: #f0f0f0;
+    color: #555;
+}
+
+.kb-chat-message-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.kb-chat-message.user .kb-chat-message-content {
+    text-align: right;
+}
+
+.kb-chat-message-bubble {
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.kb-chat-message.user .kb-chat-message-bubble {
+    background: linear-gradient(135deg, #e94560, #c41e3a);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+
+.kb-chat-message.assistant .kb-chat-message-bubble {
+    background: #fff;
+    color: #333;
+    border: 1px solid #eee;
+    border-bottom-left-radius: 4px;
+}
+
+.kb-chat-message-bubble code {
+    background: rgba(0,0,0,0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 13px;
+}
+
+.kb-chat-message.user .kb-chat-message-bubble code {
+    background: rgba(255,255,255,0.2);
+}
+
+.kb-chat-message-bubble pre {
+    background: #f8f8f8;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+
+.kb-chat-message.user .kb-chat-message-bubble pre {
+    background: rgba(0,0,0,0.15);
+}
+
+.kb-chat-message-bubble pre code {
+    background: none;
+    padding: 0;
+}
+
+.kb-chat-message-time {
+    font-size: 11px;
+    color: #bbb;
+    margin-top: 4px;
+    padding: 0 4px;
+}
+
+.kb-chat-message.user .kb-chat-message-time {
+    text-align: right;
+}
+
+.kb-chat-sources {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+}
+
+.kb-chat-sources-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #999;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.kb-chat-source-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #666;
+    padding: 4px 0;
+}
+
+.kb-chat-source-item .icon {
+    font-size: 12px;
+}
+
+.kb-chat-source-item a {
+    color: #e94560;
+    text-decoration: none;
+}
+
+.kb-chat-source-item a:hover {
+    text-decoration: underline;
+}
+
+.kb-chat-input-area {
+    padding: 16px 20px;
+    background: #fff;
+    border-top: 1px solid #eee;
+    flex-shrink: 0;
+}
+
+.kb-chat-input-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    background: #fafaf8;
+    border: 1px solid #e8e8e8;
+    border-radius: 12px;
+    padding: 10px 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.kb-chat-input-wrapper:focus-within {
+    border-color: #e94560;
+    box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.1);
+}
+
+.kb-chat-input-wrapper textarea {
+    flex: 1;
+    border: none;
+    background: none;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+    color: #333;
+    max-height: 120px;
+    min-height: 24px;
+    font-family: inherit;
+}
+
+.kb-chat-input-wrapper textarea::placeholder {
+    color: #aaa;
+}
+
+.kb-chat-input-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.kb-chat-input-actions button {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.kb-chat-send-btn {
+    background: linear-gradient(135deg, #e94560, #c41e3a);
+    color: #fff;
+}
+
+.kb-chat-send-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
+}
+
+.kb-chat-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.kb-chat-send-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.kb-chat-typing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: #999;
+    font-size: 13px;
+}
+
+.kb-chat-typing-dots {
     display: flex;
     gap: 4px;
 }
 
-.wiki-sidebar-actions button {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: 4px;
-    font-size: 16px;
-    color: #666;
-    transition: background 0.15s;
+.kb-chat-typing-dots span {
+    width: 6px;
+    height: 6px;
+    background: #ddd;
+    border-radius: 50%;
+    animation: typingBounce 1.4s infinite ease-in-out;
 }
 
-.wiki-sidebar-actions button:hover {
-    background: #f0f0f0;
+.kb-chat-typing-dots span:nth-child(1) { animation-delay: 0s; }
+.kb-chat-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.kb-chat-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+    0%, 80%, 100% {
+        transform: scale(1);
+        opacity: 0.4;
+    }
+    40% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
 }
 
-.wiki-tree {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 0;
-}
-
-.wiki-tree-item {
+.kb-chat-context-indicator {
     display: flex;
     align-items: center;
-    padding: 6px 12px;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #f0f8ff;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: #666;
+}
+
+.kb-chat-context-indicator .icon {
+    font-size: 14px;
+}
+
+.kb-chat-context-indicator .count {
+    background: #e94560;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.kb-sidebar {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 400px;
+    height: 100vh;
+    background: #fff;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.1);
+    z-index: 500;
+    transition: right 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.kb-sidebar.open {
+    right: 0;
+}
+
+.kb-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.kb-sidebar-header h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+}
+
+.kb-sidebar-header button {
+    background: none;
+    border: none;
+    font-size: 20px;
     cursor: pointer;
+    color: #999;
+    padding: 4px;
+}
+
+.kb-sidebar-header button:hover {
+    color: #333;
+}
+
+.kb-sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.kb-sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.3);
+    z-index: 400;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.kb-sidebar-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.kb-file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-bottom: 4px;
+}
+
+.kb-file-item:hover {
+    background: #f5f5f5;
+}
+
+.kb-file-item .icon {
+    font-size: 18px;
+}
+
+.kb-file-item .name {
+    flex: 1;
     font-size: 13px;
     color: #333;
-    transition: background 0.1s;
-    user-select: none;
-}
-
-.wiki-tree-item:hover {
-    background: #f0f2f5;
-}
-
-.wiki-tree-item.active {
-    background: #fff0f3;
-    color: #e94560;
-}
-
-.wiki-tree-item .icon {
-    margin-right: 8px;
-    font-size: 14px;
-    width: 18px;
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.wiki-tree-item .name {
-    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.wiki-tree-item.folder {
-    font-weight: 500;
+.kb-file-item .size {
+    font-size: 11px;
+    color: #999;
 }
 
-.wiki-tree-children {
-    padding-left: 16px;
-}
-
-.wiki-editor-area {
-    flex: 1;
+.kb-session-item {
     display: flex;
-    flex-direction: column;
-    min-width: 0;
-}
-
-.wiki-editor-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid #e8e8e8;
-    background: #fff;
-}
-
-.wiki-editor-toolbar button {
-    padding: 5px 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background: #fff;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 12px;
+    transition: background 0.15s;
+    margin-bottom: 4px;
+}
+
+.kb-session-item:hover {
+    background: #f5f5f5;
+}
+
+.kb-session-item.active {
+    background: #fff0f3;
+}
+
+.kb-session-item .icon {
+    font-size: 18px;
+    margin-top: 2px;
+}
+
+.kb-session-item .title {
+    font-size: 13px;
     color: #333;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+}
+
+.kb-session-item .preview {
+    font-size: 12px;
+    color: #999;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+}
+
+.kb-session-item .time {
+    font-size: 11px;
+    color: #bbb;
+    margin-top: 2px;
+}
+
+.kb-memory-entry {
+    padding: 10px 12px;
+    border-left: 3px solid #e94560;
+    margin-bottom: 8px;
+    background: #fafaf8;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.kb-memory-entry .target {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e94560;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.kb-memory-usage {
+    display: flex;
+    gap: 16px;
+    padding: 12px;
+    background: #f8f8f8;
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.kb-memory-usage-item {
+    flex: 1;
+}
+
+.kb-memory-usage-item .label {
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+}
+
+.kb-memory-usage-item .bar {
+    height: 4px;
+    background: #eee;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.kb-memory-usage-item .bar-fill {
+    height: 100%;
+    background: #e94560;
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+.kb-memory-usage-item .value {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+}
+
+.kb-skill-item {
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #eee;
+    margin-bottom: 8px;
+    cursor: pointer;
     transition: all 0.15s;
 }
 
-.wiki-editor-toolbar button:hover {
-    background: #f0f2f5;
-    border-color: #ccc;
-}
-
-.wiki-editor-toolbar button.primary {
-    background: #e94560;
-    color: #fff;
+.kb-skill-item:hover {
     border-color: #e94560;
+    background: #fff0f3;
 }
 
-.wiki-editor-toolbar button.primary:hover {
-    background: #c41e3a;
-}
-
-.wiki-editor-toolbar .filename {
-    flex: 1;
-    font-size: 13px;
-    color: #666;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.wiki-editor-wrapper {
-    flex: 1;
-    overflow: hidden;
-}
-
-.wiki-editor-wrapper .EasyMDEContainer {
-    border: none;
-    border-radius: 0;
-}
-
-.wiki-editor-wrapper .editor-toolbar {
-    border-bottom: 1px solid #e8e8e8;
-}
-
-.wiki-editor-wrapper .CodeMirror {
-    border: none;
-    min-height: 300px;
-}
-
-.wiki-search-bar {
-    border-top: 1px solid #e8e8e8;
-    background: #fff;
-    padding: 8px 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.wiki-search-bar input {
-    flex: 1;
-    padding: 6px 10px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 12px;
-    outline: none;
-    transition: border-color 0.15s;
-}
-
-.wiki-search-bar input:focus {
-    border-color: #e94560;
-}
-
-.wiki-search-bar button {
-    padding: 5px 10px;
-    background: #e94560;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.wiki-search-results {
-    max-height: 200px;
-    overflow-y: auto;
-    border-top: 1px solid #eee;
-    display: none;
-}
-
-.wiki-search-results.show {
-    display: block;
-}
-
-.wiki-search-result-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    border-bottom: 1px solid #f0f0f0;
-    transition: background 0.1s;
-}
-
-.wiki-search-result-item:hover {
-    background: #f8f8f8;
-}
-
-.wiki-search-result-item .title {
-    font-size: 13px;
-    font-weight: 500;
+.kb-skill-item .name {
+    font-size: 14px;
+    font-weight: 600;
     color: #333;
     margin-bottom: 4px;
 }
 
-.wiki-search-result-item .snippet {
+.kb-skill-item .category {
+    font-size: 11px;
+    color: #999;
+    display: inline-block;
+    background: #f5f5f5;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+}
+
+.kb-skill-item .stats {
     font-size: 12px;
     color: #666;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.wiki-search-result-item mark {
-    background: #fff3cd;
-    padding: 0 2px;
-    border-radius: 2px;
-}
-
-.wiki-empty-state {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
+    gap: 12px;
+}
+
+.kb-skill-item .state {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    display: inline-block;
+}
+
+.kb-skill-item .state.active {
+    background: #e6f9ee;
+    color: #2d8659;
+}
+
+.kb-skill-item .state.stale {
+    background: #fff3e6;
+    color: #b8860b;
+}
+
+.kb-skill-item .state.archived {
+    background: #f0f0f0;
     color: #999;
-    font-size: 14px;
-    flex-direction: column;
-    gap: 8px;
 }
 
-.wiki-empty-state .icon {
-    font-size: 48px;
-    opacity: 0.5;
+.kb-sidebar-input-area {
+    padding: 12px;
+    border-top: 1px solid #eee;
 }
 
-.wiki-new-input {
-    display: flex;
-    gap: 4px;
-    padding: 8px 12px;
-    border-bottom: 1px solid #e8e8e8;
-    background: #fff;
-}
-
-.wiki-new-input input {
-    flex: 1;
-    padding: 4px 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 12px;
+.kb-sidebar-input-area textarea {
+    width: 100%;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    resize: none;
     outline: none;
+    font-family: inherit;
 }
 
-.wiki-new-input input:focus {
+.kb-sidebar-input-area textarea:focus {
     border-color: #e94560;
 }
 
-.wiki-new-input button {
-    padding: 4px 8px;
-    background: #e94560;
+.kb-sidebar-input-area button {
+    margin-top: 8px;
+    width: 100%;
+    padding: 10px;
+    background: linear-gradient(135deg, #e94560, #c41e3a);
     color: #fff;
     border: none;
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 8px;
+    font-size: 13px;
     cursor: pointer;
 }
 
-.wiki-new-input .cancel {
-    background: #999;
+.kb-sidebar-input-area button:hover {
+    opacity: 0.9;
 }

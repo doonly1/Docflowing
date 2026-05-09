@@ -7,6 +7,10 @@ from functools import wraps
 
 from kb.database import get_db
 from kb.search import search_wiki
+from kb.config import get_kb_section
+from kb.llm import is_llm_available, call_llm
+from kb.context_compressor import ContextCompressor
+from kb.session_db import get_session_db
 
 wiki_bp = Blueprint('wiki', __name__, url_prefix='/api/kb')
 
@@ -70,7 +74,7 @@ def _check_wiki_permission(usr_id, target_usr_id, required_level):
     if usr_id == target_usr_id:
         return True
 
-    conn = get_db()
+    conn = get_db(usr_id)
     row = conn.execute(
         "SELECT permission_level FROM wiki_permissions WHERE usr_id = ? AND shared_user_id = ?",
         (target_usr_id, usr_id)
@@ -105,6 +109,30 @@ def _get_kb_root(usr_id):
     return kb_dir
 
 
+def _build_skills_index(usr_id: str) -> str:
+    try:
+        from .skills.manager import list_skills
+        skills = list_skills(usr_id, state="active")
+        if not skills:
+            return ""
+        lines = ["## 可用技能索引", ""]
+        for s in skills:
+            name = s.get("name", "")
+            fm = s.get("frontmatter", {})
+            desc = fm.get("description", "") if isinstance(fm, dict) else ""
+            cat = fm.get("category", "") if isinstance(fm, dict) else ""
+            line = f"- **{name}**"
+            if cat:
+                line += f" [{cat}]"
+            if desc:
+                line += f": {desc}"
+            lines.append(line)
+        lines.append("")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def sanitize_path(user_path):
     clean_path = user_path.lstrip('/').replace('\\', '/')
     parts = clean_path.split('/')
@@ -128,7 +156,7 @@ def validate_file_path(usr_id, file_path):
 
 
 def update_search_index(usr_id, file_path, title, content):
-    conn = get_db()
+    conn = get_db(usr_id)
     conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))
     conn.execute(
         "INSERT INTO wiki_fts (usr_id, title, content, path) VALUES (?, ?, ?, ?)",
@@ -138,7 +166,7 @@ def update_search_index(usr_id, file_path, title, content):
 
 
 def remove_from_index(usr_id, file_path):
-    conn = get_db()
+    conn = get_db(usr_id)
     conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))
     conn.commit()
 
@@ -157,7 +185,7 @@ def _extract_title_from_md(content):
 @_require_wiki_permission('view')
 def get_wiki_info(_user_id=None):
     usr_id = _user_id
-    conn = get_db()
+    conn = get_db(usr_id)
     row = conn.execute("SELECT * FROM wiki_info WHERE usr_id = ?", (usr_id,)).fetchone()
 
     if not row:
@@ -189,7 +217,7 @@ def update_wiki_settings(_user_id=None):
     name = (data.get('name') or '').strip()
     description = (data.get('description') or '').strip()
 
-    conn = get_db()
+    conn = get_db(usr_id)
     row = conn.execute("SELECT * FROM wiki_info WHERE usr_id = ?", (usr_id,)).fetchone()
     if not row:
         return jsonify({'success': False, 'message': '知识库未初始化'})
@@ -310,7 +338,7 @@ def create_or_update_file(file_path, _user_id=None):
     update_search_index(usr_id, rel_path, title, content)
 
     now = time.time()
-    conn = get_db()
+    conn = get_db(usr_id)
     conn.execute(
         "UPDATE wiki_info SET updated_at = ? WHERE usr_id = ?",
         (now, usr_id)
@@ -414,9 +442,10 @@ def agent_context(_user_id=None):
     data = request.get_json() or {}
     query = (data.get('query') or '').strip()
     max_chars = data.get('max_chars', 4000)
+    session_id = data.get('session_id')
 
     if not query:
-        return jsonify({'success': True, 'context': '', 'sources': []})
+        return jsonify({'success': True, 'context': '', 'sources': [], 'session_id': session_id, 'llm_used': False})
 
     results = search_wiki(usr_id, query)
 
@@ -447,8 +476,117 @@ def agent_context(_user_id=None):
         sources.append({'path': r['path'], 'title': r['title']})
         total_chars += len(content)
 
+    kb_context = '\n\n---\n\n'.join(context_parts)
+
+    from .memory import get_memory_store
+    from .context_fence import build_memory_context_block
+    memory_store = get_memory_store(usr_id)
+    memory_block = memory_store.format_for_system_prompt()
+    memory_context = build_memory_context_block(memory_block) if memory_block else ""
+
+    if is_llm_available() and kb_context:
+        kb_section = get_kb_section()
+        wiki_name = kb_section.get('default_name', '知识库')
+
+        skills_index = _build_skills_index(usr_id)
+
+        system_prompt = f"""你是一个专业的知识库助手，基于以下知识库内容回答用户问题。
+
+## 知识库名称
+{wiki_name}
+
+## 知识库内容
+{kb_context}
+
+{memory_context}
+{skills_index}
+
+请根据上述知识库内容回答用户问题。如果知识库中没有相关信息，请明确告知用户。回答要简洁准确，基于提供的内容，不要编造信息。
+
+你拥有持久化记忆和技能管理能力。当用户要求你记住某些信息，或者你发现值得跨会话保留的知识时，请主动使用工具保存。"""
+
+        from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
+        from .llm import call_llm_with_tools
+
+        messages_history = None
+        if session_id:
+            try:
+                db = get_session_db(usr_id)
+                raw_messages = db.get_messages(session_id)
+                if raw_messages:
+                    messages_history = []
+                    for m in raw_messages:
+                        role = m.get("role", "")
+                        content = m.get("content", "")
+                        if role in ("user", "assistant") and content:
+                            messages_history.append({"role": role, "content": content})
+
+                    compressor = ContextCompressor()
+                    if compressor.should_compress(messages_history):
+                        previous_summary = db.get_meta(f"summary:{session_id}")
+                        messages_history = compressor.compress(
+                            messages_history, user_id=usr_id, previous_summary=previous_summary
+                        )
+                        for m in messages_history:
+                            if m.get("role") == "system" and "[上下文摘要" in m.get("content", ""):
+                                db.set_meta(f"summary:{session_id}", m["content"])
+                                break
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("Session history load failed: %s", e)
+                messages_history = None
+
+        def _tool_exec(name, args):
+            return execute_tool_call(name, args, usr_id)
+
+        llm_result = call_llm_with_tools(
+            system_prompt=system_prompt,
+            user_query=query,
+            messages_history=messages_history,
+            tools=ALL_TOOL_SCHEMAS,
+            max_tool_rounds=5,
+            tool_executor=_tool_exec,
+        )
+
+        answer = llm_result.get("content", "")
+        if answer:
+            from .context_fence import sanitize_context
+            answer = sanitize_context(answer)
+
+            if llm_result.get("tool_calls_made"):
+                from .auto_extract import auto_extract_async
+                auto_extract_async(usr_id, query, answer)
+
+            return jsonify({
+                'success': True,
+                'context': answer,
+                'sources': sources,
+                'session_id': session_id,
+                'llm_used': True,
+                'tool_calls': len(llm_result.get("tool_calls_made", [])),
+            })
+
     return jsonify({
         'success': True,
-        'context': '\n\n---\n\n'.join(context_parts),
-        'sources': sources
+        'context': kb_context,
+        'sources': sources,
+        'session_id': session_id,
+        'llm_used': False,
     })
+
+
+# --- Memory system endpoints ---
+from .routes_memory import register_memory_routes
+register_memory_routes(wiki_bp)
+
+# --- Session memory endpoints ---
+from .routes_session import register_session_routes
+register_session_routes(wiki_bp)
+
+# --- Skills system endpoints ---
+from .routes_skills import register_skills_routes
+register_skills_routes(wiki_bp)
+
+# --- Insights endpoints ---
+from .routes_insights import register_insights_routes
+register_insights_routes(wiki_bp)

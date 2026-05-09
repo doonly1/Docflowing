@@ -1,7 +1,7 @@
 CREATE_WIKI_INFO = """
 CREATE TABLE IF NOT EXISTS wiki_info (
     usr_id TEXT NOT NULL PRIMARY KEY,
-    name TEXT DEFAULT '我的知识库',
+    name TEXT DEFAULT '知识库',
     description TEXT DEFAULT '',
     created_at REAL,
     updated_at REAL

@@ -1,4 +1,4 @@
-﻿// ==================== 全局错误捕获 ====================
+// ==================== 全局错误捕获 ====================
         window.addEventListener('error', function(e) {
             console.error('[GLOBAL ERROR]', e.message, 'at', e.filename, ':', e.lineno);
         });
@@ -1295,6 +1295,15 @@
                     } else {
                         navigateTo('fb');
                     }
+                } else if (savedView === 'kb') {
+                    document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
+                    var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
+                    if (navItem) navItem.classList.add('active');
+                    var homeView = document.getElementById('home-view');
+                    var kbView = document.getElementById('kb-view');
+                    if (homeView) homeView.style.display = 'none';
+                    if (kbView) kbView.style.display = '';
+                    if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init();
                 }
             } else {
                 document.getElementById('authOverlay').style.display = 'flex';
