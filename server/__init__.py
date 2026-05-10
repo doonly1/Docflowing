@@ -49,13 +49,13 @@ def create_app():
     # 全局错误处理器 - 确保API请求返回JSON
     @app.errorhandler(500)
     def internal_error(error):
-        # 如果是API请求，返回JSON
+        import traceback
+        logger.error('Unhandled 500 error: %s\n%s', error, traceback.format_exc())
         if request.path.startswith('/api/'):
             return jsonify({
                 'success': False,
-                'message': '服务器内部错误，请稍后重试'
-            }), 500
-        # 否则返回默认的HTML错误页面
+                'message': f'服务器内部错误: {str(error)[:200]}'
+            }), 200
         return error
 
     @app.errorhandler(404)

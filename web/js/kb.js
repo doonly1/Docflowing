@@ -91,9 +91,9 @@ var WikiKnowledge = {
             '<div class="kb-chat-container" id="kb-container">' +
                 // 右上角图标按钮
                 '<div class="kb-chat-header-actions" style="position:absolute;top:12px;right:16px;display:flex;gap:8px;z-index:10;">' +
-                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">💬</button>' +
-                    '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">🧠</button>' +
-                    '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">⚙️</button>' +
+                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">💬</button>' +
+                    '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">🧠</button>' +
+                    '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">⚙️</button>' +
                 '</div>' +
                 // 头部（初始隐藏，对话后显示）
                 '<div class="kb-chat-header" id="kb-header" style="display:none">' +

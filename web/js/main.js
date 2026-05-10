@@ -57,14 +57,14 @@
         function apiHeaders() {
             return {
                 'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + (authToken || '')
+                'Authorization': 'Bearer ' + (window.authToken || '')
             };
         }
 
         async function apiFetch(url, options) {
             options = options || {};
             if (!options.headers) options.headers = {};
-            options.headers['Authorization'] = 'Bearer ' + (authToken || '');
+            options.headers['Authorization'] = 'Bearer ' + (window.authToken || '');
             var resp = await fetch(url, options);
             if (resp.status === 401) {
                 clearAuth();
@@ -363,8 +363,8 @@
         // 后端 base 是 workspaces/{uid}，传 workdir/xxx 或 xxx
         function toActualWorkdir(displayPath) {
             var path = displayPath || '';
-            if (authUsername && path.startsWith(authUsername + '/')) {
-                path = path.substring(authUsername.length + 1);
+            if (window.authUsername && path.startsWith(window.authUsername + '/')) {
+                path = path.substring(window.authUsername.length + 1);
             }
             return path;
         }
@@ -458,7 +458,7 @@
             }
 
             formData.append('tool', currentTool);
-            formData.append('token', authToken);
+            formData.append('token', window.authToken);
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -466,7 +466,7 @@
             try {
                 const response = await fetch('/upload_files', {
                     method: 'POST',
-                    headers: {'Authorization': 'Bearer ' + (authToken || '')},
+                    headers: {'Authorization': 'Bearer ' + (window.authToken || '')},
                     body: formData,
                     signal: controller.signal
                 });
@@ -483,7 +483,7 @@
                     const folderName = (event.target.files[0]?.webkitRelativePath || '').split('/')[0] || 'uploads';
                     // 远程模式下，文件路径是 workspaces/{user_id}/workdir/{folderName}
                     // 但输入框应显示相对路径：workdir/{folderName}
-                    workdirInput.value = authUsername + '/workdir/' + folderName;
+                    workdirInput.value = window.authUsername + '/workdir/' + folderName;
                     await loadFileList(null, currentTool);
                     setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
@@ -1210,9 +1210,18 @@
         }
 
         document.addEventListener('DOMContentLoaded', async function() {
-            if (authToken) {
+            if (window.authToken) {
+                try {
+                    var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + window.authToken } });
+                    var meData = await meResp.json();
+                    if (meData.success) {
+                        window.authRole = meData.role || 'viewer';
+                        try { localStorage.setItem('docproc_role', window.authRole); } catch(e) {}
+                    }
+                } catch(e) {}
+
                 document.getElementById('authOverlay').style.display = 'none';
-                updateSidebarUser(authUsername);
+                updateSidebarUser(window.authUsername);
                 initApp();
 
                 var savedView = localStorage.getItem('docproc_current_view');
@@ -1316,12 +1325,12 @@ function navigateTo(view) {
         if (homeView) homeView.style.display = '';
         if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.currentKbId = null;
     } else if (view === 'fb') {
-        if (!authToken) { alert('请先登录'); return; }
+        if (!window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
         if (typeof KnowledgeBase !== 'undefined') { KnowledgeBase.currentKbId = null; KnowledgeBase.init(); }
     } else if (view === 'kb') {
-        if (!authToken) { alert('请先登录'); return; }
+        if (!window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
         if (typeof WikiKnowledge !== 'undefined') { WikiKnowledge.init(); }

@@ -310,6 +310,19 @@ def api_change_password(_user_id=None):
     
     return jsonify({'success': True, 'message': '密码修改成功'})
 
+@auth_bp.route('/api/user/me', methods=['GET'])
+@_login_required
+def api_user_me(_user_id=None):
+    users = _load_json(_get_users_path())
+    if _user_id not in users:
+        return jsonify({'success': False, 'message': '用户不存在'}), 404
+    user_info = users[_user_id]
+    return jsonify({
+        'success': True,
+        'username': user_info.get('username', ''),
+        'role': user_info.get('role', 'viewer')
+    })
+
 # ==================== Admin 用户初始化 ====================
 
 def ensure_admin_user():

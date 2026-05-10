@@ -36,9 +36,9 @@ var KnowledgeBase = {
     getUserRole: function() {
         var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
         for (var i = 0; i < users.length; i++) {
-            if (users[i].username === authUsername) return users[i].role;
+            if (users[i].username === window.authUsername) return users[i].role;
         }
-        return 'viewer';
+        return window.authRole || 'viewer';
     },
 
     init: async function() {
@@ -221,7 +221,6 @@ var KnowledgeBase = {
             var kbDisplayPath = kbCard.getAttribute('data-kb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            console.log('window.authRole in context menu:', window.authRole);
             var emptyMenu = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
             if (window.authRole === 'admin') {
                 emptyMenu += '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateNetworkRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
