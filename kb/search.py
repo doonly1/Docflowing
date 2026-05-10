@@ -9,6 +9,7 @@ def search_wiki(usr_id, query):
     search_terms = query.strip().split()
     fts_query = ' OR '.join(search_terms)
 
+    rows = None
     try:
         rows = conn.execute(
             "SELECT path, title, snippet(wiki_fts, 1, '<mark>', '</mark>', '...', 30) as title_snippet, "
@@ -17,11 +18,17 @@ def search_wiki(usr_id, query):
             (usr_id, fts_query)
         ).fetchall()
     except Exception:
-        rows = conn.execute(
-            "SELECT path, title, '' as title_snippet, '' as content_snippet "
-            "FROM wiki_fts WHERE usr_id = ? AND (title LIKE ? OR content LIKE ?)",
-            (usr_id, f'%{query}%', f'%{query}%')
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                "SELECT path, title, '' as title_snippet, '' as content_snippet "
+                "FROM wiki_fts WHERE usr_id = ? AND (title LIKE ? OR content LIKE ?)",
+                (usr_id, f'%{query}%', f'%{query}%')
+            ).fetchall()
+        except Exception:
+            return []
+
+    if rows is None:
+        return []
 
     results = []
     for row in rows:

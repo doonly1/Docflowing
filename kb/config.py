@@ -88,10 +88,7 @@ def _mask_api_key(api_key: str) -> str:
 
 
 def _get_user_kb_config_path(user_id: str) -> str:
-    if user_id:
-        return os.path.join(_get_user_config_dir(), f'{user_id}_kb.yaml')
-    # 向后兼容：如果没有 user_id，使用旧路径
-    return os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'kb_config.yaml')
+    return os.path.join(_get_user_config_dir(), f'{user_id}_kb.yaml')
 
 
 def _load_raw(user_id: str) -> Dict[str, Any]:

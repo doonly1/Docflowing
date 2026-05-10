@@ -218,9 +218,9 @@ var WikiKnowledge = {
 
             var answer = '';
             if (data.success && data.context) {
-                answer = self._generateAnswer(query, data.context, data.sources || []);
+                answer = self._generateAnswer(query, data.context, data.sources || [], data.llm_used);
             } else {
-                answer = '抱歉，我在知识库中没有找到相关信息。您可以尝试换一种问法，或者向知识库中添加更多内容。';
+                answer = data.message || '';
             }
 
             if (data.session_id) {
@@ -269,10 +269,8 @@ var WikiKnowledge = {
         });
     },
 
-    _generateAnswer: function(query, context, sources) {
-        var answer = '根据您的知识库内容，我找到了相关信息：\n\n';
-        answer += context;
-        return answer;
+    _generateAnswer: function(query, context, sources, llmUsed) {
+        return context;
     },
 
     _renderMessages: function() {

@@ -485,24 +485,32 @@ def agent_context(_user_id=None):
         memory_block = memory_store.format_for_system_prompt()
         memory_context = build_memory_context_block(memory_block) if memory_block else ""
 
-        if is_llm_available(usr_id) and kb_context:
+        llm_error = None
+        if is_llm_available(usr_id):
             kb_section = get_kb_section(usr_id)
             wiki_name = kb_section.get('default_name', '知识库')
 
             skills_index = _build_skills_index(usr_id)
 
-            system_prompt = f"""你是一个专业的知识库助手，基于以下知识库内容回答用户问题。
+            knowledge_section = f"## 知识库内容\n{kb_context}" if kb_context else "## 知识库内容\n（当前知识库中暂无相关文档）"
+            instruction = (
+                "请优先根据上述知识库内容回答用户问题。如果知识库中没有相关信息，你可以根据自己的知识来回答，并告知用户知识库中未找到相关内容。"
+                if kb_context
+                else "当前知识库中没有相关文档。你可以根据自己的知识来回答用户问题。如果问题涉及专业知识，建议用户向知识库中添加相关文档。"
+            )
+
+            system_prompt = f"""你是一个专业的知识库助手，具有自己的通用知识能力。
 
 ## 知识库名称
 {wiki_name}
 
-## 知识库内容
-{kb_context}
+{knowledge_section}
 
 {memory_context}
 {skills_index}
 
-请根据上述知识库内容回答用户问题。如果知识库中没有相关信息，请明确告知用户。回答要简洁准确，基于提供的内容，不要编造信息。
+{instruction}
+回答要简洁准确，不要编造信息。
 
 你拥有持久化记忆和技能管理能力。当用户要求你记住某些信息，或者你发现值得跨会话保留的知识时，请主动使用工具保存。"""
 
@@ -550,6 +558,7 @@ def agent_context(_user_id=None):
                 user_id=usr_id,
             )
 
+            llm_error = llm_result.get("error")
             answer = llm_result.get("content", "")
             if answer:
                 from .context_fence import sanitize_context
@@ -568,9 +577,19 @@ def agent_context(_user_id=None):
                     'tool_calls': len(llm_result.get("tool_calls_made", [])),
                 })
 
+        message = None
+        if is_llm_available(usr_id):
+            if llm_error:
+                message = f'AI 助手响应失败: {llm_error}'
+            else:
+                message = 'AI 助手暂时不可用，请稍后重试。'
+        else:
+            message = '请先在设置中配置 AI 模型。'
+
         return jsonify({
             'success': True,
             'context': kb_context,
+            'message': message,
             'sources': sources,
             'session_id': session_id,
             'llm_used': False,
@@ -879,7 +898,7 @@ def test_llm_connection(_user_id=None):
             if available_models:
                 return jsonify({
                     'success': False,
-                    'message': f'{error_msg}（可用模型: {", ".join(available_models[:10])}）'
+                    'message': f'{error_msg}'
                 }), 200
             return jsonify({'success': False, 'message': error_msg}), 200
     except requests.exceptions.Timeout:

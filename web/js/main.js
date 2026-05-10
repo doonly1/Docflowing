@@ -23,7 +23,7 @@
             localStorage.setItem('docproc_username', username);
             localStorage.setItem('docproc_role', window.authRole);
             document.getElementById('authOverlay').style.display = 'none';
-            updateSidebarUser(username);
+            updateSidebarUser(username, role);
             initApp();
         }
 
@@ -40,17 +40,20 @@
             updateSidebarUser(null);
         }
 
-        function updateSidebarUser(username) {
+        function updateSidebarUser(username, role) {
             var el = document.getElementById('sidebar-user-icon');
             var nd = document.getElementById('sidebar-user-name-display');
+            var um = document.getElementById('sidebar-user-manage');
             if (!el) return;
             if (username) {
                 var initial = username.charAt(0).toUpperCase();
                 el.innerHTML = '<div class="sidebar-avatar">' + initial + '</div><div class="sidebar-username">' + username + '</div>';
                 if (nd) nd.textContent = username;
+                if (um) um.style.display = (role === 'admin') ? '' : 'none';
             } else {
                 el.innerHTML = '<div class="sidebar-avatar">👤</div><div class="sidebar-username">未登录</div>';
                 if (nd) nd.textContent = '未登录';
+                if (um) um.style.display = 'none';
             }
         }
 
@@ -1155,6 +1158,14 @@
             return null;
         };
 
+        // ==================== 用户管理 ====================
+        window.toggleUserManage = function() {
+            if (typeof KnowledgeBase !== 'undefined' && KnowledgeBase.showUserManage) {
+                KnowledgeBase.showUserManage();
+            }
+            toggleUserMenu();
+        };
+
         // ==================== 关于弹窗 ====================
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
@@ -1218,10 +1229,12 @@
                         window.authRole = meData.role || 'viewer';
                         try { localStorage.setItem('docproc_role', window.authRole); } catch(e) {}
                     }
-                } catch(e) {}
+                } catch(e) {
+                    console.warn('Failed to fetch current user role:', e.message);
+                }
 
                 document.getElementById('authOverlay').style.display = 'none';
-                updateSidebarUser(window.authUsername);
+                updateSidebarUser(window.authUsername, window.authRole);
                 initApp();
 
                 var savedView = localStorage.getItem('docproc_current_view');

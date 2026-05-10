@@ -16,7 +16,6 @@ logger = get_logger(__name__)
 auth_bp = Blueprint('auth', __name__)
 
 SECRET_KEY = os.environ.get('DOCPROC_SECRET', secrets.token_hex(32))
-DOCPROC_ADMIN = os.environ.get('DOCPROC_ADMIN', '')
 
 # ==================== 路径工具 ====================
 
@@ -161,11 +160,14 @@ def api_register():
         if uinfo.get('username') == username:
             return jsonify({'success': False, 'message': '用户名已存在'})
 
+    # 注册用户默认为普通角色
+    role = 'viewer'
+
     user_id = str(uuid.uuid4())
     users[user_id] = {
         'username': username,
         'password': _hash_password(password),
-        'role': 'viewer',
+        'role': role,
         'created_at': time.time()
     }
     _save_json(_get_users_path(), users)
@@ -181,7 +183,7 @@ def api_register():
         'success': True,
         'token': token,
         'username': username,
-        'role': 'viewer',
+        'role': role,
         'message': '注册成功'
     })
 
@@ -320,45 +322,35 @@ def api_user_me(_user_id=None):
     return jsonify({
         'success': True,
         'username': user_info.get('username', ''),
-        'role': user_info.get('role', 'viewer')
+        'role': user_info.get('role', 'viewer'),
+        'user_id': _user_id
     })
 
 # ==================== Admin 用户初始化 ====================
 
 def ensure_admin_user():
-    """从环境变量 DOCPROC_ADMIN 确保管理员用户存在"""
+    """全新部署时自动创建默认管理员账户"""
     from server.settings import ensure_user_config  # 延迟导入避免循环依赖
 
-    if not DOCPROC_ADMIN:
-        return
-    parts = DOCPROC_ADMIN.split(':', 1)
-    if len(parts) != 2:
-        logger.warning("DOCPROC_ADMIN 格式错误，应为 username:password")
-        return
-    admin_username, admin_password = parts[0].strip(), parts[1].strip()
-    if not admin_username or not admin_password:
+    users_path = _get_users_path()
+    users = _load_json(users_path)
+    if users:
         return
 
-    users = _load_json(_get_users_path())
-    admin_uid = None
-    for uid, uinfo in users.items():
-        if uinfo.get('username') == admin_username:
-            admin_uid = uid
-            break
-
-    if admin_uid:
-        if users[admin_uid].get('role') != 'admin':
-            users[admin_uid]['role'] = 'admin'
-            _save_json(_get_users_path(), users)
-            logger.info("已将用户 %s 提升为 admin", admin_username)
-    else:
-        user_id = str(uuid.uuid4())
-        users[user_id] = {
-            'username': admin_username,
-            'password': _hash_password(admin_password),
-            'role': 'admin',
-            'created_at': time.time()
-        }
-        _save_json(_get_users_path(), users)
-        ensure_user_config(user_id)
-        logger.info("已创建管理员用户: %s", admin_username)
+    default_user = 'admin'
+    user_id = str(uuid.uuid4())
+    default_pass = user_id[-6:]  # 取 UUID 后 6 位作为初始密码
+    users[user_id] = {
+        'username': default_user,
+        'password': _hash_password(default_pass),
+        'role': 'admin',
+        'created_at': time.time()
+    }
+    _save_json(users_path, users)
+    ensure_user_config(user_id)
+    logger.info("=" * 50)
+    logger.info("  全新部署：已创建默认管理员账户")
+    logger.info("  用户名: %s", default_user)
+    logger.info("  密码:   %s", default_pass)
+    logger.info("  登录后请在系统设置中修改密码！")
+    logger.info("=" * 50)

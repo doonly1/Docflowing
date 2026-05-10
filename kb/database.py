@@ -38,6 +38,15 @@ ALL_TABLES = [
         PRIMARY KEY (usr_id, path)
     )
     """,
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
+        usr_id,
+        title,
+        content,
+        path,
+        tokenize='unicode61'
+    )
+    """,
 ]
 
 CREATE_INDEXES = [

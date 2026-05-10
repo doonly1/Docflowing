@@ -202,9 +202,11 @@ def call_llm_with_tools(
         "content": "",
         "tool_calls_made": [],
         "tool_results": [],
+        "error": None,
     }
 
     if not is_llm_available(user_id):
+        result["error"] = "LLM 未配置或不可用"
         return result
 
     cfg = _get_llm_config(user_id)
@@ -223,6 +225,7 @@ def call_llm_with_tools(
 
     if not HAS_REQUESTS:
         logger.error("requests 库未安装，无法调用 LLM")
+        result["error"] = "requests 库未安装"
         return result
 
     for round_idx in range(max_tool_rounds + 1):
@@ -250,9 +253,11 @@ def call_llm_with_tools(
             data = resp.json()
         except requests.exceptions.Timeout:
             logger.error("LLM 调用超时 (120s)")
+            result["error"] = "LLM 调用超时"
             return result
         except Exception as e:
             logger.error("LLM 调用失败: %s", e)
+            result["error"] = f"LLM 调用失败: {e}"
             return result
 
         choice = data.get("choices", [{}])[0]

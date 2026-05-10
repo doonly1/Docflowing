@@ -26,6 +26,22 @@ var KnowledgeBase = {
         return fetch(url, o).then(function(r) { return r.json(); }).catch(function() { return { success: false, message: '请求失败' }; });
     },
 
+    refreshAuthRole: async function() {
+        try {
+            var resp = await fetch('/api/user/me', {
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            });
+            var data = await resp.json();
+            if (data.success && data.role) {
+                window.authRole = data.role;
+                window.authUserId = data.user_id;
+                try { localStorage.setItem('docproc_role', data.role); } catch(e) {}
+            }
+        } catch (e) {
+            console.warn('refreshAuthRole failed, will use cached role:', window.authRole);
+        }
+    },
+
     refreshUserCache: async function() {
         try {
             var res = await this.api('/api/users/list', 'GET');
@@ -34,22 +50,25 @@ var KnowledgeBase = {
     },
 
     getUserRole: function() {
-        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
-        for (var i = 0; i < users.length; i++) {
-            if (users[i].username === window.authUsername) return users[i].role;
-        }
         return window.authRole || 'viewer';
     },
 
     init: async function() {
         this.selectedDocs = {};
         this.currentSort = { field: 'mtime', asc: false };
+        await this.refreshAuthRole();
         await this.refreshUserCache();
         if (this.currentKbId) {
             await this.renderDetail();
         } else {
             await this.renderKbList();
         }
+    },
+
+    goBackToList: function() {
+        this.currentKbId = null;
+        this.localPath = '';
+        this.renderKbList();
     },
 
     navigateTo: function(view) {
@@ -98,7 +117,6 @@ var KnowledgeBase = {
             h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
             h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
             if (window.authRole === 'admin') h += '<button onclick="KnowledgeBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
-            if (role === 'admin') h += '<button onclick="KnowledgeBase.showUserManage()">👥 用户</button>';
             h += '<span class="kb-toolbar-spacer"></span>';
             h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
             h += '</div>';
@@ -857,8 +875,17 @@ var KnowledgeBase = {
     },
 
     _buildEmptyContextMenu: function() {
-        return '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateFolderDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
-               '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateMdDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
+        var h = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateFolderDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
+                '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateMdDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
+        if (window.authRole === 'admin') {
+            h += '<div class="kb-menu-divider"></div>' +
+                 '<div class="kb-menu-item" onclick="KnowledgeBase.goBackToList();KnowledgeBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>' +
+                 '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateNetworkRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
+        } else {
+            h += '<div class="kb-menu-divider"></div>' +
+                 '<div class="kb-menu-item" onclick="KnowledgeBase.goBackToList();KnowledgeBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>';
+        }
+        return h;
     },
 
     contextRename: async function(path) {
@@ -1316,6 +1343,7 @@ var KnowledgeBase = {
     },
 
     showUserManage: async function() {
+        await this.refreshAuthRole();
         await this.refreshUserCache();
         var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
         var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
@@ -1323,14 +1351,16 @@ var KnowledgeBase = {
         h += '<table class="kb-member-table"><thead><tr><th>用户名</th><th>全局角色</th></tr></thead><tbody>';
         for (var i = 0; i < users.length; i++) {
             var u = users[i];
-            h += '<tr><td>' + escapeHtmlText(u.username) + '</td>';
-            h += '<td><select onchange="KnowledgeBase._updateUserRole(\'' + u.user_id + '\', this.value)">';
+            var isSelf = (u.user_id === window.authUserId);
+            h += '<tr' + (isSelf ? ' style="background:#f0f8ff"' : '') + '><td>' + escapeHtmlText(u.username) + (isSelf ? ' <span style="color:#999;font-size:11px">(当前)</span>' : '') + '</td>';
+            h += '<td><select' + (isSelf ? ' disabled' : '') + ' onchange="KnowledgeBase._updateUserRole(\'' + u.user_id + '\', this.value)">';
             h += '<option value="admin"' + (u.role==='admin'?' selected':'') + '>管理员</option>';
             h += '<option value="editor"' + (u.role==='editor'?' selected':'') + '>编辑者</option>';
             h += '<option value="viewer"' + (u.role==='viewer'?' selected':'') + '>阅读者</option>';
             h += '</select></td></tr>';
         }
         h += '</tbody></table>';
+        h += '<p style="font-size:12px;color:#999;margin:6px 0 0">注：当前用户不可修改自身角色（防止误操作），可由其他管理员调整</p>';
         h += '<div class="kb-modal-actions"><button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
