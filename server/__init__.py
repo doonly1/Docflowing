@@ -7,7 +7,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(project_root, 'tools'))
 sys.path.insert(0, project_root)
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from logging_config import setup_logging, get_logger
@@ -45,6 +45,29 @@ def create_app():
             'success': False,
             'message': f'上传总大小超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'
         }), 413
+
+    # 全局错误处理器 - 确保API请求返回JSON
+    @app.errorhandler(500)
+    def internal_error(error):
+        # 如果是API请求，返回JSON
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'message': '服务器内部错误，请稍后重试'
+            }), 500
+        # 否则返回默认的HTML错误页面
+        return error
+
+    @app.errorhandler(404)
+    def not_found(error):
+        # 如果是API请求，返回JSON
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'message': f'接口不存在: {request.path}'
+            }), 404
+        # 否则返回默认的HTML错误页面
+        return error
 
     # 注册蓝图
     app.register_blueprint(auth_bp)

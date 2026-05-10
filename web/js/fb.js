@@ -1,5 +1,9 @@
 var KnowledgeBase = {
 
+    _lsGet: function(key) { try { return localStorage.getItem(key); } catch(e) { return null; } },
+    _lsSet: function(key, val) { try { localStorage.setItem(key, val); } catch(e) {} },
+    _lsDel: function(key) { try { localStorage.removeItem(key); } catch(e) {} },
+
     currentKbId: null,
     currentPermission: null,
     selectedDocs: {},
@@ -16,7 +20,7 @@ var KnowledgeBase = {
     api: function(url, method, body) {
         var o = {
             method: method || 'GET',
-            headers: { 'Authorization': 'Bearer ' + (authToken || ''), 'Content-Type': 'application/json' }
+            headers: { 'Authorization': 'Bearer ' + (window.authToken || ''), 'Content-Type': 'application/json' }
         };
         if (body && method !== 'GET') o.body = JSON.stringify(body);
         return fetch(url, o).then(function(r) { return r.json(); }).catch(function() { return { success: false, message: '请求失败' }; });
@@ -25,12 +29,12 @@ var KnowledgeBase = {
     refreshUserCache: async function() {
         try {
             var res = await this.api('/api/users/list', 'GET');
-            if (res.success) localStorage.setItem('kb_user_list', JSON.stringify(res.users));
+            if (res.success) this._lsSet('kb_user_list', JSON.stringify(res.users));
         } catch (e) {}
     },
 
     getUserRole: function() {
-        var users = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
+        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
         for (var i = 0; i < users.length; i++) {
             if (users[i].username === authUsername) return users[i].role;
         }
@@ -61,19 +65,30 @@ var KnowledgeBase = {
         }
     },
 
-    renderKbList: async function() {
-        this.currentKbId = null;
-        this.localPath = '';
-        this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
-        localStorage.removeItem('docproc_current_kb_id');
-        localStorage.removeItem('docproc_current_kb_name');
-        localStorage.removeItem('docproc_current_kb_local_path');
-        localStorage.removeItem('docproc_current_kb_display_path');
-        localStorage.removeItem('docproc_current_kb_permission');
-        var role = this.getUserRole();
+    refreshKbList: async function() {
+        this.hideContextMenu();
+        await this.renderKbList();
+    },
 
-        var grid = document.getElementById('kb-grid-container');
-        if (!grid) {
+    renderKbList: async function() {
+        try {
+            this.currentKbId = null;
+            this.localPath = '';
+            this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
+            this._lsDel('docproc_current_kb_id');
+            this._lsDel('docproc_current_kb_name');
+            this._lsDel('docproc_current_kb_local_path');
+            this._lsDel('docproc_current_kb_display_path');
+            this._lsDel('docproc_current_kb_permission');
+            var role = this.getUserRole();
+
+            var kbView = document.getElementById('kb-view');
+            if (!kbView) {
+                console.warn('kb-view not found, cannot render list');
+                return;
+            }
+
+            // 重新构建整个视图
             var h = '<div class="kb-explorer">';
             h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 文件库</span></div>';
             h += '<div class="kb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
@@ -82,41 +97,98 @@ var KnowledgeBase = {
             h += '<input type="text" id="kb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
             h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
             h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
+            if (window.authRole === 'admin') h += '<button onclick="KnowledgeBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             if (role === 'admin') h += '<button onclick="KnowledgeBase.showUserManage()">👥 用户</button>';
             h += '<span class="kb-toolbar-spacer"></span>';
             h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
-            h += '<button onclick="KnowledgeBase.renderKbList()">🔄 刷新</button>';
             h += '</div>';
             h += '<div class="kb-file-body" id="kb-grid-container" oncontextmenu="KnowledgeBase.showKbListContextMenu(event)"></div>';
             h += '</div></div></div>';
-            document.getElementById('kb-view').innerHTML = h;
-            grid = document.getElementById('kb-grid-container');
-        }
+            kbView.innerHTML = h;
 
-        var res = await this.api('/api/fb/list', 'GET');
-        if (!grid) return;
+            var grid = document.getElementById('kb-grid-container');
+            if (!grid) {
+                console.warn('kb-grid-container not found');
+                return;
+            }
 
-        var kbs = res.success && res.kbs ? res.kbs : [];
+            // 显示加载中
+            grid.innerHTML = '<div class="kb-empty">刷新中...</div>';
 
-        if (kbs.length === 0) {
-            grid.innerHTML = '<div class="kb-empty">暂无文件库，点击上方按钮创建</div>';
-            return;
-        }
+            var res = await this.api('/api/fb/list', 'GET');
+            if (!res || !res.success) {
+                grid.innerHTML = '<div class="kb-empty">刷新失败: ' + (res?.message || '未知错误') + '</div>';
+                return;
+            }
 
-        var html = '<div class="kb-grid">';
-        for (var i = 0; i < kbs.length; i++) {
-            var kb = kbs[i];
-            html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
-            html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
-            html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
+            var kbs = res.kbs || [];
+
+            if (kbs.length === 0) {
+                grid.innerHTML = '<div class="kb-empty">暂无文件库，点击上方按钮创建</div>';
+                return;
+            }
+
+            var html = '<div class="kb-grid">';
+            for (var i = 0; i < kbs.length; i++) {
+                var kb = kbs[i];
+                html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-type="' + (kb.kb_type || 'local') + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
+                html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
+                html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
+                html += '</div>';
+            }
             html += '</div>';
+            grid.innerHTML = html;
+        } catch (e) {
+            console.error('renderKbList error:', e);
+            var grid = document.getElementById('kb-grid-container');
+            if (grid) {
+                grid.innerHTML = '<div class="kb-empty">刷新出错: ' + e.message + '</div>';
+            }
         }
-        html += '</div>';
-        grid.innerHTML = html;
     },
 
     showCreateRootFolder: function() {
         this._createRootFolder('新建文件夹');
+    },
+
+    showCreateNetworkRootFolder: function() {
+        var self = this;
+        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal" style="max-width:420px">';
+        h += '<h3>🌐 新建网络文件库</h3>';
+        h += '<div style="margin-bottom:12px">';
+        h += '<label style="display:block;font-size:13px;color:#555;margin-bottom:4px">网络路径</label>';
+        h += '<input type="text" id="kb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
+        h += '</div>';
+        h += '<div class="kb-modal-actions">';
+        h += '<button class="btn" onclick="KnowledgeBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+        setTimeout(function() { document.getElementById('kb-net-path').focus(); }, 100);
+    },
+
+    _doCreateNetworkRootFolder: async function() {
+        var networkPath = (document.getElementById('kb-net-path').value || '').trim();
+        if (!networkPath) { alert('请输入网络路径'); return; }
+        var parts = networkPath.replace(/\\/g, '/').split('/').filter(function(p) { return p && p !== ''; });
+        var name = parts.length > 0 ? parts[parts.length - 1] : '网络文件库';
+        this.closeModal();
+        await this._createNetworkRootFolder(name, networkPath);
+    },
+
+    _createNetworkRootFolder: async function(name, networkPath) {
+        var self = this;
+        var res = await this.api('/api/fb/create-folder', 'POST', {
+            name: name,
+            kb_type: 'net',
+            network_path: networkPath
+        });
+        if (res.success) {
+            await self.renderKbList();
+        } else {
+            alert(res.message || '创建失败');
+        }
     },
 
     _createRootFolder: async function(name) {
@@ -149,7 +221,13 @@ var KnowledgeBase = {
             var kbDisplayPath = kbCard.getAttribute('data-kb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            menu.innerHTML = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+            console.log('window.authRole in context menu:', window.authRole);
+            var emptyMenu = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+            if (window.authRole === 'admin') {
+                emptyMenu += '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateNetworkRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
+            }
+            emptyMenu += '<div class="kb-menu-divider"></div><div class="kb-menu-item" onclick="KnowledgeBase.refreshKbList()"><span class="icon">🔄</span> 刷新</div>';
+            menu.innerHTML = emptyMenu;
         }
 
         menu.style.left = Math.min(event.clientX, window.innerWidth - 180) + 'px';
@@ -238,11 +316,11 @@ var KnowledgeBase = {
         this._categoryTree = null;
         this._treeLoaded = false;
 
-        localStorage.setItem('docproc_current_kb_id', kbId);
-        localStorage.setItem('docproc_current_kb_permission', permission);
-        localStorage.setItem('docproc_current_kb_name', name || '');
-        localStorage.setItem('docproc_current_kb_local_path', localPath || '');
-        localStorage.setItem('docproc_current_kb_display_path', displayPath || '');
+        this._lsSet('docproc_current_kb_id', kbId);
+        this._lsSet('docproc_current_kb_permission', permission);
+        this._lsSet('docproc_current_kb_name', name || '');
+        this._lsSet('docproc_current_kb_local_path', localPath || '');
+        this._lsSet('docproc_current_kb_display_path', displayPath || '');
 
         await this.renderDetail();
     },
@@ -285,7 +363,7 @@ var KnowledgeBase = {
             h += '</div></div></div></div>';
 
             document.getElementById('kb-view').innerHTML = h;
-            if (localStorage.getItem('kb_tree_collapsed') === '1') {
+            if (this._lsGet('kb_tree_collapsed') === '1') {
                 document.querySelector('.kb-explorer-body').classList.add('collapsed');
             }
             this.initTreeResize();
@@ -351,6 +429,9 @@ var KnowledgeBase = {
             var hasChildren = n.children && n.children.length > 0;
             var nodePath = '/' + (n.path || '').replace(/\\/g, '/').replace(/\/+/g, '/');
             var isActive = activePath === nodePath;
+            var isInActivePath = activePath && activePath.indexOf(nodePath + '/') === 0;
+            // 展开条件：默认不展开，仅当节点子目录在活跃路径上时才展开
+            var shouldExpand = isInActivePath;
             var h2 = '';
             if (hasChildren) {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
@@ -358,20 +439,35 @@ var KnowledgeBase = {
             h += '<div class="kb-tree-node">';
             h += '<div class="kb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="KnowledgeBase.navigateSubdir(\'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
             if (hasChildren) {
-                h += '<span class="kb-tree-toggle" style="visibility:hidden">▶</span>';
+                h += '<span class="kb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();KnowledgeBase.toggleTreeNode(this)">' + (shouldExpand ? 'v' : '>') + '</span>';
             } else {
-                h += '<span class="kb-tree-toggle" style="visibility:hidden">▶</span>';
+                h += '<span class="kb-tree-toggle" style="visibility:hidden">></span>';
             }
             h += '<span class="icon">📁</span>' + escapeHtmlText(n.name);
             h += '</div>';
             if (hasChildren) {
-                h += '<div class="kb-tree-children" style="display:block">';
+                h += '<div class="kb-tree-children' + (shouldExpand ? ' open' : '') + '">';
                 h += h2;
                 h += '</div>';
             }
             h += '</div>';
         }
         return h;
+    },
+
+    toggleTreeNode: function(toggleEl) {
+        var childrenDiv = toggleEl.parentElement.nextElementSibling;
+        if (!childrenDiv || !childrenDiv.classList.contains('kb-tree-children')) return;
+        var isOpen = childrenDiv.classList.contains('open');
+        if (isOpen) {
+            childrenDiv.classList.remove('open');
+            toggleEl.classList.remove('open');
+            toggleEl.innerHTML = '&gt;'; // >
+        } else {
+            childrenDiv.classList.add('open');
+            toggleEl.classList.add('open');
+            toggleEl.innerHTML = 'v';
+        }
     },
 
     goToRoot: function() {
@@ -1051,7 +1147,7 @@ var KnowledgeBase = {
         var body = document.querySelector('.kb-explorer-body');
         if (!body) return;
         body.classList.toggle('collapsed');
-        localStorage.setItem('kb_tree_collapsed', body.classList.contains('collapsed') ? '1' : '0');
+        this._lsSet('kb_tree_collapsed', body.classList.contains('collapsed') ? '1' : '0');
     },
 
     initTreeResize: function() {
@@ -1059,9 +1155,10 @@ var KnowledgeBase = {
         var pane = document.getElementById('kb-tree-pane');
         if (!handle || !pane) return;
 
-        var saved = localStorage.getItem('kb_tree_width');
+        var saved = this._lsGet('kb_tree_width');
         if (saved) { pane.style.width = saved + 'px'; }
 
+        var self = this;
         var startX, startW;
 
         handle.addEventListener('mousedown', function(e) {
@@ -1081,7 +1178,7 @@ var KnowledgeBase = {
 
         document.addEventListener('mouseup', function() {
             if (startW) {
-                localStorage.setItem('kb_tree_width', pane.offsetWidth);
+                self._lsSet('kb_tree_width', pane.offsetWidth);
                 startW = null;
                 document.body.classList.remove('kb-resizing');
                 handle.classList.remove('active');
@@ -1125,7 +1222,7 @@ var KnowledgeBase = {
         h += '<button onclick="KnowledgeBase._batchSetAllUsers()">应用到所有用户</button>';
         h += '</div>';
         h += '<div class="kb-batch-user-list" style="max-height:200px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px">';
-        var allUsers = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
+        var allUsers = JSON.parse(this._lsGet('kb_user_list') || '[]');
         var memberMap = {};
         if (res.success && res.members) {
             for (var j = 0; j < res.members.length; j++) {
@@ -1201,7 +1298,7 @@ var KnowledgeBase = {
         var uname = document.getElementById('kb-transfer-user').value.trim();
         if (!uname) return;
         if (!confirm('确定将文件库所有权转让给 ' + uname + ' 吗？')) return;
-        var users = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
+        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
         var tid = null;
         for (var i = 0; i < users.length; i++) {
             if (users[i].username === uname) { tid = users[i].user_id; break; }
@@ -1221,7 +1318,7 @@ var KnowledgeBase = {
 
     showUserManage: async function() {
         await this.refreshUserCache();
-        var users = JSON.parse(localStorage.getItem('kb_user_list') || '[]');
+        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
         var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
         h += '<h3>👥 用户管理</h3>';
         h += '<table class="kb-member-table"><thead><tr><th>用户名</th><th>全局角色</th></tr></thead><tbody>';
@@ -1296,11 +1393,11 @@ var KnowledgeBase = {
         }
         this.currentSort = { field: 'mtime', asc: false };
 
-        localStorage.setItem('docproc_current_kb_id', kbId);
-        localStorage.setItem('docproc_current_kb_permission', 'view');
-        localStorage.setItem('docproc_current_kb_name', kbName);
-        localStorage.setItem('docproc_current_kb_local_path', '');
-        localStorage.setItem('docproc_current_kb_display_path', '');
+        this._lsSet('docproc_current_kb_id', kbId);
+        this._lsSet('docproc_current_kb_permission', 'view');
+        this._lsSet('docproc_current_kb_name', kbName);
+        this._lsSet('docproc_current_kb_local_path', '');
+        this._lsSet('docproc_current_kb_display_path', '');
 
         await this.renderDetail();
     },
@@ -1373,7 +1470,7 @@ var KnowledgeBase = {
         else if (e === '.html' || e === '.htm') { cls = 'kb-file-icon-file kb-icon-html'; label = 'H'; }
         else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-img'; label = 'I'; }
         else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-zip'; label = 'Z'; }
-        return '<span class="' + cls + '">' + label + '</span>';
+        return '<span class="' + cls + '" style="overflow:hidden;">' + label + '</span>';
     },
 
     formatSize: function(bytes) {

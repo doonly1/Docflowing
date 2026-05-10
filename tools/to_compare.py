@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Word文档比较工具
-比较 原-***.docx 和 终-***.docx 文档，生成比较结果文档
+比较 原稿.docx 和 终稿.docx 文档，基于原稿生成差异比较结果
 """
 
 import os
@@ -1825,7 +1825,7 @@ def main(workdir, original_path=None, final_path=None):
     logger.info("原稿: %s", os.path.basename(original))
     logger.info("终稿: %s", os.path.basename(final))
     
-    output_name = f"对比标注-{os.path.basename(original)}"
+    output_name = f"差异标注-{os.path.basename(original)}"
     logger.info("开始比较...")
     
     success, result_msg = compare_with_python_inplace(original, final, os.path.join(workdir, output_name))

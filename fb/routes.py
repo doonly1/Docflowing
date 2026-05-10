@@ -114,6 +114,7 @@ def create_folder():
         return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
     data = request.get_json()
+    kb_type = (data.get('kb_type') or 'local').strip()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'message': '文件夹名称不能为空'})
@@ -121,6 +122,46 @@ def create_folder():
         return jsonify({'success': False, 'message': '文件夹名称不能超过64个字符'})
     if '/' in name or '\\' in name:
         return jsonify({'success': False, 'message': '文件夹名称不能包含路径分隔符'})
+
+    # 网络文件库需要管理员权限
+    if kb_type == 'net':
+        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+        users = {}
+        if os.path.exists(users_path):
+            try:
+                with open(users_path, 'r', encoding='utf-8') as f:
+                    users = json.load(f)
+            except Exception:
+                pass
+        user_info = users.get(user_id, {})
+        role = user_info.get('role', 'viewer')
+        if role != 'admin':
+            return jsonify({'success': False, 'message': '需要管理员权限才能创建网络文件库'}), 403
+
+    db = get_db()
+    kb_id = str(uuid.uuid4())
+    now = time.time()
+
+    if kb_type == 'net':
+        network_path = (data.get('network_path') or '').strip()
+        if not network_path:
+            return jsonify({'success': False, 'message': '网络路径不能为空'})
+
+        db.execute(
+            "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'net', ?, ?)",
+            (kb_id, name, user_id, network_path, now)
+        )
+        db.execute(
+            "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
+            (kb_id, user_id, 'manage')
+        )
+        db.commit()
+
+        return jsonify({
+            'success': True,
+            'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'net',
+                   'local_path': network_path}
+        })
 
     ws = _get_user_workspace(user_id)
     local_path = os.path.join(ws, name)
@@ -135,9 +176,6 @@ def create_folder():
 
     os.makedirs(local_path, exist_ok=True)
 
-    db = get_db()
-    kb_id = str(uuid.uuid4())
-    now = time.time()
     db.execute(
         "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
         (kb_id, name, user_id, local_path, now)
@@ -237,7 +275,12 @@ def list_kb():
     for row in rows:
         db_kbs[row['local_path']] = row
 
-    existing_paths = set(db_kbs.keys())
+    # 分别处理本地文件库和网络文件库
+    local_existing_paths = set()
+    for row in rows:
+        if row['kb_type'] != 'net':
+            local_existing_paths.add(row['local_path'])
+
     fs_paths = set()
 
     for entry_name in sorted(os.listdir(ws)):
@@ -259,10 +302,11 @@ def list_kb():
                 )
             else:
                 row = db_kbs[entry_path]
-                if row['name'] != entry_name:
+                if row['kb_type'] != 'net' and row['name'] != entry_name:
                     db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (entry_name, row['id']))
 
-    for path in existing_paths - fs_paths:
+    # 删除不存在于文件系统的本地文件库
+    for path in local_existing_paths - fs_paths:
         row = db_kbs[path]
         db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (row['id'],))
         db.execute("DELETE FROM knowledge_bases WHERE id = ?", (row['id'],))
@@ -313,7 +357,7 @@ def list_kb():
             'display_path': display_path,
             'created_at': row['created_at'],
             'permission': permission,
-            'kb_type': 'local',
+            'kb_type': row['kb_type'] or 'local',
             'local_path': local_path
         })
 
@@ -329,11 +373,19 @@ def rename_kb(kb_id, _user_id=None):
         return jsonify({'success': False, 'message': '名称不能为空'})
 
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
+    kb_type = kb_row['kb_type'] or 'local'
     old_path = kb_row['local_path']
+
+    # 网络文件库：只更新数据库记录，不操作文件系统
+    if kb_type == 'net':
+        db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (name, kb_id))
+        db.commit()
+        return jsonify({'success': True, 'message': '重命名成功'})
+
     parent_dir = os.path.dirname(old_path)
     new_path = os.path.join(parent_dir, name)
 
@@ -354,13 +406,21 @@ def rename_kb(kb_id, _user_id=None):
 @_require_kb_permission('manage')
 def delete_kb(kb_id, _user_id=None):
     db = get_db()
-    row = db.execute("SELECT id, name, local_path, owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    row = db.execute("SELECT id, name, local_path, owner_id, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = row['local_path']
+    kb_type = row['kb_type'] or 'local'
     ws = _get_user_workspace(row['owner_id'])
     trash_dir = os.path.join(ws, '已删除')
+
+    # 网络文件库：只删除数据库记录
+    if kb_type == 'net':
+        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
+        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+        db.commit()
+        return jsonify({'success': True, 'message': '网络文件库已删除'})
 
     if local_path.startswith(trash_dir):
         if os.path.isdir(local_path):

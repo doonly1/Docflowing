@@ -13,13 +13,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _get_llm_config() -> Dict[str, Any]:
+def _get_llm_config(user_id: str = None) -> Dict[str, Any]:
     from kb.config import get_llm_config
-    return get_llm_config()
+    return get_llm_config(user_id)
 
 
-def is_llm_available() -> bool:
-    cfg = _get_llm_config()
+def is_llm_available(user_id: str = None) -> bool:
+    cfg = _get_llm_config(user_id)
     return bool(
         cfg.get('enabled', False) and
         cfg.get('api_key') and
@@ -34,10 +34,11 @@ def call_llm(
     messages_history: List[Dict[str, str]] = None,
     temperature: float = None,
     max_tokens: int = None,
+    user_id: str = None,
 ) -> str:
-    cfg = _get_llm_config()
+    cfg = _get_llm_config(user_id)
 
-    if not is_llm_available():
+    if not is_llm_available(user_id):
         return None
 
     api_key = cfg['api_key']
@@ -89,11 +90,12 @@ def call_llm_stream(
     messages_history: List[Dict[str, str]] = None,
     temperature: float = None,
     max_tokens: int = None,
+    user_id: str = None,
 ):
-    if not is_llm_available():
+    if not is_llm_available(user_id):
         return
 
-    cfg = _get_llm_config()
+    cfg = _get_llm_config(user_id)
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
     model = cfg['model']
@@ -157,8 +159,8 @@ _TITLE_PROMPT = (
 )
 
 
-def generate_title(user_message: str, assistant_response: str) -> Optional[str]:
-    if not is_llm_available():
+def generate_title(user_message: str, assistant_response: str, user_id: str = None) -> Optional[str]:
+    if not is_llm_available(user_id):
         return None
 
     user_snippet = (user_message or "")[:500]
@@ -170,6 +172,7 @@ def generate_title(user_message: str, assistant_response: str) -> Optional[str]:
             user_query=f"User: {user_snippet}\n\nAssistant: {assistant_snippet}",
             temperature=0.3,
             max_tokens=100,
+            user_id=user_id,
         )
         if not title:
             return None
@@ -193,6 +196,7 @@ def call_llm_with_tools(
     tool_executor: Callable = None,
     temperature: float = None,
     max_tokens: int = None,
+    user_id: str = None,
 ) -> Dict[str, Any]:
     result = {
         "content": "",
@@ -200,10 +204,10 @@ def call_llm_with_tools(
         "tool_results": [],
     }
 
-    if not is_llm_available():
+    if not is_llm_available(user_id):
         return result
 
-    cfg = _get_llm_config()
+    cfg = _get_llm_config(user_id)
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
     model = cfg['model']

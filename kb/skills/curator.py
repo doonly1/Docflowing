@@ -292,7 +292,7 @@ def run_llm_review(user_id: str, dry_run: bool = False) -> Dict[str, Any]:
         "summary": "",
     }
 
-    if not is_llm_available():
+    if not is_llm_available(user_id):
         report["success"] = False
         report["error"] = "LLM 不可用，无法执行审查"
         return report
@@ -312,6 +312,7 @@ def run_llm_review(user_id: str, dry_run: bool = False) -> Dict[str, Any]:
             user_query="请审查以上技能列表，输出你的整合建议和结构化摘要。",
             temperature=0.3,
             max_tokens=4000,
+            user_id=user_id,
         )
         report["summary"] = summary or ""
     else:
@@ -326,6 +327,7 @@ def run_llm_review(user_id: str, dry_run: bool = False) -> Dict[str, Any]:
             tool_executor=_tool_exec,
             temperature=0.3,
             max_tokens=4000,
+            user_id=user_id,
         )
         report["summary"] = result.get("content", "")
         report["tool_calls_made"] = [

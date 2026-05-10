@@ -7,28 +7,33 @@
         });
 
         // ==================== Token 管理 ====================
-        let authToken = localStorage.getItem('docproc_token');
-        let authUsername = localStorage.getItem('docproc_username');
+        window.authToken = localStorage.getItem('docproc_token');
+        window.authUsername = localStorage.getItem('docproc_username');
+        window.authRole = localStorage.getItem('docproc_role') || 'viewer';
 
         function getToken() {
-            return authToken;
+            return window.authToken;
         }
 
-        function setAuth(token, username) {
-            authToken = token;
-            authUsername = username;
+        function setAuth(token, username, role) {
+            window.authToken = token;
+            window.authUsername = username;
+            window.authRole = role || 'viewer';
             localStorage.setItem('docproc_token', token);
             localStorage.setItem('docproc_username', username);
+            localStorage.setItem('docproc_role', window.authRole);
             document.getElementById('authOverlay').style.display = 'none';
             updateSidebarUser(username);
             initApp();
         }
 
         function clearAuth() {
-            authToken = null;
-            authUsername = null;
+            window.authToken = null;
+            window.authUsername = null;
+            window.authRole = 'viewer';
             localStorage.removeItem('docproc_token');
             localStorage.removeItem('docproc_username');
+            localStorage.removeItem('docproc_role');
             localStorage.removeItem('docproc_client_id');
             localStorage.removeItem('workdir');
             document.getElementById('authOverlay').style.display = 'flex';
@@ -97,7 +102,7 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    setAuth(data.token, data.username);
+                    setAuth(data.token, data.username, data.role);
                     document.getElementById('authPassword').value = '';
                 } else {
                     errorDiv.textContent = data.message || '操作失败';
@@ -140,30 +145,18 @@
             if (e.key === 'Enter') handleAuth();
         });
 
-        // ==================== 远程/本地模式检测 ====================
-        function isRemoteMode() {
-            const hostname = window.location.hostname;
-            return hostname !== 'localhost' && hostname !== '127.0.0.1';
-        }
-
+        // ==================== 远程模式（统一模式） ====================
         function updateModeUI() {
-            const remote = isRemoteMode();
+            // 统一为远程模式，始终显示上传和下载按钮
             const selectBtn = document.getElementById('selectFolderBtn');
             const remoteGroup = document.getElementById('remoteUploadGroup');
             const openBtn = document.getElementById('openDirBtn');
             const downloadBtn = document.getElementById('downloadBtn');
 
-            if (remote) {
-                selectBtn.textContent = '从本地选择';
-                remoteGroup.style.display = 'block';
-                openBtn.style.display = 'none';
-                downloadBtn.style.display = 'inline-block';
-            } else {
-                selectBtn.textContent = '从本地选择';
-                remoteGroup.style.display = 'none';
-                openBtn.style.display = 'inline-block';
-                downloadBtn.style.display = 'none';
-            }
+            selectBtn.textContent = '从本地选择';
+            remoteGroup.style.display = 'block';
+            openBtn.style.display = 'none';
+            downloadBtn.style.display = 'inline-block';
         }
 
         // ==================== 工具定义 ====================
@@ -378,83 +371,37 @@
 
         // 清理工作区文件
         window.clearWorkspace = async function() {
-            if (isRemoteMode()) {
-                if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
-                try {
-                    const workdir = document.getElementById('workdir').value.trim();
-                    const body = workdir ? { workdir: toActualWorkdir(workdir) } : {};
-                    const res = await apiFetch('/clear_workspace', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify(body)
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                        // 刷新文件列表
-                        await loadFileList(null, currentTool);
-                    } else {
-                        alert('清理失败: ' + (data.message || ''));
-                    }
-                } catch (e) {
-                    alert('清理失败: ' + e.message);
+            if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
+            try {
+                const workdir = document.getElementById('workdir').value.trim();
+                const body = workdir ? { workdir: toActualWorkdir(workdir) } : {};
+                const res = await apiFetch('/clear_workspace', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    // 刷新文件列表
+                    await loadFileList(null, currentTool);
+                } else {
+                    alert('清理失败: ' + (data.message || ''));
                 }
-            } else {
-                // 本地模式确认提示
-                if (!confirm('确定要清空当前目录中的输出文件吗？原始文件不受影响。')) return;
-                alert('本地模式请手动删除文件。');
+            } catch (e) {
+                alert('清理失败: ' + e.message);
             }
         };
 
-        // 打开工作目录（本地模式） / 查看文件（远程模式）
+        // 下载结果文件
         window.openWorkdir = async function() {
-            if (isRemoteMode()) {
-                downloadResults(); // 远程模式：打开=下载
-                return;
-            }
-            const workdir = document.getElementById('workdir').value.trim();
-            if (!workdir) { alert('请先选择工作目录'); return; }
-            await fetch('/open_folder', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({path: workdir})
-            });
+            downloadResults(); // 统一为下载功能
         };
 
         // ==================== 选择文件夹 / 上传 ====================
         window.selectFolder = async function() {
-            if (isRemoteMode()) {
-                // 远程模式：触发浏览器文件夹选择
-                document.getElementById('folderInput').click();
-            } else {
-                // 本地模式：服务端 tkinter 对话框
-                await selectLocalFolder();
-            }
+            // 统一为远程模式：触发浏览器文件夹选择
+            document.getElementById('folderInput').click();
         };
-
-        async function selectLocalFolder() {
-            try {
-                const response = await fetch('/select_folder', { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    const workdir = data.path;
-                    const workdirInput = document.getElementById('workdir');
-                    workdirInput.value = workdir;
-                    workdirInput.removeAttribute('data-kb-id');
-                    workdirInput.removeAttribute('data-kb-subdir');
-                    localStorage.setItem('workdir', workdir);
-
-                    apiFetch('/save_workdir', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({workdir})
-                    });
-
-                    if (currentTool) await loadFileList(workdir, currentTool);
-                }
-            } catch (error) {
-                console.error('选择文件夹失败:', error);
-            }
-        }
 
         // 远程模式：上传文件夹中的所有文件（或构建索引时仅上传元数据）
         async function handleRemoteUpload(event) {
@@ -652,7 +599,7 @@
             const resultDiv = document.getElementById('result');
             const kbInfo = getKbInfoFromWorkdir();
 
-            if (!isRemoteMode() && !kbInfo.isKbMode && !workdir) {
+            if (!kbInfo.isKbMode && !workdir) {
                 resultDiv.className = 'error';
                 resultDiv.textContent = '请选择工作目录';
                 resultDiv.style.display = 'block';
@@ -696,11 +643,8 @@
                 });
             } else {
                 const bodyData = { tool: currentTool };
-                if (isRemoteMode()) {
-                    // token will be in header
-                } else {
-                    bodyData.workdir = workdir;
-                }
+                // 统一远程模式：传递 workdir 参数
+                if (workdir) bodyData.workdir = toActualWorkdir(workdir);
                 if (selectedFiles.length > 0) bodyData.files = selectedFiles;
                 if (userConfig) bodyData.userConfig = userConfig;
 
@@ -1669,4 +1613,70 @@ window.confirmKbSelection = function() {
     closeKbSelector();
 
     if (currentTool) loadFileList(workdirInput.value, currentTool);
+};
+
+// ==================== 修改密码 ====================
+
+window.showChangePassword = function() {
+    var overlay = document.getElementById('changePwdOverlay');
+    overlay.style.display = 'flex';
+    setTimeout(function() { overlay.style.opacity = '1'; }, 10);
+    document.getElementById('changePwd-old').value = '';
+    document.getElementById('changePwd-new').value = '';
+    document.getElementById('changePwd-confirm').value = '';
+    document.getElementById('changePwd-error').style.display = 'none';
+    document.getElementById('changePwd-old').focus();
+};
+
+window.hideChangePassword = function() {
+    var overlay = document.getElementById('changePwdOverlay');
+    overlay.style.opacity = '0';
+    setTimeout(function() { overlay.style.display = 'none'; }, 250);
+};
+
+window.doChangePassword = async function() {
+    var oldPwd = document.getElementById('changePwd-old').value.trim();
+    var newPwd = document.getElementById('changePwd-new').value.trim();
+    var confirmPwd = document.getElementById('changePwd-confirm').value.trim();
+    var errorDiv = document.getElementById('changePwd-error');
+
+    errorDiv.style.display = 'none';
+
+    if (!oldPwd) {
+        errorDiv.textContent = '请输入原密码';
+        errorDiv.style.display = 'block';
+        return;
+    }
+    if (!newPwd || newPwd.length < 6) {
+        errorDiv.textContent = '新密码至少 6 个字符';
+        errorDiv.style.display = 'block';
+        return;
+    }
+    if (newPwd !== confirmPwd) {
+        errorDiv.textContent = '两次输入的密码不一致';
+        errorDiv.style.display = 'block';
+        return;
+    }
+
+    try {
+        var resp = await apiFetch('/api/user/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                old_password: oldPwd,
+                new_password: newPwd
+            })
+        });
+        var data = await resp.json();
+        if (data.success) {
+            hideChangePassword();
+            alert('密码修改成功！');
+        } else {
+            errorDiv.textContent = data.message || '修改失败';
+            errorDiv.style.display = 'block';
+        }
+    } catch (e) {
+        errorDiv.textContent = '请求失败: ' + e.message;
+        errorDiv.style.display = 'block';
+    }
 };

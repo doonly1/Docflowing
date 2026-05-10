@@ -438,59 +438,60 @@ def search_files(_user_id=None):
 @wiki_bp.route('/agent/context', methods=['POST'])
 @_require_wiki_permission('view')
 def agent_context(_user_id=None):
-    usr_id = _user_id
-    data = request.get_json() or {}
-    query = (data.get('query') or '').strip()
-    max_chars = data.get('max_chars', 4000)
-    session_id = data.get('session_id')
+    try:
+        usr_id = _user_id
+        data = request.get_json() or {}
+        query = (data.get('query') or '').strip()
+        max_chars = data.get('max_chars', 4000)
+        session_id = data.get('session_id')
 
-    if not query:
-        return jsonify({'success': True, 'context': '', 'sources': [], 'session_id': session_id, 'llm_used': False})
+        if not query:
+            return jsonify({'success': True, 'context': '', 'sources': [], 'session_id': session_id, 'llm_used': False})
 
-    results = search_wiki(usr_id, query)
+        results = search_wiki(usr_id, query)
 
-    context_parts = []
-    sources = []
-    total_chars = 0
+        context_parts = []
+        sources = []
+        total_chars = 0
 
-    for r in results:
-        if total_chars >= max_chars:
-            break
+        for r in results:
+            if total_chars >= max_chars:
+                break
 
-        kb_root = _get_kb_root(usr_id)
-        full_path = os.path.normpath(os.path.join(kb_root, r['path']))
-        if not os.path.isfile(full_path):
-            continue
+            kb_root = _get_kb_root(usr_id)
+            full_path = os.path.normpath(os.path.join(kb_root, r['path']))
+            if not os.path.isfile(full_path):
+                continue
 
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception:
-            continue
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except Exception:
+                continue
 
-        remaining = max_chars - total_chars
-        if len(content) > remaining:
-            content = content[:remaining]
+            remaining = max_chars - total_chars
+            if len(content) > remaining:
+                content = content[:remaining]
 
-        context_parts.append(f"## {r['title']}\n\n{content}")
-        sources.append({'path': r['path'], 'title': r['title']})
-        total_chars += len(content)
+            context_parts.append(f"## {r['title']}\n\n{content}")
+            sources.append({'path': r['path'], 'title': r['title']})
+            total_chars += len(content)
 
-    kb_context = '\n\n---\n\n'.join(context_parts)
+        kb_context = '\n\n---\n\n'.join(context_parts)
 
-    from .memory import get_memory_store
-    from .context_fence import build_memory_context_block
-    memory_store = get_memory_store(usr_id)
-    memory_block = memory_store.format_for_system_prompt()
-    memory_context = build_memory_context_block(memory_block) if memory_block else ""
+        from .memory import get_memory_store
+        from .context_fence import build_memory_context_block
+        memory_store = get_memory_store(usr_id)
+        memory_block = memory_store.format_for_system_prompt()
+        memory_context = build_memory_context_block(memory_block) if memory_block else ""
 
-    if is_llm_available() and kb_context:
-        kb_section = get_kb_section()
-        wiki_name = kb_section.get('default_name', '知识库')
+        if is_llm_available(usr_id) and kb_context:
+            kb_section = get_kb_section(usr_id)
+            wiki_name = kb_section.get('default_name', '知识库')
 
-        skills_index = _build_skills_index(usr_id)
+            skills_index = _build_skills_index(usr_id)
 
-        system_prompt = f"""你是一个专业的知识库助手，基于以下知识库内容回答用户问题。
+            system_prompt = f"""你是一个专业的知识库助手，基于以下知识库内容回答用户问题。
 
 ## 知识库名称
 {wiki_name}
@@ -505,86 +506,93 @@ def agent_context(_user_id=None):
 
 你拥有持久化记忆和技能管理能力。当用户要求你记住某些信息，或者你发现值得跨会话保留的知识时，请主动使用工具保存。"""
 
-        from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
-        from .llm import call_llm_with_tools
+            from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
+            from .llm import call_llm_with_tools
 
-        messages_history = None
-        if session_id:
-            try:
-                db = get_session_db(usr_id)
-                raw_messages = db.get_messages(session_id)
-                if raw_messages:
-                    messages_history = []
-                    for m in raw_messages:
-                        role = m.get("role", "")
-                        content = m.get("content", "")
-                        if role in ("user", "assistant") and content:
-                            messages_history.append({"role": role, "content": content})
+            messages_history = None
+            if session_id:
+                try:
+                    db = get_session_db(usr_id)
+                    raw_messages = db.get_messages(session_id)
+                    if raw_messages:
+                        messages_history = []
+                        for m in raw_messages:
+                            role = m.get("role", "")
+                            content = m.get("content", "")
+                            if role in ("user", "assistant") and content:
+                                messages_history.append({"role": role, "content": content})
 
-                    compressor = ContextCompressor()
-                    if compressor.should_compress(messages_history):
-                        previous_summary = db.get_meta(f"summary:{session_id}")
-                        messages_history = compressor.compress(
-                            messages_history, user_id=usr_id, previous_summary=previous_summary
-                        )
-                        for m in messages_history:
-                            if m.get("role") == "system" and "[上下文摘要" in m.get("content", ""):
-                                db.set_meta(f"summary:{session_id}", m["content"])
-                                break
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug("Session history load failed: %s", e)
-                messages_history = None
+                        compressor = ContextCompressor()
+                        if compressor.should_compress(messages_history):
+                            previous_summary = db.get_meta(f"summary:{session_id}")
+                            messages_history = compressor.compress(
+                                messages_history, user_id=usr_id, previous_summary=previous_summary
+                            )
+                            for m in messages_history:
+                                if m.get("role") == "system" and "[上下文摘要" in m.get("content", ""):
+                                    db.set_meta(f"summary:{session_id}", m["content"])
+                                    break
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).debug("Session history load failed: %s", e)
+                    messages_history = None
 
-        def _tool_exec(name, args):
-            return execute_tool_call(name, args, usr_id)
+            def _tool_exec(name, args):
+                return execute_tool_call(name, args, usr_id)
 
-        llm_result = call_llm_with_tools(
-            system_prompt=system_prompt,
-            user_query=query,
-            messages_history=messages_history,
-            tools=ALL_TOOL_SCHEMAS,
-            max_tool_rounds=5,
-            tool_executor=_tool_exec,
-        )
+            llm_result = call_llm_with_tools(
+                system_prompt=system_prompt,
+                user_query=query,
+                messages_history=messages_history,
+                tools=ALL_TOOL_SCHEMAS,
+                max_tool_rounds=5,
+                tool_executor=_tool_exec,
+                user_id=usr_id,
+            )
 
-        answer = llm_result.get("content", "")
-        if answer:
-            from .context_fence import sanitize_context
-            answer = sanitize_context(answer)
+            answer = llm_result.get("content", "")
+            if answer:
+                from .context_fence import sanitize_context
+                answer = sanitize_context(answer)
 
-            if llm_result.get("tool_calls_made"):
-                from .auto_extract import auto_extract_async
-                auto_extract_async(usr_id, query, answer)
+                if llm_result.get("tool_calls_made"):
+                    from .auto_extract import auto_extract_async
+                    auto_extract_async(usr_id, query, answer)
 
-            return jsonify({
-                'success': True,
-                'context': answer,
-                'sources': sources,
-                'session_id': session_id,
-                'llm_used': True,
-                'tool_calls': len(llm_result.get("tool_calls_made", [])),
-            })
+                return jsonify({
+                    'success': True,
+                    'context': answer,
+                    'sources': sources,
+                    'session_id': session_id,
+                    'llm_used': True,
+                    'tool_calls': len(llm_result.get("tool_calls_made", [])),
+                })
 
-    return jsonify({
-        'success': True,
-        'context': kb_context,
-        'sources': sources,
-        'session_id': session_id,
-        'llm_used': False,
-    })
+        return jsonify({
+            'success': True,
+            'context': kb_context,
+            'sources': sources,
+            'session_id': session_id,
+            'llm_used': False,
+        })
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[ERROR] agent_context failed: {e}\n{error_detail}")
+        return jsonify({'success': False, 'message': f'服务器内部错误: {str(e)}', 'error_detail': error_detail}), 200
 
 
 # --- LLM 配置接口 ---
 
 LLM_PROVIDERS = [
-    {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]},
-    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "models": ["deepseek-chat", "deepseek-reasoner"]},
-    {"name": "硅基流动", "base_url": "https://api.siliconflow.cn/v1", "models": ["Qwen/Qwen2.5-7B-Instruct", "Qwen/Qwen2.5-14B-Instruct", "Pro/Qwen/Qwen2.5-7B-Instruct", "deepseek-ai/DeepSeek-V3"]},
-    {"name": "阿里百炼", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "models": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"]},
-    {"name": "Moonshot", "base_url": "https://api.moonshot.cn/v1", "models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]},
-    {"name": "Groq", "base_url": "https://api.groq.com/openai/v1", "models": ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]},
-    {"name": "智谱", "base_url": "https://open.bigmodel.cn/api/paas/v4", "models": ["glm-4-plus", "glm-4-air", "glm-4-flash"]},
+    {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "models": []},
+    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "models": []},
+    {"name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": []},
+    {"name": "硅基流动", "base_url": "https://api.siliconflow.cn/v1", "models": []},
+    {"name": "阿里百炼", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "models": []},
+    {"name": "Moonshot", "base_url": "https://api.moonshot.cn/v1", "models": []},
+    {"name": "Groq", "base_url": "https://api.groq.com/openai/v1", "models": []},
+    {"name": "智谱", "base_url": "https://open.bigmodel.cn/api/paas/v4", "models": []},
     {"name": "自定义", "base_url": "", "models": []},
 ]
 
@@ -593,7 +601,7 @@ LLM_PROVIDERS = [
 @_require_wiki_permission('view')
 def get_llm_config_route(_user_id=None):
     from .config import get_llm_config, _mask_api_key
-    cfg = get_llm_config()
+    cfg = get_llm_config(_user_id)
     masked = dict(cfg)
     if masked.get('api_key'):
         masked['api_key'] = _mask_api_key(masked['api_key'])
@@ -610,12 +618,12 @@ def update_llm_config_route(_user_id=None):
     # 如果 api_key 为空或为脱敏值，保留现有加密值
     api_key = llm_cfg.get('api_key', '')
     if not api_key or '****' in api_key:
-        current = get_llm_config()
+        current = get_llm_config(_user_id)
         existing = current.get('api_key', '')
         # 重新加密保存（从内存中的明文重新加密）
         llm_cfg['api_key'] = existing
 
-    ok = save_llm_config(llm_cfg)
+    ok = save_llm_config(llm_cfg, _user_id)
     if ok:
         return jsonify({'success': True, 'message': 'LLM 配置已保存'})
     return jsonify({'success': False, 'message': '保存配置失败'}), 500
@@ -626,8 +634,82 @@ def get_llm_providers(_user_id=None):
     return jsonify({'success': True, 'providers': LLM_PROVIDERS})
 
 
+@wiki_bp.route('/llm-models', methods=['POST'])
+def get_llm_models():
+    """从提供商API动态获取可用模型列表（v2 - 无认证）"""
+    print("[DEBUG] get_llm_models 被调用 - 这是新代码！")
+    data = request.get_json() or {}
+    base_url = data.get('base_url', '').strip()
+    api_key = data.get('api_key', '').strip()
+
+    if not base_url:
+        return jsonify({'success': False, 'message': '缺少 base_url'}), 400
+
+    # 标准化 base_url
+    base_url = base_url.rstrip('/')
+
+    try:
+        import requests
+
+        # 构建 models 端点 URL
+        # 如果 base_url 已经包含 /v1，直接拼接；否则添加 /v1/models
+        if base_url.endswith('/v1'):
+            models_url = base_url + '/models'
+        else:
+            models_url = base_url + '/v1/models'
+
+        headers = {}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+
+        resp = requests.get(models_url, headers=headers, timeout=10)
+
+        if resp.status_code != 200:
+            return jsonify({
+                'success': False,
+                'message': f'获取模型列表失败 (HTTP {resp.status_code}): {resp.text[:200]}'
+            }), 200  # 始终返回 200，避免 HTTP 状态码引起混淆
+
+        result = resp.json()
+
+        # 解析返回的模型列表
+        models = []
+        if 'data' in result:
+            # OpenAI 格式: {"data": [{"id": "model-name", ...}, ...]}
+            for item in result['data']:
+                if isinstance(item, dict) and 'id' in item:
+                    models.append(item['id'])
+        elif isinstance(result, list):
+            # 直接返回数组
+            models = [item.get('id', item) if isinstance(item, dict) else str(item) for item in result]
+        else:
+            # 尝试其他格式
+            for key in ['models', 'model_ids', 'available_models']:
+                if key in result and isinstance(result[key], list):
+                    models = [item.get('id', item) if isinstance(item, dict) else str(item) for item in result[key]]
+                    break
+
+        if not models:
+            return jsonify({
+                'success': False,
+                'message': '无法解析模型列表，请手动输入模型名称'
+            }), 400
+
+        return jsonify({
+            'success': True,
+            'models': sorted(models)
+        })
+
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'message': '请求超时，请检查 base_url 是否正确'}), 200
+    except requests.exceptions.ConnectionError:
+        return jsonify({'success': False, 'message': '连接失败，请检查 base_url 和网络连接'}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': '获取模型列表失败: ' + str(e)}), 200
+
+
 @wiki_bp.route('/llm-test', methods=['POST'])
-@_require_wiki_permission('manage')
+@_require_wiki_permission('view')
 def test_llm_connection(_user_id=None):
     """测试 LLM 连接：发送一条简单消息验证配置是否可用"""
     from .llm import call_llm
@@ -636,14 +718,14 @@ def test_llm_connection(_user_id=None):
 
     # 临时配置覆盖
     from .config import get_llm_config
-    current = dict(get_llm_config())
+    current = dict(get_llm_config(_user_id))
     for k in ('api_key', 'base_url', 'model'):
         if k in test_cfg and test_cfg[k]:
             if '****' not in test_cfg[k]:
                 current[k] = test_cfg[k]
 
     if not current.get('api_key') or not current.get('base_url') or not current.get('model'):
-        return jsonify({'success': False, 'message': '请先填写 API Key、API 地址和模型名称'})
+        return jsonify({'success': False, 'message': '请先填写 API Key、API 地址和模型名称'}), 200
 
     import logging
     logger = logging.getLogger(__name__)
@@ -663,16 +745,16 @@ def test_llm_connection(_user_id=None):
         }
         resp = requests.post(url, headers=headers, json=payload, timeout=15)
         if resp.status_code == 200:
-            return jsonify({'success': True, 'message': '连接成功！模型响应正常。'})
+            return jsonify({'success': True, 'message': '连接成功！模型响应正常。'}), 200
         else:
             detail = resp.text[:200]
-            return jsonify({'success': False, 'message': f'连接失败 (HTTP {resp.status_code}): {detail}'})
+            return jsonify({'success': False, 'message': f'连接失败 (HTTP {resp.status_code}): {detail}'}), 200
     except requests.exceptions.Timeout:
-        return jsonify({'success': False, 'message': '连接超时，请检查 API 地址是否正确'})
+        return jsonify({'success': False, 'message': '连接超时，请检查 API 地址是否正确'}), 200
     except requests.exceptions.ConnectionError:
-        return jsonify({'success': False, 'message': '无法连接，请检查 API 地址和网络设置'})
+        return jsonify({'success': False, 'message': '无法连接，请检查 API 地址和网络设置'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': f'连接异常: {str(e)}'})
+        return jsonify({'success': False, 'message': f'连接异常: {str(e)}'}), 200
 
 
 # --- Memory system endpoints ---

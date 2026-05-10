@@ -51,7 +51,7 @@ def auto_extract_from_conversation(
 ) -> Dict[str, Any]:
     from .llm import call_llm, is_llm_available
 
-    if not is_llm_available():
+    if not is_llm_available(user_id):
         return {"should_save": False, "memory_writes": [], "skill_creates": []}
 
     user_snippet = (user_message or "")[:1000]
@@ -66,6 +66,7 @@ def auto_extract_from_conversation(
             user_query=f"User: {user_snippet}\n\nAssistant: {assistant_snippet}",
             temperature=0.1,
             max_tokens=500,
+            user_id=user_id,
         )
         if not raw:
             return {"should_save": False, "memory_writes": [], "skill_creates": []}

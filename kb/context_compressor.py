@@ -134,7 +134,7 @@ class ContextCompressor:
     ) -> Optional[str]:
         from .llm import call_llm, is_llm_available
 
-        if not is_llm_available():
+        if not is_llm_available(user_id):
             return None
 
         conversation_text = self._format_for_summary(messages)
@@ -190,6 +190,7 @@ class ContextCompressor:
                 user_query=prompt,
                 temperature=0.1,
                 max_tokens=self.max_summary_tokens,
+                user_id=user_id,
             )
             return summary.strip() if summary else None
         except Exception as e:

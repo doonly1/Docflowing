@@ -282,6 +282,34 @@ def api_set_user_role(user_id, _user_id=None):
     _save_json(_get_users_path(), users)
     return jsonify({'success': True, 'message': '角色修改成功'})
 
+@auth_bp.route('/api/user/change-password', methods=['POST'])
+@_login_required
+def api_change_password(_user_id=None):
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': '请求数据不能为空'})
+    
+    old_password = (data.get('old_password') or '').strip()
+    new_password = (data.get('new_password') or '').strip()
+    
+    if not old_password:
+        return jsonify({'success': False, 'message': '请输入原密码'})
+    if not new_password or len(new_password) < 6:
+        return jsonify({'success': False, 'message': '新密码至少 6 个字符'})
+    
+    users = _load_json(_get_users_path())
+    if _user_id not in users:
+        return jsonify({'success': False, 'message': '用户不存在'})
+    
+    user_info = users[_user_id]
+    if not _verify_password(old_password, user_info.get('password', '')):
+        return jsonify({'success': False, 'message': '原密码错误'})
+    
+    user_info['password'] = _hash_password(new_password)
+    _save_json(_get_users_path(), users)
+    
+    return jsonify({'success': True, 'message': '密码修改成功'})
+
 # ==================== Admin 用户初始化 ====================
 
 def ensure_admin_user():

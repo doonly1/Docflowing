@@ -111,61 +111,6 @@ def api_list_dir():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-@workspace_bp.route('/select_folder', methods=['POST'])
-def api_select_folder():
-    """打开文件夹选择对话框（跨平台兼容版本）"""
-    import platform
-
-    system = platform.system()
-
-    if system == 'Linux' and 'DISPLAY' not in os.environ:
-        current_dir = os.getcwd()
-        return jsonify({'success': True, 'path': current_dir, 'message': '无图形界面，使用当前目录'})
-
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        folder = filedialog.askdirectory()
-        root.destroy()
-
-        if folder:
-            return jsonify({'success': True, 'path': folder})
-        else:
-            return jsonify({'success': False, 'message': '取消选择'})
-    except ImportError:
-        return jsonify({'success': False, 'message': '图形界面不可用，请通过其他方式指定路径'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'文件夹选择失败: {str(e)}'})
-
-@workspace_bp.route('/open_folder', methods=['POST'])
-def api_open_folder():
-    """打开指定目录"""
-    import subprocess, platform
-
-    data = request.get_json()
-    path = data.get('path')
-
-    if not path:
-        return jsonify({'success': False, 'message': '未指定路径'})
-    if not os.path.exists(path):
-        return jsonify({'success': False, 'message': '目录不存在'})
-
-    try:
-        system = platform.system()
-        if system == 'Windows':
-            subprocess.Popen(['explorer', path])
-        elif system == 'Darwin':
-            subprocess.Popen(['open', path])
-        else:
-            subprocess.Popen(['xdg-open', path])
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
 # ==================== 文件上传 / 结果检查 / 下载 / 清理 ====================
 
 @workspace_bp.route('/upload_files', methods=['POST', 'OPTIONS'])

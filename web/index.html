@@ -798,7 +798,7 @@
             padding: 4px 0;
         }
     </style>
-    <link rel="stylesheet" href="js/fb.css">
+    <link rel="stylesheet" href="js/fb.css?v=2">
     <link rel="stylesheet" href="js/kb.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
 </head>
@@ -827,11 +827,41 @@
     <!-- 关于弹窗 overlay -->
     <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
 
+    <!-- 修改密码弹窗 -->
+    <div id="changePwdOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;">
+        <div class="kb-modal" style="max-width: 420px;">
+            <div class="kb-modal-header">
+                <span class="kb-modal-title">🔑 修改密码</span>
+                <span class="kb-modal-close" onclick="hideChangePassword()">&times;</span>
+            </div>
+            <div class="kb-modal-body" style="padding-top: 16px;">
+                <div class="kb-form-group" style="margin-bottom: 14px;">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">原密码</label>
+                    <input type="password" id="changePwd-old" style="width:100%;" placeholder="请输入原密码">
+                </div>
+                <div class="kb-form-group" style="margin-bottom: 14px;">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">新密码</label>
+                    <input type="password" id="changePwd-new" style="width:100%;" placeholder="至少 6 个字符">
+                </div>
+                <div class="kb-form-group">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">确认密码</label>
+                    <input type="password" id="changePwd-confirm" style="width:100%;" placeholder="再次输入新密码">
+                </div>
+                <div id="changePwd-error" style="margin-top:12px;color:#e94560;font-size:13px;display:none;"></div>
+            </div>
+            <div class="kb-modal-footer">
+                <button class="kb-btn kb-btn-secondary" onclick="hideChangePassword()">取消</button>
+                <button class="kb-btn kb-btn-primary" onclick="doChangePassword()">修改</button>
+            </div>
+        </div>
+    </div>
+
     <nav class="sidebar">
         <div class="sidebar-brand" id="sidebar-user-icon" title="用户菜单" onclick="toggleUserMenu(event)">👤</div>
         <div class="sidebar-user-popup" id="sidebar-user-popup" style="display:none">
             <div class="sidebar-user-name" id="sidebar-user-name-display">未登录</div>
             <div class="sidebar-popup-divider"></div>
+            <div class="sidebar-nav-item sidebar-popup-item" onclick="showChangePassword();toggleUserMenu()">🔑 修改密码</div>
             <div class="sidebar-nav-item sidebar-popup-item" onclick="handleLogout();toggleUserMenu()">🚪 退出</div>
         </div>
         <div class="sidebar-section">
@@ -901,7 +931,7 @@
                 </div>
             </div>
 
-            <!-- 远程模式：上传（浏览器文件多选，无信任提示） -->
+            <!-- 文件上传区域 -->
             <div id="remoteUploadGroup" style="display: none;">
                 <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleRemoteUpload(event)">
                 <div id="uploadProgress" style="display: none; margin-top: 8px; padding: 8px; background: #e8f4fd; border-radius: 4px; font-size: 12px;">

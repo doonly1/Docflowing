@@ -89,13 +89,14 @@ var WikiKnowledge = {
 
         viewEl.innerHTML =
             '<div class="kb-chat-container" id="kb-container">' +
+                // 右上角图标按钮
+                '<div class="kb-chat-header-actions" style="position:absolute;top:12px;right:16px;display:flex;gap:8px;z-index:10;">' +
+                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">💬</button>' +
+                    '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">🧠</button>' +
+                    '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">⚙️</button>' +
+                '</div>' +
                 // 头部（初始隐藏，对话后显示）
                 '<div class="kb-chat-header" id="kb-header" style="display:none">' +
-                    '<div class="kb-chat-header-actions">' +
-                        '<button onclick="WikiKnowledge.showSessions()" title="历史会话">💬 会话</button>' +
-                        '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆">🧠 记忆</button>' +
-                        '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置">⚙️</button>' +
-                    '</div>' +
                 '</div>' +
                 // 消息区（初始隐藏）
                 '<div class="kb-chat-messages" id="kb-messages" style="display:none">' +
@@ -105,15 +106,10 @@ var WikiKnowledge = {
                         '<div class="desc">与AI助手对话，它将基于记忆与技能持续进化</div>' +
                     '</div>' +
                 '</div>' +
-                // 初始居中区
+                // 初始居中区（移除快捷按钮）
                 '<div class="kb-chat-initial-area" id="kb-initial-area">' +
                     '<div class="kb-chat-greeting-title">开始对话</div>' +
-                    '<div class="kb-chat-greeting-desc">输入消息或选择快捷操作</div>' +
-                    '<div class="kb-chat-shortcuts">' +
-                        '<button onclick="WikiKnowledge.showSessions()" class="kb-shortcut-btn">💬 历史会话</button>' +
-                        '<button onclick="WikiKnowledge.showMemory()" class="kb-shortcut-btn">🧠 持久化记忆</button>' +
-                        '<button onclick="WikiKnowledge.showLLMSettings()" class="kb-shortcut-btn">⚙️ LLM 设置</button>' +
-                    '</div>' +
+                    '<div class="kb-chat-greeting-desc">输入消息，与AI助手对话</div>' +
                 '</div>' +
                 // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +
@@ -204,6 +200,17 @@ var WikiKnowledge = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(bodyData)
         }).then(function(resp) {
+            // 检查响应状态
+            if (!resp.ok) {
+                throw new Error('服务器错误: ' + resp.status);
+            }
+            // 检查响应类型
+            var contentType = resp.headers.get('content-type');
+            if (!contentType || contentType.indexOf('application/json') === -1) {
+                return resp.text().then(function(text) {
+                    throw new Error('服务器返回了非JSON响应: ' + text.substring(0, 100));
+                });
+            }
             return resp.json();
         }).then(function(data) {
             var typingEl = document.getElementById('kb-typing');
@@ -652,13 +659,14 @@ var WikiKnowledge = {
     // ==================== LLM 设置 ====================
 
     LLM_PROVIDERS: [
-        { name: 'OpenAI', base_url: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-        { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
-        { name: '硅基流动', base_url: 'https://api.siliconflow.cn/v1', models: ['Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-14B-Instruct', 'Pro/Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V3'] },
-        { name: '阿里百炼', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen-long'] },
-        { name: 'Moonshot', base_url: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
-        { name: 'Groq', base_url: 'https://api.groq.com/openai/v1', models: ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'] },
-        { name: '智谱', base_url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-air', 'glm-4-flash'] },
+        { name: 'OpenAI', base_url: 'https://api.openai.com/v1', models: [] },
+        { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: [] },
+        { name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', models: [] },
+        { name: '硅基流动', base_url: 'https://api.siliconflow.cn/v1', models: [] },
+        { name: '阿里百炼', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [] },
+        { name: 'Moonshot', base_url: 'https://api.moonshot.cn/v1', models: [] },
+        { name: 'Groq', base_url: 'https://api.groq.com/openai/v1', models: [] },
+        { name: '智谱', base_url: 'https://open.bigmodel.cn/api/paas/v4', models: [] },
         { name: '自定义', base_url: '', models: [] },
     ],
 
@@ -758,10 +766,14 @@ var WikiKnowledge = {
 
                 '<div class="kb-settings-section">' +
                     '<label class="kb-settings-label">模型</label>' +
-                    '<select id="kb-llm-model-select" onchange="WikiKnowledge._onModelSelectChange()" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;' + (modelOptions.indexOf('选择模型') >= 0 ? '' : 'display:none;') + '">' +
-                        modelOptions +
-                    '</select>' +
-                    '<input id="kb-llm-model-input" type="text" value="' + self._escapeHtml(model) + '" placeholder="gpt-4o-mini" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;' + (modelOptions.indexOf('选择模型') >= 0 ? 'display:none;' : '') + '" ' + (modelOptions.indexOf('选择模型') >= 0 ? '' : '') + '>' +
+                    '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+                        '<select id="kb-llm-model-select" onchange="WikiKnowledge._onModelSelectChange()" style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
+                            '<option value="">-- 手动输入 --</option>' +
+                        '</select>' +
+                        '<button onclick="WikiKnowledge._fetchModels()" id="kb-llm-fetch-models" style="padding:8px 12px;border:1px solid #4a90d9;border-radius:6px;background:white;color:#4a90d9;cursor:pointer;font-size:12px;white-space:nowrap;">🔄 获取列表</button>' +
+                    '</div>' +
+                    '<input id="kb-llm-model-input" type="text" value="' + self._escapeHtml(model) + '" placeholder="输入模型名称，如: gpt-4o-mini" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                    '<div id="kb-llm-model-status" style="margin-top:4px;font-size:11px;color:#999;"></div>' +
                 '</div>' +
 
                 '<div class="kb-settings-section">' +
@@ -797,23 +809,106 @@ var WikiKnowledge = {
             var p = this.LLM_PROVIDERS[i];
             if (p.name === name) {
                 baseUrlInput.value = p.base_url;
-                // 更新模型下拉
-                var opts = '<option value="">-- 选择模型 --</option>';
-                for (var j = 0; j < p.models.length; j++) {
-                    opts += '<option value="' + this._escapeHtml(p.models[j]) + '">' + this._escapeHtml(p.models[j]) + '</option>';
-                }
-                if (p.models.length > 0) {
-                    modelSelect.innerHTML = opts;
-                    modelSelect.style.display = '';
-                    modelInput.style.display = 'none';
-                    modelInput.value = '';
-                } else {
-                    modelSelect.style.display = 'none';
-                    modelInput.style.display = '';
+                // 清空模型下拉
+                modelSelect.innerHTML = '<option value="">-- 手动输入 --</option>';
+                modelSelect.style.display = '';
+                modelInput.style.display = 'none';
+                modelInput.value = '';
+
+                // 自动获取模型列表
+                if (p.base_url) {
+                    this._fetchModels();
                 }
                 break;
             }
         }
+    },
+
+    _fetchModels: function() {
+        var baseUrlInput = document.getElementById('kb-llm-base-url');
+        var apiKeyInput = document.getElementById('kb-llm-api-key');
+        var modelSelect = document.getElementById('kb-llm-model-select');
+        var modelInput = document.getElementById('kb-llm-model-input');
+        var statusDiv = document.getElementById('kb-llm-model-status');
+        var fetchBtn = document.getElementById('kb-llm-fetch-models');
+
+        if (!baseUrlInput || !baseUrlInput.value.trim()) {
+            alert('请先填写 API 地址');
+            return;
+        }
+
+        var baseUrl = baseUrlInput.value.trim();
+        var apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+
+        // 显示加载状态
+        if (fetchBtn) {
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = '⏳ 获取中...';
+        }
+        if (statusDiv) {
+            statusDiv.style.color = '#999';
+            statusDiv.textContent = '正在获取模型列表...';
+        }
+
+        var self = this;
+        // 使用原生 fetch，不发送认证头，避免 401 触发退出登录
+        var reqBody = JSON.stringify({ base_url: baseUrl, api_key: apiKey });
+        console.log('[DEBUG] _fetchModels 请求:', reqBody);
+        fetch('/api/kb/llm-models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: reqBody
+        }).then(function(resp) {
+            console.log('[DEBUG] _fetchModels 响应状态:', resp.status);
+            if (!resp.ok) {
+                return resp.json().then(function(data) {
+                    console.log('[DEBUG] _fetchModels 错误响应:', data);
+                    throw new Error(data.message || 'HTTP ' + resp.status);
+                }).catch(function(err) {
+                    if (err.message && err.message.startsWith('[DEBUG]')) throw err;
+                    throw new Error('HTTP ' + resp.status);
+                });
+            }
+            return resp.json();
+        }).then(function(data) {
+            if (data.success && data.models && data.models.length > 0) {
+                // 更新模型下拉列表
+                var opts = '<option value="">-- 选择模型 --</option>';
+                for (var i = 0; i < data.models.length; i++) {
+                    opts += '<option value="' + self._escapeHtml(data.models[i]) + '">' + self._escapeHtml(data.models[i]) + '</option>';
+                }
+                modelSelect.innerHTML = opts;
+                modelSelect.style.display = '';
+                if (modelInput) modelInput.style.display = 'none';
+
+                if (statusDiv) {
+                    statusDiv.style.color = '#52c41a';
+                    statusDiv.textContent = '✓ 成功获取 ' + data.models.length + ' 个模型';
+                }
+            } else {
+                // 获取失败，允许手动输入
+                modelSelect.style.display = 'none';
+                if (modelInput) modelInput.style.display = '';
+                if (statusDiv) {
+                    statusDiv.style.color = '#faad14';
+                    statusDiv.textContent = '获取失败: ' + (data.message || '未知错误') + '，请手动输入模型名称';
+                }
+            }
+        }).catch(function(e) {
+            // 获取失败，允许手动输入
+            modelSelect.style.display = 'none';
+            if (modelInput) modelInput.style.display = '';
+            if (statusDiv) {
+                statusDiv.style.color = '#f5222d';
+                statusDiv.textContent = '获取失败: ' + e.message + '，请手动输入模型名称';
+            }
+        }).finally(function() {
+            // 恢复按钮状态
+            if (fetchBtn) {
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = '🔄 获取列表';
+            }
+        });
     },
 
     _onModelSelectChange: function() {

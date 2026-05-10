@@ -139,11 +139,11 @@ def build_index_from_metadata(metadata_list, folder_name, output_dir):
         rel_path = item.get('path', item.get('name', ''))
         filename = item.get('name', rel_path.split('/')[-1] if '/' in rel_path else rel_path)
         # webkitRelativePath 格式: folderName/sub/file.docx
-        # 去掉第一层 folderName，使目录层级与本地模式一致
+        # 去掉第一层 folderName，使目录层级与服务器工作区一致
         path_parts = rel_path.split('/') if rel_path else [filename]
         if len(path_parts) > 1 and path_parts[0] == folder_name:
             path_parts = path_parts[1:]
-        # 构建不含根目录名的相对路径（与本地 collect_file_info 一致）
+        # 构建不含根目录名的相对路径
         rel_path_no_root = '/'.join(path_parts) if path_parts else filename
         dir_levels = path_parts[:-1]
         # 修改日期
@@ -161,7 +161,7 @@ def build_index_from_metadata(metadata_list, folder_name, output_dir):
         file_info_list.append({
             'filename': filename,
             'rel_path': rel_path_no_root,
-            'abs_path': rel_path,  # 远程模式无绝对路径，用原始路径占位
+            'abs_path': rel_path,  # 使用原始路径
             'dir_levels': dir_levels,
             'mod_time': mod_time,
             'file_size': formatted_size

@@ -173,7 +173,7 @@ def _auto_title_async(user_id: str, session_id: str, db):
             if not user_msg:
                 return
 
-            title = generate_title(user_msg, assistant_msg)
+            title = generate_title(user_msg, assistant_msg, user_id=user_id)
             if title:
                 existing = db.get_session(session_id)
                 if existing and not existing.get('title'):
