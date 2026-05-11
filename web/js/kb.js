@@ -438,6 +438,7 @@ var WikiKnowledge = {
                             '<div class="preview">' + self._escapeHtml(s.preview || '') + '</div>' +
                             '<div class="time">' + timeStr + '</div>' +
                         '</div>' +
+                        '<button class="kb-session-delete-btn" onclick="event.stopPropagation(); WikiKnowledge.deleteSession(\'' + s.id.replace(/'/g, "\\'") + '\')" title="删除会话">🗑️</button>' +
                     '</div>';
                 }
             }
@@ -472,6 +473,29 @@ var WikiKnowledge = {
         });
 
         this.closeSidebar();
+    },
+
+    deleteSession: function(sessionId) {
+        if (!confirm('确定要删除此会话吗？删除后不可恢复。')) return;
+
+        var self = this;
+        apiFetch('/api/kb/session/' + sessionId, { method: 'DELETE' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                if (self.sessionId === sessionId) {
+                    self.sessionId = null;
+                    self.messages = [];
+                    self._switchToInitial();
+                    self._renderMessages();
+                }
+                self.showSessions();
+            } else {
+                alert('删除失败: ' + (data.error || '未知错误'));
+            }
+        }).catch(function(e) {
+            alert('删除失败: ' + e.message);
+        });
     },
 
     showMemory: function() {
