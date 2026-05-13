@@ -6,8 +6,7 @@ import shutil
 import tempfile
 
 from flask import Blueprint, request, jsonify, Response
-from server.auth import _login_required
-from server.database import update_user_activity
+from server.auth import _login_required, update_user_activity
 
 workspace_bp = Blueprint('workspace', __name__)
 
@@ -35,7 +34,7 @@ def _get_workspace_resources_dir(user_id):
     return res_dir
 
 def _update_workspace_activity(user_id):
-    """记录用户最后访问时间（写入数据库）"""
+    """记录用户最后访问时间"""
     update_user_activity(user_id)
 
 def _get_tool_extensions(tool):

@@ -2,7 +2,7 @@
 
 > DocProc——Document Process，公文处理与 AI 知识管理平台。
 
-DocProc（文枢）是一个面向政府/企业公文处理的 **Web 应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理（受 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) 启发），包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
+DocProc（文枢）是一个面向公文处理的 **Web 应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理，包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
 
 ---
 
@@ -43,7 +43,6 @@ docker-compose up -d
 | `to_pdf.py` | 批量转 PDF | LibreOffice / win32com 双引擎 |
 | `to_pageNum.py` | 批量添加页码 | DOCX XML 级 PAGE 域操作 |
 | `to_index.py` | 目录索引生成 | 扫描目录输出 Excel |
-| `float_picture.py` | 浮动图片处理 | Word XML anchor 元素操作 |
 | `mystyle.py` | 公文样式库 | 符合中文公文规范的样式定义 |
 | `doc_process.py` | 文档基础库 | 标题解析、附件处理、日期排版、格式转换 |
 
@@ -87,8 +86,7 @@ AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进�
 │   └── kb_config.yaml          # 知识库系统配置（LLM、记忆、技能）
 ├── server/                     # Flask 后端服务核心
 │   ├── __init__.py             # App 工厂
-│   ├── auth.py                 # Token 认证、用户管理
-│   ├── database.py             # 用户活跃时间 SQLite
+│   ├── auth.py                 # Token 认证、用户管理、活跃时间
 │   ├── middleware.py           # 请求 ID 中间件
 │   ├── runner.py               # 工具脚本 SSE 流式执行
 │   ├── settings.py             # 用户配置持久化
@@ -152,10 +150,8 @@ AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进�
 ```
 workspaces/
 ├── data/                           # 全局数据
-│   ├── auth/users.json             # 用户信息
+│   ├── auth/users.json             # 用户信息（含 last_active）
 │   ├── auth/tokens.json            # Token 映射
-│   ├── server.db                   # 用户活跃时间
-│   ├── config.yaml                 # 全局配置
 │   └── fb/fb.db                   # 文件库数据库
 ├── {user_id}/                      # 用户独立存储
 │   ├── config/                     # 用户配置（含加密 LLM 密钥）
@@ -190,7 +186,7 @@ compare:
 - 搜索/记忆/会话限制
 - 技能生命周期与审查间隔
 
-配置加载优先级：环境变量 `USER_CONFIG_PATH` → `workspaces/data/config.yaml` → `./config/config.yaml`
+配置加载优先级：环境变量 `USER_CONFIG_PATH` → `./config/config.yaml`（项目模板）
 
 ---
 

@@ -295,7 +295,8 @@ def api_users_list():
             'user_id': uid,
             'username': uinfo.get('username', ''),
             'role': uinfo.get('role', 'viewer'),
-            'created_at': uinfo.get('created_at', 0)
+            'created_at': uinfo.get('created_at', 0),
+            'last_active': uinfo.get('last_active', 0)
         })
     return jsonify({'success': True, 'users': user_list})
 
@@ -361,6 +362,16 @@ def api_user_me():
     })
 
 # ==================== Admin 用户初始化 ====================
+
+# ==================== 用户活跃时间 ====================
+
+def update_user_activity(user_id):
+    """记录用户最后活跃时间到 users.json"""
+    users = _load_json(_get_users_path())
+    if user_id in users:
+        users[user_id]['last_active'] = time.time()
+        _save_json(_get_users_path(), users)
+
 
 def ensure_admin_user():
     """全新部署时自动创建默认管理员账户"""
