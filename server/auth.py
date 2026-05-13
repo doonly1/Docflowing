@@ -1,4 +1,8 @@
-"""Token 认证系统 + 用户管理 API"""
+"""Token 认证系统 + 用户管理 API
+
+认证数据存储位置：workspaces/data/auth/
+迁移：从旧路径 ~/.config/DocProc/auth/ 自动迁移
+"""
 
 import os
 import json
@@ -6,9 +10,10 @@ import uuid
 import hashlib
 import secrets
 import time
+import shutil
 from functools import wraps
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,10 +24,35 @@ SECRET_KEY = os.environ.get('DOCPROC_SECRET', secrets.token_hex(32))
 
 # ==================== 路径工具 ====================
 
+def _get_data_dir():
+    """获取全局数据存储目录：workspaces/data/"""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root, 'workspaces', 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
 def _get_auth_data_dir():
-    auth_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth')
+    """获取认证数据目录：workspaces/data/auth/"""
+    auth_dir = os.path.join(_get_data_dir(), 'auth')
     os.makedirs(auth_dir, exist_ok=True)
     return auth_dir
+
+def _migrate_old_auth_data():
+    """从旧路径 ~/.config/DocProc/auth/ 迁移认证数据到新路径"""
+    old_auth_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth')
+    new_auth_dir = _get_auth_data_dir()
+
+    if not os.path.exists(old_auth_dir):
+        return
+
+    for filename in ['users.json', 'tokens.json']:
+        old_path = os.path.join(old_auth_dir, filename)
+        new_path = os.path.join(new_auth_dir, filename)
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            try:
+                shutil.copy2(old_path, new_path)
+            except Exception:
+                pass
 
 def _get_users_path():
     return os.path.join(_get_auth_data_dir(), 'users.json')
@@ -31,6 +61,10 @@ def _get_tokens_path():
     return os.path.join(_get_auth_data_dir(), 'tokens.json')
 
 def _load_json(path):
+    # 首次加载时触发迁移
+    if 'users.json' in path or 'tokens.json' in path:
+        _migrate_old_auth_data()
+
     if os.path.exists(path):
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -67,7 +101,7 @@ def _get_user_id_from_token(token: str) -> str | None:
 
 # ==================== 装饰器 ====================
 
-def _login_required(f):
+def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if request.method == 'OPTIONS':
@@ -94,11 +128,11 @@ def _login_required(f):
         if not user_id:
             return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
 
-        kwargs['_user_id'] = user_id
+        g.user_id = user_id
         return f(*args, **kwargs)
     return decorated
 
-def _admin_required(f):
+def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if request.method == 'OPTIONS':
@@ -131,7 +165,7 @@ def _admin_required(f):
         if role != 'admin':
             return jsonify({'success': False, 'message': '需要管理员权限'}), 403
 
-        kwargs['_user_id'] = user_id
+        g.user_id = user_id
         return f(*args, **kwargs)
     return decorated
 
@@ -252,8 +286,8 @@ def api_logout():
 # ==================== 用户管理 API（Admin） ====================
 
 @auth_bp.route('/api/users/list', methods=['GET'])
-@_admin_required
-def api_users_list(_user_id=None):
+@admin_required
+def api_users_list():
     users = _load_json(_get_users_path())
     user_list = []
     for uid, uinfo in users.items():
@@ -266,14 +300,14 @@ def api_users_list(_user_id=None):
     return jsonify({'success': True, 'users': user_list})
 
 @auth_bp.route('/api/users/<user_id>/role', methods=['PUT'])
-@_admin_required
-def api_set_user_role(user_id, _user_id=None):
+@admin_required
+def api_set_user_role(user_id):
     data = request.get_json()
     new_role = (data.get('role') or '').strip()
     if new_role not in ('admin', 'editor', 'viewer'):
         return jsonify({'success': False, 'message': '无效的角色，可选值: admin, editor, viewer'})
 
-    if user_id == _user_id:
+    if user_id == g.user_id:
         return jsonify({'success': False, 'message': '不能修改自己的角色'})
 
     users = _load_json(_get_users_path())
@@ -285,45 +319,45 @@ def api_set_user_role(user_id, _user_id=None):
     return jsonify({'success': True, 'message': '角色修改成功'})
 
 @auth_bp.route('/api/user/change-password', methods=['POST'])
-@_login_required
-def api_change_password(_user_id=None):
+@login_required
+def api_change_password():
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'message': '请求数据不能为空'})
-    
+
     old_password = (data.get('old_password') or '').strip()
     new_password = (data.get('new_password') or '').strip()
-    
+
     if not old_password:
         return jsonify({'success': False, 'message': '请输入原密码'})
     if not new_password or len(new_password) < 6:
         return jsonify({'success': False, 'message': '新密码至少 6 个字符'})
-    
+
     users = _load_json(_get_users_path())
-    if _user_id not in users:
+    if g.user_id not in users:
         return jsonify({'success': False, 'message': '用户不存在'})
-    
-    user_info = users[_user_id]
+
+    user_info = users[g.user_id]
     if not _verify_password(old_password, user_info.get('password', '')):
         return jsonify({'success': False, 'message': '原密码错误'})
-    
+
     user_info['password'] = _hash_password(new_password)
     _save_json(_get_users_path(), users)
-    
+
     return jsonify({'success': True, 'message': '密码修改成功'})
 
 @auth_bp.route('/api/user/me', methods=['GET'])
-@_login_required
-def api_user_me(_user_id=None):
+@login_required
+def api_user_me():
     users = _load_json(_get_users_path())
-    if _user_id not in users:
+    if g.user_id not in users:
         return jsonify({'success': False, 'message': '用户不存在'}), 404
-    user_info = users[_user_id]
+    user_info = users[g.user_id]
     return jsonify({
         'success': True,
         'username': user_info.get('username', ''),
         'role': user_info.get('role', 'viewer'),
-        'user_id': _user_id
+        'user_id': g.user_id
     })
 
 # ==================== Admin 用户初始化 ====================

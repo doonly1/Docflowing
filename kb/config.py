@@ -1,13 +1,14 @@
 """知识库配置加载器（用户级 + 模板级）
 
 优先级：
-  1. ~/.config/DocProc/users/{user_id}_kb.yaml（用户持久化配置）
-  2. ./config/kb_config.yaml（项目模板，只读默认配置）
+ 1. workspaces/{user_id}/config/kb_config.yaml（用户持久化配置）
+ 2. ./config/kb_config.yaml（项目模板，只读默认配置）
 
-支持加密存储 API Key（Fernet 对称加密），密钥保存在 ~/.config/DocProc/_llm_key。"""
+支持加密存储 API Key（Fernet 对称加密），密钥保存在 workspaces/{user_id}/config/_llm_key。"""
 
 import os
 import yaml
+import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,6 +17,8 @@ try:
     HAS_FERNET = True
 except ImportError:
     HAS_FERNET = False
+
+from server.workspace import _get_workspace_dir
 
 _TEMPLATE_PATH = Path(__file__).parent.parent / 'config' / 'kb_config.yaml'
 
@@ -28,21 +31,18 @@ _cache_mtime: Dict[str, float] = {}
 _ENCRYPTION_KEY_FILE = '_llm_key'
 
 
-def _get_config_dir() -> str:
-    d = os.path.join(os.path.expanduser('~'), '.config', 'DocProc')
-    os.makedirs(d, exist_ok=True)
-    return d
+def _get_user_config_dir(user_id: str) -> str:
+    """获取用户配置目录：workspaces/{user_id}/config/"""
+    config_dir = os.path.join(_get_workspace_dir(user_id), 'config')
+    os.makedirs(config_dir, exist_ok=True)
+    return config_dir
 
 
-def _get_user_config_dir() -> str:
-    users_dir = os.path.join(_get_config_dir(), 'users')
-    os.makedirs(users_dir, exist_ok=True)
-    return users_dir
-
-
-def _get_or_create_encryption_key() -> bytes:
-    """获取或创建 Fernet 加密密钥"""
-    key_path = os.path.join(_get_config_dir(), _ENCRYPTION_KEY_FILE)
+def _get_or_create_encryption_key(user_id: str = None) -> bytes:
+    """获取或创建 Fernet 加密密钥（按用户存储）"""
+    if user_id is None:
+        user_id = 'anonymous'
+    key_path = os.path.join(_get_user_config_dir(user_id), _ENCRYPTION_KEY_FILE)
     if os.path.exists(key_path):
         with open(key_path, 'rb') as f:
             return f.read().strip()
@@ -54,23 +54,50 @@ def _get_or_create_encryption_key() -> bytes:
     return key
 
 
-def _encrypt_api_key(api_key: str) -> str:
+def _migrate_old_kb_config(user_id: str = None):
+    """从旧路径 ~/.config/DocProc/ 迁移配置到新路径"""
+    if user_id is None:
+        return
+
+    # 迁移用户 KB 配置
+    old_user_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'users')
+    old_kb_path = os.path.join(old_user_dir, f'{user_id}_kb.yaml')
+    new_kb_path = os.path.join(_get_user_config_dir(user_id), 'kb_config.yaml')
+
+    if os.path.exists(old_kb_path) and not os.path.exists(new_kb_path):
+        try:
+            shutil.copy2(old_kb_path, new_kb_path)
+        except Exception:
+            pass
+
+    # 迁移加密密钥
+    old_key_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', _ENCRYPTION_KEY_FILE)
+    new_key_path = os.path.join(_get_user_config_dir(user_id), _ENCRYPTION_KEY_FILE)
+
+    if os.path.exists(old_key_path) and not os.path.exists(new_key_path):
+        try:
+            shutil.copy2(old_key_path, new_key_path)
+        except Exception:
+            pass
+
+
+def _encrypt_api_key(api_key: str, user_id: str = None) -> str:
     if not api_key or not HAS_FERNET:
         return api_key
     try:
-        key = _get_or_create_encryption_key()
+        key = _get_or_create_encryption_key(user_id)
         f = Fernet(key)
         return f.encrypt(api_key.encode()).decode()
     except Exception:
         return api_key
 
 
-def _decrypt_api_key(value: str) -> str:
+def _decrypt_api_key(value: str, user_id: str = None) -> str:
     """尝试解密 API Key；若无法解密（明文或解密失败）则原样返回"""
     if not value or not HAS_FERNET:
         return value
     try:
-        key = _get_or_create_encryption_key()
+        key = _get_or_create_encryption_key(user_id)
         f = Fernet(key)
         return f.decrypt(value.encode()).decode()
     except Exception:
@@ -87,11 +114,15 @@ def _mask_api_key(api_key: str) -> str:
 # ==================== 配置读取 ====================
 
 
-def _get_user_kb_config_path(user_id: str) -> str:
-    return os.path.join(_get_user_config_dir(), f'{user_id}_kb.yaml')
+def _get_user_kb_config_path(user_id: str = None) -> str:
+    """获取用户 KB 配置文件路径"""
+    return os.path.join(_get_user_config_dir(user_id), 'kb_config.yaml')
 
 
-def _load_raw(user_id: str) -> Dict[str, Any]:
+def _load_raw(user_id: str = None) -> Dict[str, Any]:
+    """加载配置（带迁移）"""
+    _migrate_old_kb_config(user_id)
+
     user_path = _get_user_kb_config_path(user_id)
     if os.path.exists(user_path):
         try:
@@ -115,7 +146,9 @@ def _load_raw(user_id: str) -> Dict[str, Any]:
 
 
 def get_kb_config(user_id: str = None) -> Dict[str, Any]:
-    cache_key = user_id or 'default'
+    if user_id is None:
+        return {}
+    cache_key = user_id
     paths_to_check = [_get_user_kb_config_path(user_id), str(_TEMPLATE_PATH)]
     max_mtime = 0
     for p in paths_to_check:
@@ -143,7 +176,7 @@ def get_llm_config(user_id: str = None) -> Dict[str, Any]:
     llm_cfg = cfg.get('llm', {})
     if llm_cfg:
         api_key = llm_cfg.get('api_key', '')
-        decrypted = _decrypt_api_key(api_key)
+        decrypted = _decrypt_api_key(api_key, user_id)
         if decrypted != api_key:
             llm_cfg = dict(llm_cfg)
             llm_cfg['api_key'] = decrypted
@@ -169,7 +202,7 @@ def save_llm_config(llm_cfg: dict, user_id: str = None) -> bool:
     # 加密 api_key
     api_key = llm_cfg.get('api_key', '')
     if api_key:
-        llm_cfg['api_key'] = _encrypt_api_key(api_key)
+        llm_cfg['api_key'] = _encrypt_api_key(api_key, user_id)
 
     config['llm'] = llm_cfg
 
@@ -178,7 +211,7 @@ def save_llm_config(llm_cfg: dict, user_id: str = None) -> bool:
         with open(user_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         # 清除缓存
-        cache_key = user_id or 'default'
+        cache_key = user_id or 'anonymous'
         _cache.pop(cache_key, None)
         _cache_mtime.pop(cache_key, None)
         return True

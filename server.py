@@ -8,17 +8,6 @@ from server import create_app
 
 app = create_app()
 
-# 诊断路由：测试服务器是否加载了新代码
-@app.route('/api/kb/llm-models-test', methods=['POST'])
-def test_llm_models():
-    from flask import request, jsonify
-    data = request.get_json() or {}
-    return jsonify({
-        'success': True,
-        'message': '诊断端点正常 - 这是新代码',
-        'received': data
-    })
-
 def get_local_ip():
     """获取本机局域网 IP 地址"""
     try:

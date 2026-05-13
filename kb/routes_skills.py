@@ -1,7 +1,9 @@
 import json
 import logging
 import os
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
+
+from server.auth import login_required
 
 from .skills.manager import (
     create_skill,
@@ -29,43 +31,12 @@ from .skills.usage import bump_use, pin_skill, unpin_skill
 logger = logging.getLogger(__name__)
 
 
-def _get_user_id():
-    user_id = getattr(request, '_user_id', None)
-    if not user_id:
-        auth_header = request.headers.get('Authorization', '')
-        token = None
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-        elif auth_header:
-            token = auth_header
-
-        if not token:
-            data = request.get_json(silent=True) or {}
-            token = data.get('token') or data.get('client_id')
-
-        if not token:
-            token = request.args.get('token') or request.args.get('client_id')
-
-        if token:
-            tokens_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'tokens.json')
-            try:
-                if os.path.exists(tokens_path):
-                    with open(tokens_path, 'r', encoding='utf-8') as f:
-                        tokens = json.load(f)
-                    user_id = tokens.get(token)
-            except Exception:
-                pass
-
-    if not user_id:
-        user_id = 'default'
-    return user_id
-
-
 def register_skills_routes(bp: Blueprint):
 
     @bp.route('/skills', methods=['GET'])
+    @login_required
     def api_list_skills():
-        user_id = _get_user_id()
+        user_id = g.user_id
         category = request.args.get('category')
         state = request.args.get('state')
         skills = list_skills(user_id, category=category, state=state)
@@ -78,8 +49,9 @@ def register_skills_routes(bp: Blueprint):
         })
 
     @bp.route('/skills/create', methods=['POST'])
+    @login_required
     def api_create_skill():
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         name = data.get('name')
         content = data.get('content')
@@ -94,22 +66,25 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>', methods=['GET'])
+    @login_required
     def api_get_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         result = get_skill(user_id, skill_name)
         if not result.get('success'):
             return jsonify(result), 404
         return jsonify(result)
 
     @bp.route('/skills/<skill_name>/use', methods=['POST'])
+    @login_required
     def api_use_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         bump_use(user_id, skill_name)
         return jsonify({'success': True, 'message': f"Usage recorded for '{skill_name}'."})
 
     @bp.route('/skills/<skill_name>/edit', methods=['POST'])
+    @login_required
     def api_edit_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         content = data.get('content')
         if not content:
@@ -120,8 +95,9 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>/patch', methods=['POST'])
+    @login_required
     def api_patch_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         old_string = data.get('old_string')
         new_string = data.get('new_string')
@@ -133,8 +109,9 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>', methods=['DELETE'])
+    @login_required
     def api_delete_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         absorbed_into = data.get('absorbed_into')
         result = delete_skill(user_id, skill_name, absorbed_into=absorbed_into)
@@ -142,27 +119,31 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>/restore', methods=['POST'])
+    @login_required
     def api_restore_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         result = restore_skill(user_id, skill_name)
         status_code = 200 if result.get('success') else 404
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>/pin', methods=['POST'])
+    @login_required
     def api_pin_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         ok, msg = pin_skill(user_id, skill_name)
         return jsonify({'success': ok, 'message': msg})
 
     @bp.route('/skills/<skill_name>/unpin', methods=['POST'])
+    @login_required
     def api_unpin_skill(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         ok, msg = unpin_skill(user_id, skill_name)
         return jsonify({'success': ok, 'message': msg})
 
     @bp.route('/skills/curator/run', methods=['POST'])
+    @login_required
     def api_curator_run():
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         stale_after_days = data.get('stale_after_days', 30)
         archive_after_days = data.get('archive_after_days', 90)
@@ -175,27 +156,31 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(report)
 
     @bp.route('/skills/curator/status', methods=['GET'])
+    @login_required
     def api_curator_status():
-        user_id = _get_user_id()
+        user_id = g.user_id
         status = get_curator_status(user_id)
         return jsonify({'success': True, **status})
 
     @bp.route('/skills/categories', methods=['GET'])
+    @login_required
     def api_get_categories():
-        user_id = _get_user_id()
+        user_id = g.user_id
         categories = get_categories(user_id)
         return jsonify({'success': True, 'categories': categories})
 
     @bp.route('/skills/<skill_name>/files', methods=['GET'])
+    @login_required
     def api_list_skill_files(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         result = list_skill_files(user_id, skill_name)
         status_code = 200 if result.get('success') else 404
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>/files', methods=['POST'])
+    @login_required
     def api_write_skill_file(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         file_path = data.get('file_path')
         content = data.get('content')
@@ -206,8 +191,9 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/<skill_name>/files', methods=['DELETE'])
+    @login_required
     def api_remove_skill_file(skill_name):
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         file_path = data.get('file_path')
         if not file_path:
@@ -217,8 +203,9 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(result), status_code
 
     @bp.route('/skills/curator/review', methods=['POST'])
+    @login_required
     def api_curator_llm_review():
-        user_id = _get_user_id()
+        user_id = g.user_id
         data = request.get_json() or {}
         dry_run = data.get('dry_run', False)
 
@@ -226,14 +213,16 @@ def register_skills_routes(bp: Blueprint):
         return jsonify(report)
 
     @bp.route('/skills/curator/reports', methods=['GET'])
+    @login_required
     def api_curator_reports():
-        user_id = _get_user_id()
+        user_id = g.user_id
         reports = list_review_reports(user_id)
         return jsonify({'success': True, 'reports': reports, 'count': len(reports)})
 
     @bp.route('/skills/curator/report/<report_id>', methods=['GET'])
+    @login_required
     def api_curator_report_detail(report_id):
-        user_id = _get_user_id()
+        user_id = g.user_id
         report = get_review_report(user_id, report_id)
         if not report:
             return jsonify({'success': False, 'error': 'Report not found.'}), 404

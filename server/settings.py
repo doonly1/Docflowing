@@ -1,32 +1,50 @@
-"""用户配置持久化 + 配置管理 API"""
+"""用户配置持久化 + 配置管理 API
+
+配置存储位置：workspaces/{user_id}/config/user_config.yaml
+迁移：从旧路径 ~/.config/DocProc/users/{user_id}.yaml 自动迁移
+"""
 
 import os
 import yaml
+import shutil
 
 from flask import Blueprint, request, jsonify
 from server.auth import _login_required
+from server.workspace import _get_workspace_dir
 
 settings_bp = Blueprint('settings', __name__)
 
 # ==================== 用户配置路径 / 初始化 ====================
 
-def _get_config_base_dir():
-    config_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc')
+def _get_user_config_dir(user_id):
+    """获取用户配置目录：workspaces/{user_id}/config/"""
+    config_dir = os.path.join(_get_workspace_dir(user_id), 'config')
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 
-def _get_user_config_dir():
-    users_dir = os.path.join(_get_config_base_dir(), 'users')
-    os.makedirs(users_dir, exist_ok=True)
-    return users_dir
-
 def _get_user_config_path(user_id):
-    return os.path.join(_get_user_config_dir(), f'{user_id}.yaml')
+    """获取用户配置文件路径"""
+    return os.path.join(_get_user_config_dir(user_id), 'user_config.yaml')
 
 def _get_project_config_dir():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config')
 
+def _migrate_old_config(user_id):
+    """从旧路径 ~/.config/DocProc/users/ 迁移配置到新路径"""
+    old_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'users')
+    old_path = os.path.join(old_dir, f'{user_id}.yaml')
+    new_path = _get_user_config_path(user_id)
+
+    if os.path.exists(old_path) and not os.path.exists(new_path):
+        try:
+            shutil.copy2(old_path, new_path)
+        except Exception:
+            pass
+
 def ensure_user_config(user_id):
+    """确保用户配置文件存在（从模板创建或迁移旧配置）"""
+    _migrate_old_config(user_id)
+
     config_path = _get_user_config_path(user_id)
     if not os.path.exists(config_path):
         template_path = os.path.join(_get_project_config_dir(), 'config.yaml')
@@ -40,15 +58,6 @@ def ensure_user_config(user_id):
         except Exception:
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump({}, f, allow_unicode=True, default_flow_style=False)
-
-    kb_template_path = os.path.join(_get_project_config_dir(), 'kb_config.yaml')
-    user_kb_path = os.path.join(_get_config_base_dir(), 'kb_config.yaml')
-    if not os.path.exists(user_kb_path) and os.path.exists(kb_template_path):
-        try:
-            import shutil
-            shutil.copy2(kb_template_path, user_kb_path)
-        except Exception:
-            pass
 
     return config_path
 

@@ -12,7 +12,6 @@ services:
       - DOCPROC_ADMIN=${DOCPROC_ADMIN:-}
     volumes:
       - docproc_workspaces:/app/workspaces
-      - docproc_config:/home/docproc/.config/DocProc
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]
@@ -23,5 +22,4 @@ services:
 
 volumes:
   docproc_workspaces:
-  docproc_config:
   kb_storage:

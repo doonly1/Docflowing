@@ -1,16 +1,40 @@
 import os
 import sqlite3
 import threading
+import shutil
 
 from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS
 
 _local = threading.local()
 
 
-def get_db_path():
-    data_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'fb')
+def _get_data_dir():
+    """获取全局数据存储目录：workspaces/data/"""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root, 'workspaces', 'data')
     os.makedirs(data_dir, exist_ok=True)
-    return os.path.join(data_dir, 'fb.db')
+    return data_dir
+
+
+def _migrate_old_db():
+    """从旧路径 ~/.config/DocProc/fb/ 迁移数据库到新路径"""
+    old_db_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'fb', 'fb.db')
+    new_db_dir = os.path.join(_get_data_dir(), 'fb')
+    os.makedirs(new_db_dir, exist_ok=True)
+    new_db_path = os.path.join(new_db_dir, 'fb.db')
+
+    if os.path.exists(old_db_path) and not os.path.exists(new_db_path):
+        try:
+            shutil.copy2(old_db_path, new_db_path)
+        except Exception:
+            pass
+
+
+def get_db_path():
+    _migrate_old_db()
+    db_dir = os.path.join(_get_data_dir(), 'fb')
+    os.makedirs(db_dir, exist_ok=True)
+    return os.path.join(db_dir, 'fb.db')
 
 
 def init_db(conn):
@@ -63,7 +87,9 @@ def get_visible_kb_ids(user_id, is_admin=False):
 def get_user_role(user_id):
     try:
         import json
-        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+        # 从新的数据存储路径读取
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        users_path = os.path.join(project_root, 'workspaces', 'data', 'auth', 'users.json')
         if os.path.exists(users_path):
             with open(users_path, 'r', encoding='utf-8') as f:
                 users = json.load(f)

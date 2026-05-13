@@ -1,23 +1,10 @@
 # DocProc · 文枢
 
-> DocProc——Document Process，公文处理工具集。
+> DocProc——Document Process，公文处理与 AI 知识管理平台。
 
-## 功能模块
+DocProc（文枢）是一个面向政府/企业公文处理的 **Web 应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理（受 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) 启发），包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
 
-| 模块 | 说明 |
-|------|------|
-| `to_compare.py` | 文档比对（段落/句子/字符三级 diff，红蓝高亮） |
-| `to_redhead.py` | 红头文件生成（套红、印章、文号） |
-| `to_docx.py` | 多格式转 DOCX（PDF/DOC/DOCX/TXT/HTML/MD） |
-| `to_pageNum.py` | 批量添加页码 |
-| `to_pdf.py` | 批量转换为 PDF |
-| `to_index.py` | 生成目录索引 |
-| `float_picture.py` | 浮动图片处理 |
-| `mystyle.py` | 样式定义与格式化 |
-| `doc_process.py` | 文档处理基础库（标题/附件/日期排版） |
-| `server.py` | Web 服务器（Flask，提供文档处理在线服务） |
-| `index.html` | 前端页面 |
-
+---
 
 ## 快速开始
 
@@ -27,10 +14,164 @@ pip install -r requirements.txt
 
 # 启动 Web 服务
 python server.py
+# 默认访问 http://localhost:5000
 ```
 
+首次启动会自动创建管理员账号（`admin` / UUID 后 6 位），可在控制台日志中查看。
 
-### 配置 (config.yaml)
+### Docker 部署
+
+```bash
+docker-compose up -d
+```
+
+### Railway 部署
+
+已内置 `railway.toml`，可直接关联 GitHub 仓库一键部署。
+
+---
+
+## 功能模块
+
+### 📄 文档处理工具集（`tools/`）
+
+| 工具 | 功能 | 技术要点 |
+|------|------|----------|
+| `to_compare.py` | 文档比对 | 三级 diff（段落/句子/字符），红蓝高亮标记 |
+| `to_redhead.py` | 红头文件生成 | 套红标题、浮动印章、发文代字/文号 |
+| `to_docx.py` | 多格式转 DOCX | 支持 PDF/DOC/DOCX/TXT/HTML/MD |
+| `to_pdf.py` | 批量转 PDF | LibreOffice / win32com 双引擎 |
+| `to_pageNum.py` | 批量添加页码 | DOCX XML 级 PAGE 域操作 |
+| `to_index.py` | 目录索引生成 | 扫描目录输出 Excel |
+| `float_picture.py` | 浮动图片处理 | Word XML anchor 元素操作 |
+| `mystyle.py` | 公文样式库 | 符合中文公文规范的样式定义 |
+| `doc_process.py` | 文档基础库 | 标题解析、附件处理、日期排版、格式转换 |
+
+### 🗂️ 文件库管理（`fb/`）
+
+- **文件库 CRUD**：创建本地/网络文件库，自动扫描同步
+- **文件操作**：上传、下载（Zip 打包）、删除、重命名
+- **权限管理**：view / edit / manage 三级权限，支持共享
+- **工具集成**：按工具类型过滤显示文件
+
+### 🧠 知识库系统（`kb/`）— 进化知识库（Evolving Wiki）
+
+AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进化。
+
+| 子系统 | 路由模块 | 功能 |
+|--------|----------|------|
+| **文件管理** | `routes.py` | Markdown 文件 CRUD、目录树浏览、FTS5 全文搜索 |
+| **对话会话** | `routes_session.py` + `session_db.py` | 创建/查询会话、消息追加、自动标题生成、90 天保留 |
+| **持久记忆** | `routes_memory.py` + `memory.py` | 系统笔记（2200 字符）/ 用户画像（1375 字符），安全扫描 |
+| **技能管理** | `routes_skills.py` + `skills/` | 技能 CRUD、文件关联、使用统计、生命周期（active→stale→archived） |
+| **技能审查** | `skills/curator.py` | LLM 驱动自动合并与归档同类技能 |
+| **上下文压缩** | `context_compressor.py` | Token 超阈值自动摘要，保留首尾关键消息 |
+| **自动提取** | `auto_extract.py` | 对话分析，自动提取记忆和技能 |
+| **洞察分析** | `routes_insights.py` + `insights.py` | 使用数据概览、活跃模式、热门会话统计 |
+| **LLM 配置** | `config.py` | OpenAI 兼容 API，Fernet 加密存储密钥 |
+
+### 🔐 认证与权限
+
+- Token-based Bearer 认证
+- 角色系统：`admin` / `editor` / `viewer`
+- 首次部署自动创建管理员
+- 支持注册、登录、退出、改密码、用户角色管理
+
+---
+
+## 项目结构
+
+```
+├── config/                     # 配置文件
+│   ├── config.yaml             # 公司信息、比对参数
+│   └── kb_config.yaml          # 知识库系统配置（LLM、记忆、技能）
+├── server/                     # Flask 后端服务核心
+│   ├── __init__.py             # App 工厂
+│   ├── auth.py                 # Token 认证、用户管理
+│   ├── database.py             # 用户活跃时间 SQLite
+│   ├── middleware.py           # 请求 ID 中间件
+│   ├── runner.py               # 工具脚本 SSE 流式执行
+│   ├── settings.py             # 用户配置持久化
+│   └── workspace.py            # 工作区管理、文件上传/下载
+├── fb/                         # 文件库管理
+│   ├── models.py               # 数据库模型
+│   ├── database.py             # SQLite 连接与迁移
+│   └── routes.py               # 文件库 CRUD、权限 API
+├── kb/                         # 知识库系统（进化 Wiki）
+│   ├── routes.py               # 核心 API（文件 CRUD、搜索、权限）
+│   ├── routes_session.py       # 会话管理 API
+│   ├── routes_memory.py        # 持久记忆 API
+│   ├── routes_insights.py      # 洞察分析 API
+│   ├── routes_skills.py        # 技能管理 API
+│   ├── config.py               # LLM 配置加载与密钥加密
+│   ├── database.py             # 知识库数据库（FTS5）
+│   ├── models.py               # 库表模型
+│   ├── session_db.py           # 会话消息数据库
+│   ├── search.py               # FTS5 全文搜索
+│   ├── memory.py               # 持久记忆存储（安全扫描）
+│   ├── llm.py                  # LLM 调用（OpenAI 兼容）
+│   ├── context_compressor.py   # 上下文压缩
+│   ├── context_fence.py        # 记忆上下文 fence 标签
+│   ├── file_safety.py          # 文件写入安全路径
+│   ├── file_lock.py            # 跨平台文件锁
+│   ├── auto_extract.py         # 对话自动提取记忆/技能
+│   ├── insights.py             # 使用数据洞察分析引擎
+│   ├── tools.py                # LLM Function Calling 工具定义
+│   └── skills/                 # 技能管理子系统
+│       ├── manager.py          # 技能 CRUD
+│       ├── curator.py          # 技能审查器（合并与归档）
+│       └── usage.py            # 技能使用统计
+├── tools/                      # 文档处理命令行脚本
+│   ├── doc_process.py          # 文档基础处理
+│   ├── mystyle.py              # 公文样式库
+│   ├── to_compare.py           # 文档比对（77KB 最大模块）
+│   ├── to_docx.py              # 多格式转 DOCX
+│   ├── to_redhead.py           # 红头文件生成
+│   ├── to_index.py             # 目录索引
+│   ├── to_pageNum.py           # 批量添加页码
+│   ├── to_pdf.py               # 批量转 PDF
+│   ├── float_picture.py        # 浮动图片处理
+│   ├── load_config.py          # 配置加载器
+│   └── logging_config.py       # 日志配置
+├── ui/                         # 前端 SPA
+│   ├── index.html              # 主页面
+│   └── js/
+│       ├── fb.js / fb.css       # 文件库管理器前端
+│       └── kb.js / kb.css       # 知识库聊天/文件浏览
+├── docker-compose.yml           # Docker 编排
+├── Dockerfile                   # Docker 构建
+├── requirements.txt             # Python 依赖
+├── railway.toml                 # Railway 部署配置
+└── README.md                    # 本文件（包含第三方声明）
+```
+
+---
+
+## 数据存储
+
+```
+workspaces/
+├── data/                           # 全局数据
+│   ├── auth/users.json             # 用户信息
+│   ├── auth/tokens.json            # Token 映射
+│   ├── server.db                   # 用户活跃时间
+│   ├── config.yaml                 # 全局配置
+│   └── fb/fb.db                   # 文件库数据库
+├── {user_id}/                      # 用户独立存储
+│   ├── config/                     # 用户配置（含加密 LLM 密钥）
+│   ├── workdir/                    # 工作区文件
+│   └── kb/                         # 知识库
+│       ├── wiki.db                 # 知识库 FTS 数据库
+│       ├── data/state.db           # 会话消息数据库
+│       ├── memories/               # 持久记忆文件
+│       └── skills/                 # 技能文件
+```
+
+---
+
+## 配置
+
+### 公文配置（`config/config.yaml`）
 
 ```yaml
 公司名称:
@@ -38,38 +179,27 @@ python server.py
     - 公司简称
   代字: 发文代字
   印章位置: ./config/公司名称.png
-
 compare:
   sentence_similarity_threshold: 0.40
   para_similarity_threshold: 0.40
-
-last_workdir: ""
 ```
 
+### 知识库配置（`config/kb_config.yaml`）
 
-## 项目结构
+- LLM 端点、模型、温度等
+- 搜索/记忆/会话限制
+- 技能生命周期与审查间隔
 
-```
-├── config/
-│   └── config.yaml          # 配置文件
-├── doc_process.py           # 文档处理基础库
-├── float_picture.py         # 浮动图片处理
-├── index.html               # 前端页面
-├── mystyle.py               # 样式定义
-├── server.py                # Web 服务器
-├── to_compare.py            # 文档比对
-├── to_docx.py               # 格式转换
-├── to_index.py              # 目录索引
-├── to_pageNum.py            # 页码添加
-├── to_pdf.py                # PDF 转换
-└── to_redhead.py            # 红头文件生成
-```
+配置加载优先级：环境变量 `USER_CONFIG_PATH` → `workspaces/data/config.yaml` → `./config/config.yaml`
+
+---
 
 ## 环境要求
 
-- Python 3.6+
-- Windows（pywin32 依赖 Windows COM 接口，`to_docx.py` 的 DOC 转换和 `to_pdf.py` 需要 Microsoft Word）
-- Linux/macOS 可使用除 DOC 转换和 PDF 转换外的功能
+- **Python** 3.9+
+- **Windows**：完整功能（DOC 转换 / PDF 转换需 Microsoft Word）
+- **Linux/macOS**：除 win32com 依赖功能外皆可使用
+- **Docker**：可选择 Docker 部署（内置 LibreOffice 与中文字体）
 
 ## 版权声明
 

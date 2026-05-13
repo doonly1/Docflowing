@@ -1,17 +1,38 @@
-"""用户活跃时间数据库"""
+"""用户活跃时间数据库
+
+存储位置：workspaces/data/server.db
+迁移：从旧路径 ~/.config/DocProc/server.db 自动迁移
+"""
 
 import os
 import time
+import shutil
 import sqlite3
 from threading import local
 
 _db_local = local()
 
+def _get_data_dir():
+    """获取全局数据存储目录：workspaces/data/"""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root, 'workspaces', 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
+def _migrate_old_db():
+    """从旧路径 ~/.config/DocProc/server.db 迁移数据库到新路径"""
+    old_db_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'server.db')
+    new_db_path = os.path.join(_get_data_dir(), 'server.db')
+
+    if os.path.exists(old_db_path) and not os.path.exists(new_db_path):
+        try:
+            shutil.copy2(old_db_path, new_db_path)
+        except Exception:
+            pass
 
 def _get_db_path():
-    db_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc')
-    os.makedirs(db_dir, exist_ok=True)
-    return os.path.join(db_dir, 'server.db')
+    _migrate_old_db()
+    return os.path.join(_get_data_dir(), 'server.db')
 
 
 def get_db():

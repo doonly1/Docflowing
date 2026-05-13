@@ -9,9 +9,10 @@ import tempfile
 import subprocess
 import json
 
-from flask import Blueprint, request, jsonify, send_file, Response
+from flask import Blueprint, request, jsonify, send_file, Response, g
 from functools import wraps
 
+from server.auth import login_required, admin_required
 from fb.database import get_db, get_visible_kb_ids, get_user_role
 
 kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -19,47 +20,12 @@ kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
 
-def _get_user_id():
-    auth_header = request.headers.get('Authorization', '')
-    token = None
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-    elif auth_header:
-        token = auth_header
-
-    if not token:
-        data = request.get_json(silent=True) or {}
-        token = data.get('token') or data.get('client_id')
-
-    if not token:
-        token = request.args.get('token') or request.args.get('client_id')
-
-    if not token:
-        token = request.form.get('token') or request.form.get('client_id')
-
-    if not token:
-        return None
-
-    import json
-    tokens_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'tokens.json')
-    try:
-        if os.path.exists(tokens_path):
-            with open(tokens_path, 'r', encoding='utf-8') as f:
-                tokens = json.load(f)
-            return tokens.get(token)
-    except Exception:
-        pass
-    return None
-
-
-def _is_admin(user_id):
-    return get_user_role(user_id) == 'admin'
-
-
 def _check_kb_permission(kb_id, user_id, required_level):
+    """检查用户对指定文件库的权限"""
     if not user_id:
         return False
-    if _is_admin(user_id):
+    # 检查是否为管理员
+    if get_user_role(user_id) == 'admin':
         return True
     db = get_db()
     row = db.execute(
@@ -78,13 +44,14 @@ def _check_kb_permission(kb_id, user_id, required_level):
 
 
 def _require_kb_permission(required_level):
+    """FB 专属权限校验装饰器，需在 @login_required 之后使用"""
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
             if request.method == 'OPTIONS':
                 return f(*args, **kwargs)
 
-            user_id = _get_user_id()
+            user_id = g.user_id
             if not user_id:
                 return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
@@ -92,7 +59,6 @@ def _require_kb_permission(required_level):
             if kb_id and not _check_kb_permission(kb_id, user_id, required_level):
                 return jsonify({'success': False, 'message': '权限不足'}), 403
 
-            kwargs['_user_id'] = user_id
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -108,11 +74,9 @@ def _get_user_workspace(user_id):
 
 
 @kb_bp.route('/create-folder', methods=['POST'])
+@login_required
 def create_folder():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
+    user_id = g.user_id
     data = request.get_json()
     kb_type = (data.get('kb_type') or 'local').strip()
     name = (data.get('name') or '').strip()
@@ -125,7 +89,7 @@ def create_folder():
 
     # 网络文件库需要管理员权限
     if kb_type == 'net':
-        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+        users_path = os.path.join(_get_auth_data_dir(), 'users.json')
         users = {}
         if os.path.exists(users_path):
             try:
@@ -194,11 +158,9 @@ def create_folder():
 
 
 @kb_bp.route('/copy-folder', methods=['POST'])
+@login_required
 def copy_folder():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
+    user_id = g.user_id
     data = request.get_json()
     kb_id = (data.get('kb_id') or '').strip()
     new_name = (data.get('new_name') or '').strip()
@@ -251,19 +213,17 @@ def copy_folder():
 
 
 @kb_bp.route('/list', methods=['GET'])
+@login_required
 def list_kb():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
-    is_admin = _is_admin(user_id)
+    user_id = g.user_id
+    is_admin = (get_user_role(user_id) == 'admin')
     db = get_db()
     ws = _get_user_workspace(user_id)
 
     import json
     users = {}
     try:
-        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+        users_path = os.path.join(_get_auth_data_dir(), 'users.json')
         if os.path.exists(users_path):
             with open(users_path, 'r', encoding='utf-8') as f:
                 users = json.load(f)
@@ -365,8 +325,9 @@ def list_kb():
 
 
 @kb_bp.route('/<kb_id>', methods=['PUT'])
+@login_required
 @_require_kb_permission('manage')
-def rename_kb(kb_id, _user_id=None):
+def rename_kb(kb_id):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     if not name:
@@ -403,8 +364,9 @@ def rename_kb(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>', methods=['DELETE'])
+@login_required
 @_require_kb_permission('manage')
-def delete_kb(kb_id, _user_id=None):
+def delete_kb(kb_id):
     db = get_db()
     row = db.execute("SELECT id, name, local_path, owner_id, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not row:
@@ -445,11 +407,9 @@ def delete_kb(kb_id, _user_id=None):
 
 
 @kb_bp.route('/trash', methods=['DELETE'])
+@login_required
 def clear_trash():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
+    user_id = g.user_id
     ws = _get_user_workspace(user_id)
     trash_dir = os.path.join(ws, '已删除')
     if not os.path.isdir(trash_dir):
@@ -472,11 +432,9 @@ def clear_trash():
 
 
 @kb_bp.route('/trash-list', methods=['GET'])
+@login_required
 def list_trash():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
+    user_id = g.user_id
     ws = _get_user_workspace(user_id)
     trash_dir = os.path.join(ws, '已删除')
     if not os.path.isdir(trash_dir):
@@ -498,10 +456,9 @@ def list_trash():
 
 
 @kb_bp.route('/trash-restore', methods=['POST'])
+@login_required
 def restore_from_trash():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+    user_id = g.user_id
 
     data = request.get_json()
     item_name = (data.get('name') or '').strip()
@@ -544,10 +501,9 @@ def restore_from_trash():
 
 
 @kb_bp.route('/trash-item', methods=['DELETE'])
+@login_required
 def delete_trash_item():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+    user_id = g.user_id
 
     name = request.args.get('name', '').strip()
     if not name:
@@ -574,8 +530,9 @@ def delete_trash_item():
 
 
 @kb_bp.route('/<kb_id>/transfer', methods=['POST'])
+@login_required
 @_require_kb_permission('manage')
-def transfer_kb(kb_id, _user_id=None):
+def transfer_kb(kb_id):
     data = request.get_json()
     new_owner_id = (data.get('new_owner_id') or '').strip()
     keep_role = (data.get('keep_role') or 'editor').strip()
@@ -596,9 +553,9 @@ def transfer_kb(kb_id, _user_id=None):
     db.execute("INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
                (kb_id, new_owner_id, 'manage'))
 
-    db.execute("DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?", (kb_id, _user_id))
+    db.execute("DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?", (kb_id, g.user_id))
     db.execute("INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-               (kb_id, _user_id, keep_role))
+               (kb_id, g.user_id, keep_role))
 
     db.commit()
     return jsonify({'success': True, 'message': '所有权移交成功'})
@@ -607,10 +564,11 @@ def transfer_kb(kb_id, _user_id=None):
 # ==================== 成员权限管理 ====================
 
 @kb_bp.route('/<kb_id>/members', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def list_members(kb_id, _user_id=None):
+def list_members(kb_id):
     import json
-    users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+    users_path = os.path.join(_get_auth_data_dir(), 'users.json')
     users = {}
     if os.path.exists(users_path):
         with open(users_path, 'r', encoding='utf-8') as f:
@@ -648,10 +606,11 @@ def list_members(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/members', methods=['POST'])
+@login_required
 @_require_kb_permission('manage')
-def add_member(kb_id, _user_id=None):
+def add_member(kb_id):
     import json
-    users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
+    users_path = os.path.join(_get_auth_data_dir(), 'users.json')
     users = {}
     if os.path.exists(users_path):
         with open(users_path, 'r', encoding='utf-8') as f:
@@ -694,8 +653,9 @@ def add_member(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/members/<member_id>', methods=['PUT'])
+@login_required
 @_require_kb_permission('manage')
-def update_member(kb_id, member_id, _user_id=None):
+def update_member(kb_id, member_id):
     data = request.get_json()
     permission = (data.get('permission') or 'view').strip()
     if permission not in ('view', 'edit', 'manage'):
@@ -711,8 +671,9 @@ def update_member(kb_id, member_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/members/<member_id>', methods=['DELETE'])
+@login_required
 @_require_kb_permission('manage')
-def remove_member(kb_id, member_id, _user_id=None):
+def remove_member(kb_id, member_id):
     db = get_db()
     db.execute(
         "DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
@@ -725,11 +686,9 @@ def remove_member(kb_id, member_id, _user_id=None):
 # ==================== 全文搜索 ====================
 
 @kb_bp.route('/search', methods=['GET'])
+@login_required
 def search_documents():
-    user_id = _get_user_id()
-    if not user_id:
-        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
-
+    user_id = g.user_id
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'success': True, 'results': []})
@@ -824,8 +783,9 @@ def _resolve_local_path(db, kb_id, subdir=''):
 
 
 @kb_bp.route('/<kb_id>/local-files', methods=['POST'])
+@login_required
 @_require_kb_permission('edit')
-def upload_local_files(kb_id, _user_id=None):
+def upload_local_files(kb_id):
     db = get_db()
     subdir = request.args.get('subdir', '').strip()
     local_path, target_dir = _resolve_local_path(db, kb_id, subdir)
@@ -854,8 +814,9 @@ def upload_local_files(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/dir', methods=['POST'])
+@login_required
 @_require_kb_permission('edit')
-def create_local_dir(kb_id, _user_id=None):
+def create_local_dir(kb_id):
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -885,8 +846,9 @@ def create_local_dir(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/create', methods=['POST'])
+@login_required
 @_require_kb_permission('edit')
-def create_local_file(kb_id, _user_id=None):
+def create_local_file(kb_id):
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -919,8 +881,9 @@ def create_local_file(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/content', methods=['PUT'])
+@login_required
 @_require_kb_permission('edit')
-def save_local_file_content(kb_id, _user_id=None):
+def save_local_file_content(kb_id):
     db = get_db()
     data = request.get_json() or {}
     path = (data.get('path') or '').strip()
@@ -941,8 +904,9 @@ def save_local_file_content(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def list_local_files(kb_id, _user_id=None):
+def list_local_files(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1011,8 +975,9 @@ def list_local_files(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-categories', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def list_local_categories(kb_id, _user_id=None):
+def list_local_categories(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1088,8 +1053,9 @@ def _scan_categories_recursive(target_path, base_path):
 
 
 @kb_bp.route('/<kb_id>/local-files/download', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def download_local_file(kb_id, _user_id=None):
+def download_local_file(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1130,8 +1096,9 @@ TOOL_EXTENSIONS = {
 
 
 @kb_bp.route('/<kb_id>/run-tool', methods=['POST'])
+@login_required
 @_require_kb_permission('edit')
-def run_tool_on_kb(kb_id, _user_id=None):
+def run_tool_on_kb(kb_id):
     data = request.get_json()
     tool = data.get('tool')
     subdir = data.get('subdir', '').strip()
@@ -1233,8 +1200,9 @@ def run_tool_on_kb(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/content', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def get_local_file_content(kb_id, _user_id=None):
+def get_local_file_content(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1289,8 +1257,9 @@ def get_local_file_content(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/batch-download', methods=['POST'])
+@login_required
 @_require_kb_permission('view')
-def batch_download_local(kb_id, _user_id=None):
+def batch_download_local(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1324,8 +1293,9 @@ def batch_download_local(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/replace', methods=['PUT'])
+@login_required
 @_require_kb_permission('edit')
-def replace_local_file(kb_id, _user_id=None):
+def replace_local_file(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1364,8 +1334,9 @@ def replace_local_file(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/move', methods=['PUT'])
+@login_required
 @_require_kb_permission('edit')
-def move_local_items(kb_id, _user_id=None):
+def move_local_items(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1416,8 +1387,9 @@ def move_local_items(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files', methods=['DELETE'])
+@login_required
 @_require_kb_permission('edit')
-def delete_local_items(kb_id, _user_id=None):
+def delete_local_items(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1454,8 +1426,9 @@ def delete_local_items(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/rename', methods=['PUT'])
+@login_required
 @_require_kb_permission('edit')
-def rename_local_item(kb_id, _user_id=None):
+def rename_local_item(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1495,8 +1468,9 @@ def rename_local_item(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/copy', methods=['POST'])
+@login_required
 @_require_kb_permission('edit')
-def copy_local_items(kb_id, _user_id=None):
+def copy_local_items(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:
@@ -1551,8 +1525,9 @@ def copy_local_items(kb_id, _user_id=None):
 
 
 @kb_bp.route('/<kb_id>/local-files/open', methods=['GET'])
+@login_required
 @_require_kb_permission('view')
-def open_local_file(kb_id, _user_id=None):
+def open_local_file(kb_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
     if not kb_row:

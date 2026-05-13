@@ -67,7 +67,9 @@ def _get_user_kb_dir(user_id: str) -> str:
 
 
 def get_db_path(user_id=None):
-    kb_dir = _get_user_kb_dir(user_id or 'default')
+    if user_id is None:
+        return None
+    kb_dir = _get_user_kb_dir(user_id)
     return os.path.join(kb_dir, 'wiki.db')
 
 

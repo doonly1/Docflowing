@@ -2,9 +2,10 @@ import os
 import time
 import json
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from functools import wraps
 
+from server.auth import login_required, admin_required
 from kb.database import get_db
 from kb.search import search_wiki
 from kb.config import get_kb_section
@@ -17,59 +18,15 @@ wiki_bp = Blueprint('wiki', __name__, url_prefix='/api/kb')
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
 
-def _get_user_id():
-    auth_header = request.headers.get('Authorization', '')
-    token = None
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-    elif auth_header:
-        token = auth_header
-
-    if not token:
-        data = request.get_json(silent=True) or {}
-        token = data.get('token') or data.get('client_id')
-
-    if not token:
-        token = request.args.get('token') or request.args.get('client_id')
-
-    if not token:
-        token = request.form.get('token') or request.form.get('client_id')
-
-    if not token:
-        return None
-
-    tokens_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'tokens.json')
-    try:
-        if os.path.exists(tokens_path):
-            with open(tokens_path, 'r', encoding='utf-8') as f:
-                tokens = json.load(f)
-            return tokens.get(token)
-    except Exception:
-        pass
-    return None
-
-
-def _get_user_role(user_id):
-    try:
-        users_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'auth', 'users.json')
-        if os.path.exists(users_path):
-            with open(users_path, 'r', encoding='utf-8') as f:
-                users = json.load(f)
-            user_info = users.get(user_id, {})
-            return user_info.get('role', 'viewer')
-    except Exception:
-        pass
-    return 'viewer'
-
-
-def _is_admin(user_id):
-    return _get_user_role(user_id) == 'admin'
-
-
 def _check_wiki_permission(usr_id, target_usr_id, required_level):
+    """检查用户对目标用户知识库的权限"""
     if not usr_id:
         return False
-    if _is_admin(usr_id):
+    # 检查是否为管理员：从 g 或数据库获取当前用户角色
+    from server.auth import _load_json, _get_users_path
+    users = _load_json(_get_users_path())
+    user_info = users.get(usr_id, {})
+    if user_info.get('role', 'viewer') == 'admin':
         return True
     if usr_id == target_usr_id:
         return True
@@ -86,17 +43,20 @@ def _check_wiki_permission(usr_id, target_usr_id, required_level):
 
 
 def _require_wiki_permission(required_level):
+    """KB 专属权限校验装饰器，需在 @login_required 之后使用"""
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
             if request.method == 'OPTIONS':
                 return f(*args, **kwargs)
 
-            user_id = _get_user_id()
+            user_id = g.user_id
             if not user_id:
                 return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
-            kwargs['_user_id'] = user_id
+            # 此处可扩展：检查 user_id 对当前资源的具体权限
+            # 目前仅保证已登录，具体权限由调用方通过 _check_wiki_permission 判断
+
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -182,9 +142,10 @@ def _extract_title_from_md(content):
 # ==================== 知识库管理 ====================
 
 @wiki_bp.route('/info', methods=['GET'])
+@login_required
 @_require_wiki_permission('view')
-def get_wiki_info(_user_id=None):
-    usr_id = _user_id
+def get_wiki_info():
+    usr_id = g.user_id
     conn = get_db(usr_id)
     row = conn.execute("SELECT * FROM wiki_info WHERE usr_id = ?", (usr_id,)).fetchone()
 
@@ -210,9 +171,10 @@ def get_wiki_info(_user_id=None):
 
 
 @wiki_bp.route('/settings', methods=['POST'])
+@login_required
 @_require_wiki_permission('manage')
-def update_wiki_settings(_user_id=None):
-    usr_id = _user_id
+def update_wiki_settings():
+    usr_id = g.user_id
     data = request.get_json()
     name = (data.get('name') or '').strip()
     description = (data.get('description') or '').strip()
@@ -234,9 +196,10 @@ def update_wiki_settings(_user_id=None):
 # ==================== 文件操作 ====================
 
 @wiki_bp.route('/files', methods=['GET'])
+@login_required
 @_require_wiki_permission('view')
-def list_files(_user_id=None):
-    usr_id = _user_id
+def list_files():
+    usr_id = g.user_id
     kb_root = _get_kb_root(usr_id)
     subdir = request.args.get('subdir', '').strip()
 
@@ -284,9 +247,10 @@ def list_files(_user_id=None):
 
 
 @wiki_bp.route('/files/<path:file_path>', methods=['GET'])
+@login_required
 @_require_wiki_permission('view')
-def get_file_content(file_path, _user_id=None):
-    usr_id = _user_id
+def get_file_content(file_path):
+    usr_id = g.user_id
     kb_root, full_path = validate_file_path(usr_id, file_path)
     if full_path is None:
         return jsonify({'success': False, 'message': '路径非法'}), 400
@@ -307,9 +271,10 @@ def get_file_content(file_path, _user_id=None):
 
 
 @wiki_bp.route('/files/<path:file_path>', methods=['POST'])
+@login_required
 @_require_wiki_permission('edit')
-def create_or_update_file(file_path, _user_id=None):
-    usr_id = _user_id
+def create_or_update_file(file_path):
+    usr_id = g.user_id
     data = request.get_json()
     content = data.get('content', '')
 
@@ -349,9 +314,10 @@ def create_or_update_file(file_path, _user_id=None):
 
 
 @wiki_bp.route('/files/<path:file_path>', methods=['DELETE'])
+@login_required
 @_require_wiki_permission('edit')
-def delete_file(file_path, _user_id=None):
-    usr_id = _user_id
+def delete_file(file_path):
+    usr_id = g.user_id
     kb_root, full_path = validate_file_path(usr_id, file_path)
     if full_path is None:
         return jsonify({'success': False, 'message': '路径非法'}), 400
@@ -372,9 +338,10 @@ def delete_file(file_path, _user_id=None):
 # ==================== 文件夹操作 ====================
 
 @wiki_bp.route('/folders', methods=['POST'])
+@login_required
 @_require_wiki_permission('edit')
-def create_folder(_user_id=None):
-    usr_id = _user_id
+def create_folder():
+    usr_id = g.user_id
     data = request.get_json()
     name = (data.get('name') or '').strip()
     parent = (data.get('parent') or '').strip()
@@ -399,9 +366,10 @@ def create_folder(_user_id=None):
 
 
 @wiki_bp.route('/folders/<path:folder_path>', methods=['DELETE'])
+@login_required
 @_require_wiki_permission('edit')
-def delete_folder(folder_path, _user_id=None):
-    usr_id = _user_id
+def delete_folder(folder_path):
+    usr_id = g.user_id
     kb_root, full_path = validate_file_path(usr_id, folder_path)
     if full_path is None:
         return jsonify({'success': False, 'message': '路径非法'}), 400
@@ -421,9 +389,10 @@ def delete_folder(folder_path, _user_id=None):
 # ==================== 搜索 ====================
 
 @wiki_bp.route('/search', methods=['GET'])
+@login_required
 @_require_wiki_permission('view')
-def search_files(_user_id=None):
-    usr_id = _user_id
+def search_files():
+    usr_id = g.user_id
     q = request.args.get('q', '').strip()
 
     if not q:
@@ -436,10 +405,11 @@ def search_files(_user_id=None):
 # ==================== Agent 上下文（预留） ====================
 
 @wiki_bp.route('/agent/context', methods=['POST'])
+@login_required
 @_require_wiki_permission('view')
-def agent_context(_user_id=None):
+def agent_context():
     try:
-        usr_id = _user_id
+        usr_id = g.user_id
         data = request.get_json() or {}
         query = (data.get('query') or '').strip()
         max_chars = data.get('max_chars', 4000)
@@ -713,10 +683,11 @@ def _build_chat_url(base_url):
 
 
 @wiki_bp.route('/llm-config', methods=['GET'])
+@login_required
 @_require_wiki_permission('view')
-def get_llm_config_route(_user_id=None):
+def get_llm_config_route():
     from .config import get_llm_config, _mask_api_key
-    cfg = get_llm_config(_user_id)
+    cfg = get_llm_config(g.user_id)
     masked = dict(cfg)
     if masked.get('api_key'):
         masked['api_key'] = _mask_api_key(masked['api_key'])
@@ -724,26 +695,27 @@ def get_llm_config_route(_user_id=None):
 
 
 @wiki_bp.route('/llm-config', methods=['PUT'])
+@login_required
 @_require_wiki_permission('manage')
-def update_llm_config_route(_user_id=None):
+def update_llm_config_route():
     from .config import save_llm_config, get_llm_config
     data = request.get_json() or {}
     llm_cfg = data.get('llm', {})
 
     api_key = llm_cfg.get('api_key', '')
     if not api_key or '****' in api_key:
-        current = get_llm_config(_user_id)
+        current = get_llm_config(g.user_id)
         existing = current.get('api_key', '')
         llm_cfg['api_key'] = existing
 
-    ok = save_llm_config(llm_cfg, _user_id)
+    ok = save_llm_config(llm_cfg, g.user_id)
     if ok:
         return jsonify({'success': True, 'message': 'LLM 配置已保存'}), 200
     return jsonify({'success': False, 'message': '保存配置失败'}), 200
 
 
 @wiki_bp.route('/llm-providers', methods=['GET'])
-def get_llm_providers(_user_id=None):
+def get_llm_providers():
     return jsonify({'success': True, 'providers': LLM_PROVIDERS})
 
 
@@ -809,14 +781,15 @@ def get_llm_models():
 
 
 @wiki_bp.route('/llm-test', methods=['POST'])
+@login_required
 @_require_wiki_permission('view')
-def test_llm_connection(_user_id=None):
+def test_llm_connection():
     """测试 LLM 连接：验证网络 → 验证 API Key → 验证模型名称 → 发送测试消息"""
     data = request.get_json() or {}
     test_cfg = data.get('llm', {})
 
     from .config import get_llm_config
-    current = dict(get_llm_config(_user_id))
+    current = dict(get_llm_config(g.user_id))
     for k in ('api_key', 'base_url', 'model'):
         if k in test_cfg and test_cfg[k]:
             if '****' not in test_cfg[k]:

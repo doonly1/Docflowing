@@ -1634,7 +1634,8 @@ window.confirmKbSelection = function() {
 
     closeKbSelector();
 
-    if (currentTool) loadFileList(workdirInput.value, currentTool);
+    var workdirInput = document.getElementById('workdir');
+    if (currentTool && workdirInput) loadFileList(workdirInput.value, currentTool);
 };
 
 // ==================== 修改密码 ====================
