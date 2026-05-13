@@ -9,7 +9,6 @@ services:
     environment:
       - PORT=5000
       - LOG_LEVEL=INFO
-      - DOCPROC_ADMIN=${DOCPROC_ADMIN:-}
     volumes:
       - docproc_workspaces:/app/workspaces
     restart: unless-stopped
