@@ -1,0 +1,435 @@
+"""
+FB 文件库同步 - 文件转换器模块
+
+支持将 doc/docx/pdf/pptx/xlsx/xls/md/txt 转换为 Markdown 格式
+使用 MarkItDown 内部转换器（跳过 magika/onnxruntime），保持高质量同时降低内存
+"""
+
+import os
+import re
+import time
+from abc import ABC, abstractmethod
+from typing import Optional, Dict
+from pathlib import Path
+from dataclasses import dataclass
+
+
+MARKITDOWN_EXTENSIONS = {'.pdf', '.docx', '.pptx', '.xlsx', '.xls'}
+
+
+@dataclass(kw_only=True, frozen=True)
+class _StreamInfo:
+    """轻量 StreamInfo，替代 markitdown._stream_info.StreamInfo，避免触发 magika 导入"""
+    mimetype: Optional[str] = None
+    extension: Optional[str] = None
+    charset: Optional[str] = None
+    filename: Optional[str] = None
+    local_path: Optional[str] = None
+    url: Optional[str] = None
+
+
+class BaseConverter(ABC):
+    """文件转换器基类"""
+
+    @property
+    @abstractmethod
+    def file_type(self) -> str:
+        """文件类型标识"""
+        pass
+
+    @abstractmethod
+    def can_convert(self, file_path: str) -> bool:
+        """判断是否能转换此文件"""
+        pass
+
+    @abstractmethod
+    def convert(self, source_path: str) -> Optional[str]:
+        """转换文件，返回 Markdown 内容，失败返回 None"""
+        pass
+
+    def get_metadata(self, file_path: str) -> dict:
+        """获取文件元数据"""
+        stat = os.stat(file_path)
+        return {
+            "source_type": self.file_type,
+            "source_size": stat.st_size,
+            "source_mtime": stat.st_mtime,
+            "converted_at": time.time()
+        }
+
+    def build_frontmatter(self, metadata: dict, relative_path: str, filebase_id: str) -> str:
+        """构建 Markdown frontmatter"""
+        fm_lines = ["---"]
+        fm_lines.append(f"source_file: {relative_path}")
+        fm_lines.append(f"source_type: {metadata.get('source_type', 'unknown')}")
+        fm_lines.append(f"source_size: {metadata.get('source_size', 0)}")
+        fm_lines.append(f"source_mtime: {metadata.get('source_mtime', 0)}")
+        fm_lines.append(f"filebase_id: {filebase_id}")
+        fm_lines.append(f"synced_at: {metadata.get('converted_at', time.time())}")
+        fm_lines.append("---")
+        fm_lines.append("")
+        return "\n".join(fm_lines)
+
+
+class MarkItDownConverter(BaseConverter):
+    """
+    使用 MarkItDown 内部转换器（按扩展名直调，跳过 magika/onnxruntime）
+
+    按需加载单个转换器，避免全量 MarkItDown 引擎带来的 ~57 MB 内存开销
+    以及每文件 ML 推理延迟
+    """
+
+    _converter_cache: Dict[str, object] = {}
+
+    _EXTENSION_MAP = {
+        '.pdf':  ('markitdown.converters._pdf_converter', 'PdfConverter'),
+        '.docx': ('markitdown.converters._docx_converter', 'DocxConverter'),
+        '.pptx': ('markitdown.converters._pptx_converter', 'PptxConverter'),
+        '.xlsx': ('markitdown.converters._xlsx_converter', 'XlsxConverter'),
+        '.xls':  ('markitdown.converters._xlsx_converter', 'XlsConverter'),
+    }
+
+    @property
+    def file_type(self) -> str:
+        return "markitdown"
+
+    def can_convert(self, file_path: str) -> bool:
+        ext = os.path.splitext(file_path)[1].lower()
+        return ext in MARKITDOWN_EXTENSIONS
+
+    def _get_converter(self, ext: str):
+        if ext not in self._converter_cache:
+            module_path, class_name = self._EXTENSION_MAP[ext]
+            import importlib
+            module = importlib.import_module(module_path)
+            cls = getattr(module, class_name)
+            self._converter_cache[ext] = cls()
+        return self._converter_cache[ext]
+
+    def convert(self, source_path: str) -> Optional[str]:
+        try:
+            ext = os.path.splitext(source_path)[1].lower()
+            converter = self._get_converter(ext)
+
+            with open(source_path, 'rb') as f:
+                stream_info = _StreamInfo(extension=ext)
+                result = converter.convert(f, stream_info=stream_info)
+
+            return result.markdown if result else None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                f"MarkItDown conversion failed: {source_path}, error: {e}"
+            )
+            return None
+
+    def get_metadata(self, file_path: str) -> dict:
+        meta = super().get_metadata(file_path)
+        ext = os.path.splitext(file_path)[1].lower()
+        meta["source_type"] = ext.lstrip('.')
+        return meta
+
+
+class DOCXConverter(BaseConverter):
+    """DOCX 文件转换器（MarkItDown 不可用时的备用方案）"""
+
+    @property
+    def file_type(self) -> str:
+        return "docx"
+
+    def can_convert(self, file_path: str) -> bool:
+        return file_path.lower().endswith('.docx')
+
+    def convert(self, source_path: str) -> Optional[str]:
+        try:
+            from docx import Document
+            doc = Document(source_path)
+
+            lines = []
+            for para in doc.paragraphs:
+                text = para.text.strip()
+                if not text:
+                    continue
+
+                style_name = para.style.name if para.style else ""
+
+                if "Heading" in style_name:
+                    level = self._extract_heading_level(style_name)
+                    lines.append(f"{'#' * level} {text}")
+                elif para.runs and para.runs[0].bold:
+                    lines.append(f"**{text}**")
+                else:
+                    lines.append(text)
+
+            for table in doc.tables:
+                lines.append(self._convert_table(table))
+
+            return "\n\n".join(lines)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"DOCX conversion failed: {source_path}, error: {e}")
+            return None
+
+    def _extract_heading_level(self, style_name: str) -> int:
+        """从样式名提取标题级别"""
+        match = re.search(r'\d+', style_name)
+        if match:
+            return min(int(match.group()), 6)
+        return 1
+
+    def _convert_table(self, table) -> str:
+        """将表格转换为 Markdown 格式"""
+        rows = []
+        for i, row in enumerate(table.rows):
+            cells = [cell.text.strip() for cell in row.cells]
+            rows.append("| " + " | ".join(cells) + " |")
+            if i == 0:
+                rows.append("| " + " | ".join(["---"] * len(cells)) + " |")
+        return "\n".join(rows)
+
+
+class DOCConverter(BaseConverter):
+    """DOC 文件转换器（先转 DOCX，再提取文本）"""
+
+    @property
+    def file_type(self) -> str:
+        return "doc"
+
+    def can_convert(self, file_path: str) -> bool:
+        return file_path.lower().endswith('.doc')
+
+    def _ensure_com_init(self):
+        """确保 COM 在当前线程中已初始化（win32com 需要）"""
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except ImportError:
+            pass
+
+    def _convert_via_docx(self, source_path: str) -> Optional[str]:
+        """通过 doc→docx→md 路径转换"""
+        try:
+            from tools.doc_process import doc_to_docx
+            workdir = os.path.dirname(source_path)
+            doc_to_docx(workdir)
+
+            basename = os.path.splitext(os.path.basename(source_path))[0]
+            docx_path = os.path.join(workdir, basename + '.docx')
+
+            if os.path.exists(docx_path):
+                docx_converter = MarkItDownConverter()
+                content = docx_converter.convert(docx_path)
+                if content is None:
+                    docx_converter = DOCXConverter()
+                    content = docx_converter.convert(docx_path)
+                try:
+                    os.remove(docx_path)
+                except:
+                    pass
+                return content
+            return None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f"doc→docx conversion failed: {source_path}, error: {e}"
+            )
+            return None
+
+    def _extract_text_binary(self, source_path: str) -> Optional[str]:
+        """直接从 .doc 二进制文件中提取文本（无需 Word/LibreOffice）"""
+        try:
+            with open(source_path, 'rb') as f:
+                raw = f.read()
+
+            lines = []
+            buf = []
+            i = 0
+            while i + 1 < len(raw):
+                hi, lo = raw[i + 1], raw[i]
+                cp = hi * 256 + lo
+
+                if 0x20 <= cp <= 0x7E or 0x4E00 <= cp <= 0x9FFF or cp in (
+                    0x3001, 0x3002, 0xFF0C, 0xFF1A, 0xFF1B,
+                    0x2018, 0x2019, 0x201C, 0x201D, 0x2014, 0x2013,
+                    0xFF08, 0xFF09, 0x300A, 0x300B, 0x3010, 0x3011,
+                    0x300C, 0x300D, 0x300E, 0x300F,
+                    0x00B7, 0x2026,
+                ):
+                    buf.append(chr(cp))
+                else:
+                    if buf:
+                        text = ''.join(buf).strip()
+                        if len(text) >= 2:
+                            lines.append(text)
+                        buf = []
+                i += 2
+
+            if buf:
+                text = ''.join(buf).strip()
+                if len(text) >= 2:
+                    lines.append(text)
+
+            return '\n'.join(lines) if lines else None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f"binary text extraction failed: {source_path}, error: {e}"
+            )
+            return None
+
+    def convert(self, source_path: str) -> Optional[str]:
+        self._ensure_com_init()
+
+        content = self._convert_via_docx(source_path)
+        if content:
+            return content
+
+        content = self._extract_text_binary(source_path)
+        if content:
+            return content
+
+        import logging
+        logging.getLogger(__name__).warning(
+            f"无法转换 .doc 文件，请安装 Microsoft Word 或 LibreOffice: {source_path}"
+        )
+        return None
+
+
+class PDFConverter(BaseConverter):
+    """PDF 文件转换器（MarkItDown 不可用时的备用方案）"""
+
+    @property
+    def file_type(self) -> str:
+        return "pdf"
+
+    def can_convert(self, file_path: str) -> bool:
+        return file_path.lower().endswith('.pdf')
+
+    def convert(self, source_path: str) -> Optional[str]:
+        try:
+            import pdfplumber
+
+            all_text = []
+            with pdfplumber.open(source_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    text = page.extract_text()
+                    if text:
+                        text = self._clean_pdf_text(text)
+                        all_text.append(f"## 第 {page_num} 页\n\n{text}")
+
+            return "\n\n".join(all_text) if all_text else None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"PDF conversion failed: {source_path}, error: {e}")
+            return None
+
+    def _clean_pdf_text(self, text: str) -> str:
+        """清理 PDF 提取的文本"""
+        lines = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+
+            if re.match(r'^-?\d+-?$', line):
+                continue
+            if re.match(r'^第\s*\d+\s*页$', line):
+                continue
+            if line.isdigit() and len(line) <= 3:
+                continue
+            if '版权所有' in line or '翻印必究' in line:
+                continue
+
+            lines.append(line)
+
+        return '\n'.join(lines)
+
+
+class MDConverter(BaseConverter):
+    """Markdown 文件转换器"""
+
+    @property
+    def file_type(self) -> str:
+        return "md"
+
+    def can_convert(self, file_path: str) -> bool:
+        return file_path.lower().endswith('.md')
+
+    def convert(self, source_path: str) -> Optional[str]:
+        try:
+            encodings = ['utf-8', 'gbk', 'gb2312']
+            for encoding in encodings:
+                try:
+                    with open(source_path, 'r', encoding=encoding) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+            return None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"MD conversion failed: {source_path}, error: {e}")
+            return None
+
+
+class TXTConverter(BaseConverter):
+    """TXT 文件转换器"""
+
+    @property
+    def file_type(self) -> str:
+        return "txt"
+
+    def can_convert(self, file_path: str) -> bool:
+        return file_path.lower().endswith('.txt')
+
+    def convert(self, source_path: str) -> Optional[str]:
+        try:
+            encodings = ['utf-8', 'gbk', 'gb2312']
+            for encoding in encodings:
+                try:
+                    with open(source_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        return content.strip()
+                except UnicodeDecodeError:
+                    continue
+            return None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"TXT conversion failed: {source_path}, error: {e}")
+            return None
+
+
+CONVERTERS = {}
+
+for ext in MARKITDOWN_EXTENSIONS:
+    CONVERTERS[ext] = MarkItDownConverter()
+
+CONVERTERS['.doc'] = DOCConverter()
+CONVERTERS['.md'] = MDConverter()
+CONVERTERS['.txt'] = TXTConverter()
+
+
+def get_converter(file_path: str) -> Optional[BaseConverter]:
+    """根据文件路径获取对应的转换器"""
+    ext = os.path.splitext(file_path)[1].lower()
+    return CONVERTERS.get(ext)
+
+
+def can_convert(file_path: str) -> bool:
+    """判断文件是否可转换"""
+    return get_converter(file_path) is not None
+
+
+def convert_file(source_path: str, relative_path: str, filebase_id: str) -> Optional[str]:
+    """转换文件，返回带有 frontmatter 的 Markdown"""
+    converter = get_converter(source_path)
+    if not converter:
+        return None
+
+    content = converter.convert(source_path)
+    if not content:
+        return None
+
+    metadata = converter.get_metadata(source_path)
+    frontmatter = converter.build_frontmatter(metadata, relative_path, filebase_id)
+
+    return frontmatter + content

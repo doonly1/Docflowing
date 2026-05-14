@@ -30,4 +30,5 @@ ALL_TABLES = [
 MIGRATIONS = [
     "ALTER TABLE knowledge_bases ADD COLUMN kb_type TEXT NOT NULL DEFAULT 'upload'",
     "ALTER TABLE knowledge_bases ADD COLUMN local_path TEXT DEFAULT ''",
+    "ALTER TABLE knowledge_bases ADD COLUMN sync_to_kb INTEGER NOT NULL DEFAULT 0",
 ]

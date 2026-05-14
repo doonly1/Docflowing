@@ -5,8 +5,8 @@ import json
 import shutil
 import tempfile
 
-from flask import Blueprint, request, jsonify, Response
-from server.auth import _login_required, update_user_activity
+from flask import Blueprint, request, jsonify, Response, g
+from server.auth import login_required, update_user_activity
 
 workspace_bp = Blueprint('workspace', __name__)
 
@@ -52,8 +52,8 @@ def _get_tool_extensions(tool):
 # ==================== 文件列表 ====================
 
 @workspace_bp.route('/list_files', methods=['POST'])
-@_login_required
-def api_list_files(_user_id=None):
+@login_required
+def api_list_files():
     data = request.get_json()
     workdir = data.get('workdir')
     tool = data.get('tool', 'to_docx')
@@ -61,7 +61,7 @@ def api_list_files(_user_id=None):
     show_all = data.get('show_all', False)
 
     if workdir and not os.path.isabs(workdir):
-        ws_root = _get_workspace_dir(_user_id)
+        ws_root = _get_workspace_dir(g.user_id)
         workdir = os.path.join(ws_root, workdir)
         workdir = os.path.normpath(workdir)
 
@@ -113,10 +113,10 @@ def api_list_dir():
 # ==================== 文件上传 / 结果检查 / 下载 / 清理 ====================
 
 @workspace_bp.route('/upload_files', methods=['POST', 'OPTIONS'])
-@_login_required
-def api_upload_files(_user_id=None):
-    _update_workspace_activity(_user_id)
-    workdir = _get_workspace_workdir(_user_id)
+@login_required
+def api_upload_files():
+    _update_workspace_activity(g.user_id)
+    workdir = _get_workspace_workdir(g.user_id)
 
     tool = request.form.get('tool', 'to_docx')
     extensions = _get_tool_extensions(tool)
@@ -177,11 +177,11 @@ def api_upload_files(_user_id=None):
     })
 
 @workspace_bp.route('/check_results', methods=['POST'])
-@_login_required
-def api_check_results(_user_id=None):
+@login_required
+def api_check_results():
     data = request.get_json()
-    _update_workspace_activity(_user_id)
-    workdir = _get_workspace_workdir(_user_id)
+    _update_workspace_activity(g.user_id)
+    workdir = _get_workspace_workdir(g.user_id)
 
     if not os.path.exists(workdir):
         return jsonify({'success': True, 'files': [], 'count': 0})
@@ -204,8 +204,8 @@ def api_check_results(_user_id=None):
         return jsonify({'success': False, 'message': str(e)})
 
 @workspace_bp.route('/download_results', methods=['POST'])
-@_login_required
-def api_download_results(_user_id=None):
+@login_required
+def api_download_results():
     import zipfile, io
     from flask import send_file
 
@@ -214,11 +214,11 @@ def api_download_results(_user_id=None):
     workdir_param = data.get('workdir')
 
     if workdir_param and not os.path.isabs(workdir_param):
-        ws_root = _get_workspace_dir(_user_id)
+        ws_root = _get_workspace_dir(g.user_id)
         workdir = os.path.normpath(os.path.join(ws_root, workdir_param))
     else:
-        _update_workspace_activity(_user_id)
-        workdir = _get_workspace_workdir(_user_id)
+        _update_workspace_activity(g.user_id)
+        workdir = _get_workspace_workdir(g.user_id)
 
     if not os.path.exists(workdir) or not os.listdir(workdir):
         return jsonify({'success': False, 'message': '无文件可供下载'})
@@ -244,16 +244,16 @@ def api_download_results(_user_id=None):
         return jsonify({'success': False, 'message': f'打包失败: {str(e)}'})
 
 @workspace_bp.route('/clear_workspace', methods=['POST'])
-@_login_required
-def api_clear_workspace(_user_id=None):
+@login_required
+def api_clear_workspace():
     data = request.get_json() or {}
     workdir_param = data.get('workdir')
 
     if workdir_param and not os.path.isabs(workdir_param):
-        ws_root = _get_workspace_dir(_user_id)
+        ws_root = _get_workspace_dir(g.user_id)
         workdir = os.path.normpath(os.path.join(ws_root, workdir_param))
     else:
-        workdir = _get_workspace_workdir(_user_id)
+        workdir = _get_workspace_workdir(g.user_id)
 
     if not os.path.exists(workdir):
         return jsonify({'success': True, 'message': '目录为空'})
@@ -273,8 +273,8 @@ def api_clear_workspace(_user_id=None):
         return jsonify({'success': False, 'message': str(e)})
 
 @workspace_bp.route('/build_index_from_metadata', methods=['POST'])
-@_login_required
-def api_build_index_from_metadata(_user_id=None):
+@login_required
+def api_build_index_from_metadata():
     from tools.to_index import build_index_from_metadata
 
     data = request.get_json()
@@ -284,8 +284,8 @@ def api_build_index_from_metadata(_user_id=None):
     if not metadata_list:
         return jsonify({'success': False, 'message': '没有文件元信息'})
 
-    _update_workspace_activity(_user_id)
-    output_dir = _get_workspace_workdir(_user_id)
+    _update_workspace_activity(g.user_id)
+    output_dir = _get_workspace_workdir(g.user_id)
 
     try:
         output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)

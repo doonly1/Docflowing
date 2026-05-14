@@ -9,7 +9,7 @@ import shutil
 import subprocess
 
 from flask import Blueprint, request, jsonify, Response, g
-from server.auth import _login_required
+from server.auth import login_required
 from server.workspace import _get_workspace_dir, _get_workspace_workdir, _update_workspace_activity
 
 runner_bp = Blueprint('runner', __name__)
@@ -26,8 +26,8 @@ TOOL_SCRIPTS = {
 
 
 @runner_bp.route('/run_tool_with_config', methods=['POST'])
-@_login_required
-def api_run_tool_with_config(_user_id=None):
+@login_required
+def api_run_tool_with_config():
     data = request.get_json()
 
     tool = data.get('tool')
@@ -40,12 +40,12 @@ def api_run_tool_with_config(_user_id=None):
         return jsonify({'success': False, 'message': '未指定工具'})
 
     if workdir and not os.path.isabs(workdir):
-        ws_root = _get_workspace_dir(_user_id)
+        ws_root = _get_workspace_dir(g.user_id)
         workdir = os.path.normpath(os.path.join(ws_root, workdir))
 
-    if not workdir and (token or _user_id):
-        _update_workspace_activity(_user_id)
-        workdir = _get_workspace_workdir(_user_id)
+    if not workdir and (token or g.user_id):
+        _update_workspace_activity(g.user_id)
+        workdir = _get_workspace_workdir(g.user_id)
 
     if not workdir:
         return jsonify({'success': False, 'message': '未指定工作目录'})

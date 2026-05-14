@@ -12,7 +12,7 @@ import json
 from flask import Blueprint, request, jsonify, send_file, Response, g
 from functools import wraps
 
-from server.auth import login_required, admin_required
+from server.auth import login_required, admin_required, _get_auth_data_dir
 from fb.database import get_db, get_visible_kb_ids, get_user_role
 
 kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -1074,6 +1074,126 @@ def download_local_file(kb_id):
         return jsonify({'success': False, 'message': '文件不存在'})
 
     return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+
+
+# ==================== KB 同步管理 ====================
+
+@kb_bp.route('/<kb_id>/sync', methods=['POST'])
+@login_required
+@_require_kb_permission('manage')
+def toggle_sync(kb_id):
+    """切换文件库同步状态"""
+    data = request.get_json() or {}
+    enabled = bool(data.get('enabled', False))
+
+    db = get_db()
+    kb_row = db.execute("SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'}), 404
+
+    if kb_row['owner_id'] != g.user_id:
+        return jsonify({'success': False, 'message': '只有文件库所有者可以管理同步'}), 403
+
+    db.execute("UPDATE knowledge_bases SET sync_to_kb = ? WHERE id = ?", (1 if enabled else 0, kb_id))
+    db.commit()
+
+    if enabled:
+        try:
+            from kb.sync_worker import get_sync_worker
+            worker = get_sync_worker()
+            worker.trigger_sync_now(g.user_id, kb_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to trigger sync: {e}")
+
+    return jsonify({'success': True, 'enabled': enabled})
+
+
+@kb_bp.route('/<kb_id>/sync-now', methods=['POST'])
+@login_required
+@_require_kb_permission('manage')
+def sync_now(kb_id):
+    """手动触发立即同步"""
+    db = get_db()
+    kb_row = db.execute("SELECT owner_id, sync_to_kb FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'}), 404
+
+    if kb_row['owner_id'] != g.user_id:
+        return jsonify({'success': False, 'message': '只有文件库所有者可以触发同步'}), 403
+
+    if not kb_row['sync_to_kb']:
+        return jsonify({'success': False, 'message': '请先启用同步功能'}), 400
+
+    try:
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+        worker.trigger_sync_now(g.user_id, kb_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to trigger sync: {e}")
+
+    return jsonify({'success': True, 'message': '同步已触发'})
+
+
+@kb_bp.route('/<kb_id>/sync-status', methods=['GET'])
+@login_required
+@_require_kb_permission('view')
+def get_sync_status(kb_id):
+    """获取同步状态"""
+    db = get_db()
+    kb_row = db.execute("SELECT owner_id, sync_to_kb, local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'}), 404
+
+    try:
+        from kb.sync_state import get_sync_state_manager
+        state_manager = get_sync_state_manager()
+        state = state_manager.load_state(kb_row['owner_id'], kb_id)
+
+        total_files = 0
+        if os.path.exists(kb_row['local_path']):
+            for root, dirs, files in os.walk(kb_row['local_path']):
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                files = [f for f in files if not f.startswith('.') and not f.startswith('~')]
+                total_files += len(files)
+
+        from kb.sync_converters import can_convert
+        syncable_count = 0
+        if os.path.exists(kb_row['local_path']):
+            for root, dirs, files in os.walk(kb_row['local_path']):
+                for f in files:
+                    if can_convert(os.path.join(root, f)):
+                        syncable_count += 1
+
+        return jsonify({
+            'success': True,
+            'enabled': bool(kb_row['sync_to_kb']),
+            'is_owner': kb_row['owner_id'] == g.user_id,
+            'status': {
+                'total_files': total_files,
+                'syncable_files': syncable_count,
+                'synced_files': state.synced_files,
+                'last_sync': state.last_sync
+            }
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to get sync status: {e}")
+        return jsonify({
+            'success': True,
+            'enabled': bool(kb_row['sync_to_kb']),
+            'is_owner': kb_row['owner_id'] == g.user_id,
+            'status': {
+                'total_files': 0,
+                'syncable_files': 0,
+                'synced_files': 0,
+                'last_sync': None
+            }
+        })
 
 
 TOOL_SCRIPTS = {

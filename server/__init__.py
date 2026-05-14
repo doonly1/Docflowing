@@ -83,6 +83,16 @@ def create_app():
 
     # 确保管理员用户存在（无妨多次调用）
     ensure_admin_user()
+
+    # 启动 FB 同步后台线程
+    try:
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+        worker.start()
+        logger.info("FB Sync worker started")
+    except Exception as e:
+        logger.warning(f"Failed to start FB sync worker: {e}")
+
     logger.info("App created successfully")
 
     return app

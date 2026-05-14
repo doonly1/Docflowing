@@ -8,8 +8,8 @@ import os
 import yaml
 import shutil
 
-from flask import Blueprint, request, jsonify
-from server.auth import _login_required
+from flask import Blueprint, request, jsonify, g
+from server.auth import login_required
 from server.workspace import _get_workspace_dir
 
 settings_bp = Blueprint('settings', __name__)
@@ -64,10 +64,10 @@ def ensure_user_config(user_id):
 # ==================== 配置 API ====================
 
 @settings_bp.route('/get_config', methods=['POST'])
-@_login_required
-def api_get_config(_user_id=None):
+@login_required
+def api_get_config():
     data = request.get_json() if request.is_json else {}
-    config_path = ensure_user_config(_user_id)
+    config_path = ensure_user_config(g.user_id)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
@@ -76,15 +76,15 @@ def api_get_config(_user_id=None):
         return jsonify({'success': False, 'message': f'读取配置失败: {str(e)}'})
 
 @settings_bp.route('/save_config', methods=['POST'])
-@_login_required
-def api_save_config(_user_id=None):
+@login_required
+def api_save_config():
     data = request.get_json()
     config = data.get('config')
 
     if not config:
         return jsonify({'success': False, 'message': '配置不能为空'})
 
-    config_path = ensure_user_config(_user_id)
+    config_path = ensure_user_config(g.user_id)
     try:
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
@@ -93,12 +93,12 @@ def api_save_config(_user_id=None):
         return jsonify({'success': False, 'message': f'保存配置失败: {str(e)}'})
 
 @settings_bp.route('/save_workdir', methods=['POST'])
-@_login_required
-def api_save_workdir(_user_id=None):
+@login_required
+def api_save_workdir():
     data = request.get_json()
     workdir = data.get('workdir')
 
-    config_path = ensure_user_config(_user_id)
+    config_path = ensure_user_config(g.user_id)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}

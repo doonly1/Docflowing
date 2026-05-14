@@ -152,16 +152,44 @@ var KnowledgeBase = {
                 html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-type="' + (kb.kb_type || 'local') + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
+                html += '<div class="kb-card-sync-status" id="sync-status-' + kb.id + '" data-kb-id="' + kb.id + '"></div>';
                 html += '</div>';
             }
             html += '</div>';
             grid.innerHTML = html;
+
+            // 加载所有文件库的同步状态
+            for (var i = 0; i < kbs.length; i++) {
+                this._loadSyncStatus(kbs[i].id);
+            }
         } catch (e) {
             console.error('renderKbList error:', e);
             var grid = document.getElementById('kb-grid-container');
             if (grid) {
                 grid.innerHTML = '<div class="kb-empty">刷新出错: ' + e.message + '</div>';
             }
+        }
+    },
+
+    _loadSyncStatus: async function(kbId) {
+        try {
+            var res = await this.api('/api/fb/' + kbId + '/sync-status', 'GET');
+            var statusEl = document.getElementById('sync-status-' + kbId);
+            if (!statusEl || !res.success) return;
+
+            var status = res.status || {};
+            var total = status.total_files || 0;
+            var syncable = status.syncable_files || 0;
+            var synced = status.synced_files || 0;
+
+            var display = '文件数: ' + total;
+            if (res.enabled) {
+                display = '文件数: ' + total + ' | 同步: ' + total + '/' + syncable + '/' + synced;
+            }
+
+            statusEl.innerHTML = '<small style="color:#666;font-size:11px;">' + display + '</small>';
+        } catch (e) {
+            console.warn('Failed to load sync status for ' + kbId, e);
         }
     },
 
@@ -266,12 +294,51 @@ var KnowledgeBase = {
         var h = '';
         if (permission === 'manage') {
             h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
+            h += '<div class="kb-menu-divider"></div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到 KB</div>';
+            h += '<div class="kb-menu-item" onclick="KnowledgeBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
+            h += '<div class="kb-menu-divider"></div>';
             h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
             h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
             h += '<div class="kb-menu-divider"></div>';
             h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon">🗑️</span> 删除</div>';
         }
         return h;
+    },
+
+    toggleSync: async function(kbId) {
+        this.hideContextMenu();
+        try {
+            var res = await this.api('/api/fb/' + kbId + '/sync-status', 'GET');
+            if (!res.success) {
+                alert('获取同步状态失败');
+                return;
+            }
+
+            var newEnabled = !res.enabled;
+            var res2 = await this.api('/api/fb/' + kbId + '/sync', 'POST', { enabled: newEnabled });
+            if (res2.success) {
+                await this._loadSyncStatus(kbId);
+            } else {
+                alert(res2.message || '操作失败');
+            }
+        } catch (e) {
+            alert('操作失败: ' + e.message);
+        }
+    },
+
+    syncNow: async function(kbId) {
+        this.hideContextMenu();
+        try {
+            var res = await this.api('/api/fb/' + kbId + '/sync-now', 'POST');
+            if (res.success) {
+                alert('同步已触发');
+            } else {
+                alert(res.message || '同步失败');
+            }
+        } catch (e) {
+            alert('同步失败: ' + e.message);
+        }
     },
 
     kbListManage: function(kbId) {
