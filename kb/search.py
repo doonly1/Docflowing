@@ -5,7 +5,7 @@ def search_wiki(usr_id, query):
     if not query or not query.strip():
         return []
 
-    conn = get_db()
+    conn = get_db(usr_id)
     search_terms = query.strip().split()
     fts_query = ' OR '.join(search_terms)
 

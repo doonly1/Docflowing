@@ -1,18 +1,15 @@
 """
 FB 文件库同步 - 同步状态管理器
 
-管理同步状态文件 _sync_state.json
+管理同步状态，存储于数据库 filebase_sync_states 表中
 """
 
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +113,7 @@ class SyncState:
 
 
 class SyncStateManager:
-    """同步状态管理器"""
+    """同步状态管理器（数据库存储）"""
 
     _instance = None
     _lock = threading.Lock()
@@ -134,74 +131,69 @@ class SyncStateManager:
             return
         self._initialized = True
         self._cache: Dict[str, SyncState] = {}
-        self._file_locks: Dict[str, threading.Lock] = {}
-        self._state_dir_cache: Dict[str, str] = {}
+        self._cache_lock = threading.Lock()
 
-    def _get_state_lock(self, filebase_id: str) -> threading.Lock:
-        """获取文件库的锁"""
-        if filebase_id not in self._file_locks:
-            with self._lock:
-                if filebase_id not in self._file_locks:
-                    self._file_locks[filebase_id] = threading.Lock()
-        return self._file_locks[filebase_id]
+    def _cache_key(self, user_id: str, filebase_id: str) -> str:
+        return f"{user_id}:{filebase_id}"
 
-    def _create_temp_file(self, target_path: str):
-        """创建临时文件用于原子写入"""
-        state_dir = os.path.dirname(target_path)
-        os.makedirs(state_dir, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=state_dir, suffix='.tmp', prefix='.sync_')
-        return fd, tmp_path
-
-    def _get_state_file_path(self, user_id: str, filebase_id: str) -> str:
-        """获取状态文件路径（不创建目录）"""
-        if filebase_id not in self._state_dir_cache:
-            from server.workspace import _get_workspace_dir
-            kb_dir = os.path.join(_get_workspace_dir(user_id), 'kb', 'imported', filebase_id)
-            self._state_dir_cache[filebase_id] = kb_dir
-
-        state_dir = self._state_dir_cache[filebase_id]
-        return os.path.join(state_dir, '_sync_state.json')
+    def _get_db(self):
+        from fb.database import get_db
+        return get_db()
 
     def load_state(self, user_id: str, filebase_id: str) -> SyncState:
-        """加载同步状态"""
-        cache_key = f"{user_id}:{filebase_id}"
+        """从数据库加载同步状态"""
+        cache_key = self._cache_key(user_id, filebase_id)
 
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        with self._cache_lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
 
-        state_file = self._get_state_file_path(user_id, filebase_id)
+        try:
+            db = self._get_db()
+            row = db.execute(
+                "SELECT state_json FROM filebase_sync_states WHERE filebase_id = ? AND user_id = ?",
+                (filebase_id, user_id)
+            ).fetchone()
 
-        if os.path.exists(state_file):
-            try:
-                with open(state_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+            if row:
+                data = json.loads(row['state_json'])
                 state = SyncState.from_dict(data)
-            except Exception as e:
-                logger.warning(f"Failed to load sync state from {state_file}: {e}")
+            else:
                 state = SyncState(filebase_id=filebase_id)
-        else:
-            state = SyncState(filebase_id=filebase_id)
 
-        self._cache[cache_key] = state
-        return state
+            with self._cache_lock:
+                self._cache[cache_key] = state
+            return state
+
+        except Exception as e:
+            logger.warning(f"Failed to load sync state for {filebase_id}: {e}")
+            state = SyncState(filebase_id=filebase_id)
+            with self._cache_lock:
+                self._cache[cache_key] = state
+            return state
 
     def save_state(self, user_id: str, filebase_id: str, state: SyncState):
-        """保存同步状态"""
-        cache_key = f"{user_id}:{filebase_id}"
+        """保存同步状态到数据库"""
+        cache_key = self._cache_key(user_id, filebase_id)
         state.last_sync = time.time()
 
         try:
-            state_file = self._get_state_file_path(user_id, filebase_id)
-            os.makedirs(os.path.dirname(state_file), exist_ok=True)
-            fd, tmp_path = self._create_temp_file(state_file)
+            db = self._get_db()
+            state_json = json.dumps(state.to_dict(), ensure_ascii=False, indent=2)
+            db.execute(
+                """
+                INSERT INTO filebase_sync_states (filebase_id, user_id, state_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(filebase_id, user_id) DO UPDATE SET
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+                """,
+                (filebase_id, user_id, state_json, state.last_sync)
+            )
+            db.commit()
 
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-
-            os.replace(tmp_path, state_file)
-            self._cache[cache_key] = state
+            with self._cache_lock:
+                self._cache[cache_key] = state
 
         except Exception as e:
             logger.error(f"Failed to save sync state for {filebase_id}: {e}")
@@ -212,6 +204,10 @@ class SyncStateManager:
         """更新单个文件的同步状态"""
         state = self.load_state(user_id, filebase_id)
 
+        existing_retry = 0
+        if file_path in state.files:
+            existing_retry = state.files[file_path].retry_count
+
         file_state = FileSyncState(
             source=file_path,
             source_mtime=source_mtime,
@@ -221,10 +217,13 @@ class SyncStateManager:
         )
 
         if error:
-            file_state.retry_count = state.files.get(file_path, FileSyncState(source=file_path, source_mtime=source_mtime)).retry_count + 1
+            file_state.retry_count = existing_retry + 1
             file_state.last_retry = time.time()
 
             if file_state.retry_count <= 3:
+                state.failed_files = [
+                    f for f in state.failed_files if f.get("path") != file_path
+                ]
                 state.failed_files.append({
                     "path": file_path,
                     "reason": error,
@@ -247,23 +246,28 @@ class SyncStateManager:
 
     def invalidate_cache(self, user_id: str, filebase_id: str):
         """使缓存失效"""
-        cache_key = f"{user_id}:{filebase_id}"
-        if cache_key in self._cache:
-            del self._cache[cache_key]
+        cache_key = self._cache_key(user_id, filebase_id)
+        with self._cache_lock:
+            if cache_key in self._cache:
+                del self._cache[cache_key]
 
     def clear_all_state(self, user_id: str, filebase_id: str):
-        """清除所有状态（包括状态文件和缓存）"""
-        cache_key = f"{user_id}:{filebase_id}"
+        """清除所有状态（包括数据库记录和缓存）"""
+        cache_key = self._cache_key(user_id, filebase_id)
 
-        if cache_key in self._cache:
-            del self._cache[cache_key]
+        with self._cache_lock:
+            if cache_key in self._cache:
+                del self._cache[cache_key]
 
-        state_file = self._get_state_file_path(user_id, filebase_id)
-        if os.path.exists(state_file):
-            try:
-                os.remove(state_file)
-            except Exception as e:
-                logger.error(f"Failed to remove state file {state_file}: {e}")
+        try:
+            db = self._get_db()
+            db.execute(
+                "DELETE FROM filebase_sync_states WHERE filebase_id = ? AND user_id = ?",
+                (filebase_id, user_id)
+            )
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to clear sync state for {filebase_id}: {e}")
 
 
 _sync_state_manager = None

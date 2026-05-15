@@ -197,12 +197,14 @@ def call_llm_with_tools(
     temperature: float = None,
     max_tokens: int = None,
     user_id: str = None,
+    interrupt_event=None,
 ) -> Dict[str, Any]:
     result = {
         "content": "",
         "tool_calls_made": [],
         "tool_results": [],
         "error": None,
+        "interrupted": False,
     }
 
     if not is_llm_available(user_id):
@@ -229,6 +231,12 @@ def call_llm_with_tools(
         return result
 
     for round_idx in range(max_tool_rounds + 1):
+        if interrupt_event and interrupt_event.is_set():
+            logger.info("LLM 调用被用户中断 (round %d)", round_idx)
+            result["interrupted"] = True
+            result["content"] = messages[-1].get("content", "") if messages else ""
+            return result
+
         payload = {
             "model": model,
             "messages": messages,
@@ -277,6 +285,12 @@ def call_llm_with_tools(
         messages.append(msg)
 
         for tc in tool_calls:
+            if interrupt_event and interrupt_event.is_set():
+                logger.info("工具执行被用户中断 (round %d)", round_idx)
+                result["interrupted"] = True
+                result["content"] = messages[-1].get("content", "") if messages else ""
+                return result
+
             tc_id = tc.get("id", "")
             fn = tc.get("function", {})
             tool_name = fn.get("name", "")

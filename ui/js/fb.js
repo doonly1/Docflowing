@@ -149,7 +149,7 @@ var KnowledgeBase = {
             var html = '<div class="kb-grid">';
             for (var i = 0; i < kbs.length; i++) {
                 var kb = kbs[i];
-                html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-type="' + (kb.kb_type || 'local') + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
+                html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-type="' + (kb.filebase_type || 'local') + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
                 html += '<div class="kb-card-sync-status" id="sync-status-' + kb.id + '" data-kb-id="' + kb.id + '"></div>';
@@ -227,7 +227,7 @@ var KnowledgeBase = {
         var self = this;
         var res = await this.api('/api/fb/create-folder', 'POST', {
             name: name,
-            kb_type: 'net',
+            filebase_type: 'net',
             network_path: networkPath
         });
         if (res.success) {
@@ -1122,9 +1122,95 @@ var KnowledgeBase = {
         var ext = relPath.split('.').pop().toLowerCase();
         if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
             this.openMarkdownEditor(relPath);
+        } else if (ext === 'docx') {
+            this.openDocxPreview(relPath);
+        } else if (ext === 'pdf') {
+            this.openPdfPreview(relPath);
+        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+            this.openImagePreview(relPath);
         } else {
             window.open('/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
         }
+    },
+    
+    openDocxPreview: async function(relPath) {
+        var self = this;
+        var fileName = relPath.split('/').pop();
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" id="kb-docx-preview-content">' +
+            '<div style="text-align: center; padding: 40px; color: #999;">' +
+            '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
+            '<div>正在加载预览...</div>' +
+            '</div>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        
+        try {
+            var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/docx-preview?path=' + encodeURIComponent(relPath), 'GET');
+            var contentEl = document.getElementById('kb-docx-preview-content');
+            if (res.success) {
+                contentEl.innerHTML = res.html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+            } else {
+                contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (res.message || '未知错误') + '</div>';
+            }
+        } catch (e) {
+            var contentEl = document.getElementById('kb-docx-preview-content');
+            contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
+        }
+    },
+    
+    _closeDocxPreview: function() {
+        var overlay = document.querySelector('.kb-docx-preview-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
+    },
+    
+    openPdfPreview: function(relPath) {
+        var fileName = relPath.split('/').pop();
+        var fileUrl = '/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" style="padding:0">' +
+            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+    },
+    
+    openImagePreview: function(relPath) {
+        var fileName = relPath.split('/').pop();
+        var fileUrl = '/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>🖼️ ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
+            '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
     },
 
     openMarkdownEditor: async function(relPath) {
@@ -1453,7 +1539,7 @@ var KnowledgeBase = {
             h += '<table class="kb-file-table"><thead><tr><th>文件库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < res.results.length; i++) {
                 var r = res.results[i];
-                if (!r.rel_path && !r.kb_type) continue;
+                if (!r.rel_path && !r.filebase_type) continue;
                 var dirPath = r.rel_path ? r.rel_path.replace(/\\/g, '/').replace(/\/[^\/]+$/, '') : '';
                 var clickAction = 'KnowledgeBase._openFromSearch(\'' + r.kb_id + '\',\'' + escapeHtmlText(r.kb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
                 var downloadUrl = '/api/fb/' + r.kb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);

@@ -109,14 +109,14 @@ def test_database_migration():
             else:
                 print(f"  迁移 {i+1}: {e}")
 
-    cursor = db.execute("PRAGMA table_info(knowledge_bases)")
+    cursor = db.execute("PRAGMA table_info(filebases)")
     columns = [row[1] for row in cursor.fetchall()]
-    print(f"  knowledge_bases 表字段: {columns}")
+    print(f"  filebases 表字段: {columns}")
 
-    if 'sync_to_kb' in columns:
-        print("  ✓ sync_to_kb 字段已存在")
+    if 'is_synced_to_kb' in columns:
+        print("  ✓ is_synced_to_kb 字段已存在")
     else:
-        print("  ✗ sync_to_kb 字段不存在")
+        print("  ✗ is_synced_to_kb 字段不存在")
 
     print()
 

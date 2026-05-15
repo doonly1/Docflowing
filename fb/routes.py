@@ -20,7 +20,7 @@ kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
 
-def _check_kb_permission(kb_id, user_id, required_level):
+def _check_kb_permission(filebase_id, user_id, required_level):
     """检查用户对指定文件库的权限"""
     if not user_id:
         return False
@@ -29,14 +29,14 @@ def _check_kb_permission(kb_id, user_id, required_level):
         return True
     db = get_db()
     row = db.execute(
-        "SELECT permission_level FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
-        (kb_id, user_id)
+        "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
+        (filebase_id, user_id)
     ).fetchone()
     if row:
         actual = PERMISSION_LEVELS.get(row['permission_level'], -1)
         return actual >= PERMISSION_LEVELS.get(required_level, 0)
     kb_row = db.execute(
-        "SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)
+        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
     ).fetchone()
     if kb_row and kb_row['owner_id'] == user_id:
         return True
@@ -55,8 +55,12 @@ def _require_kb_permission(required_level):
             if not user_id:
                 return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
-            kb_id = kwargs.get('kb_id')
-            if kb_id and not _check_kb_permission(kb_id, user_id, required_level):
+            kb_id = kwargs.pop('kb_id', None)
+            if kb_id:
+                kwargs['filebase_id'] = kb_id
+
+            filebase_id = kwargs.get('filebase_id')
+            if filebase_id and not _check_kb_permission(filebase_id, user_id, required_level):
                 return jsonify({'success': False, 'message': '权限不足'}), 403
 
             return f(*args, **kwargs)
@@ -78,7 +82,7 @@ def _get_user_workspace(user_id):
 def create_folder():
     user_id = g.user_id
     data = request.get_json()
-    kb_type = (data.get('kb_type') or 'local').strip()
+    filebase_type = (data.get('filebase_type') or 'local').strip()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'message': '文件夹名称不能为空'})
@@ -88,7 +92,7 @@ def create_folder():
         return jsonify({'success': False, 'message': '文件夹名称不能包含路径分隔符'})
 
     # 网络文件库需要管理员权限
-    if kb_type == 'net':
+    if filebase_type == 'net':
         users_path = os.path.join(_get_auth_data_dir(), 'users.json')
         users = {}
         if os.path.exists(users_path):
@@ -103,27 +107,27 @@ def create_folder():
             return jsonify({'success': False, 'message': '需要管理员权限才能创建网络文件库'}), 403
 
     db = get_db()
-    kb_id = str(uuid.uuid4())
+    filebase_id = str(uuid.uuid4())
     now = time.time()
 
-    if kb_type == 'net':
+    if filebase_type == 'net':
         network_path = (data.get('network_path') or '').strip()
         if not network_path:
             return jsonify({'success': False, 'message': '网络路径不能为空'})
 
         db.execute(
-            "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'net', ?, ?)",
-            (kb_id, name, user_id, network_path, now)
+            "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'net', ?, ?)",
+            (filebase_id, name, user_id, network_path, now)
         )
         db.execute(
-            "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-            (kb_id, user_id, 'manage')
+            "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+            (filebase_id, user_id, 'manage')
         )
         db.commit()
 
         return jsonify({
             'success': True,
-            'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'net',
+            'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'net',
                    'local_path': network_path}
         })
 
@@ -141,18 +145,18 @@ def create_folder():
     os.makedirs(local_path, exist_ok=True)
 
     db.execute(
-        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
-        (kb_id, name, user_id, local_path, now)
+        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        (filebase_id, name, user_id, local_path, now)
     )
     db.execute(
-        "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-        (kb_id, user_id, 'manage')
+        "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+        (filebase_id, user_id, 'manage')
     )
     db.commit()
 
     return jsonify({
         'success': True,
-        'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local',
+        'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local',
                'local_path': local_path}
     })
 
@@ -162,14 +166,14 @@ def create_folder():
 def copy_folder():
     user_id = g.user_id
     data = request.get_json()
-    kb_id = (data.get('kb_id') or '').strip()
+    filebase_id = (data.get('kb_id') or '').strip()
     new_name = (data.get('new_name') or '').strip()
 
-    if not kb_id or not new_name:
+    if not filebase_id or not new_name:
         return jsonify({'success': False, 'message': '参数不完整'})
 
     db = get_db()
-    kb_row = db.execute("SELECT * FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT * FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '源文件库不存在'})
 
@@ -194,21 +198,21 @@ def copy_folder():
     except Exception as e:
         return jsonify({'success': False, 'message': '复制目录失败: ' + str(e)})
 
-    new_kb_id = str(uuid.uuid4())
+    new_filebase_id = str(uuid.uuid4())
     now = time.time()
     db.execute(
-        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
-        (new_kb_id, new_name, user_id, dst_path, now)
+        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        (new_filebase_id, new_name, user_id, dst_path, now)
     )
     db.execute(
-        "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-        (new_kb_id, user_id, 'manage')
+        "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+        (new_filebase_id, user_id, 'manage')
     )
     db.commit()
 
     return jsonify({
         'success': True,
-        'kb': {'id': new_kb_id, 'name': new_name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local', 'local_path': dst_path}
+        'kb': {'id': new_filebase_id, 'name': new_name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst_path}
     })
 
 
@@ -231,14 +235,14 @@ def list_kb():
         pass
 
     db_kbs = {}
-    rows = db.execute("SELECT * FROM knowledge_bases").fetchall()
+    rows = db.execute("SELECT * FROM filebases").fetchall()
     for row in rows:
         db_kbs[row['local_path']] = row
 
     # 分别处理本地文件库和网络文件库
     local_existing_paths = set()
     for row in rows:
-        if row['kb_type'] != 'net':
+        if row['filebase_type'] != 'net':
             local_existing_paths.add(row['local_path'])
 
     fs_paths = set()
@@ -250,42 +254,42 @@ def list_kb():
         if os.path.isdir(entry_path):
             fs_paths.add(entry_path)
             if entry_path not in db_kbs:
-                kb_id = str(uuid.uuid4())
+                filebase_id = str(uuid.uuid4())
                 now = time.time()
                 db.execute(
-                    "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
-                    (kb_id, entry_name, user_id, entry_path, now)
+                    "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+                    (filebase_id, entry_name, user_id, entry_path, now)
                 )
                 db.execute(
-                    "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-                    (kb_id, user_id, 'manage')
+                    "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+                    (filebase_id, user_id, 'manage')
                 )
             else:
                 row = db_kbs[entry_path]
-                if row['kb_type'] != 'net' and row['name'] != entry_name:
-                    db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (entry_name, row['id']))
+                if row['filebase_type'] != 'net' and row['name'] != entry_name:
+                    db.execute("UPDATE filebases SET name = ? WHERE id = ?", (entry_name, row['id']))
 
     # 删除不存在于文件系统的本地文件库
     for path in local_existing_paths - fs_paths:
         row = db_kbs[path]
-        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (row['id'],))
-        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (row['id'],))
+        db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (row['id'],))
+        db.execute("DELETE FROM filebases WHERE id = ?", (row['id'],))
     db.commit()
 
     if is_admin:
-        visible_rows = db.execute("SELECT * FROM knowledge_bases").fetchall()
+        visible_rows = db.execute("SELECT * FROM filebases").fetchall()
     else:
         visible_ids = get_visible_kb_ids(user_id, False)
         visible_rows = []
-        for kb_id in visible_ids:
-            r = db.execute("SELECT * FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+        for filebase_id in visible_ids:
+            r = db.execute("SELECT * FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
             if r:
                 visible_rows.append(r)
 
     kbs = []
     for row in visible_rows:
         perm_row = db.execute(
-            "SELECT permission_level FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
+            "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
             (row['id'], user_id)
         ).fetchone()
         permission = 'manage' if row['owner_id'] == user_id or is_admin else (
@@ -317,7 +321,7 @@ def list_kb():
             'display_path': display_path,
             'created_at': row['created_at'],
             'permission': permission,
-            'kb_type': row['kb_type'] or 'local',
+            'filebase_type': row['filebase_type'] or 'local',
             'local_path': local_path
         })
 
@@ -327,23 +331,23 @@ def list_kb():
 @kb_bp.route('/<kb_id>', methods=['PUT'])
 @login_required
 @_require_kb_permission('manage')
-def rename_kb(kb_id):
+def rename_kb(filebase_id):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'message': '名称不能为空'})
 
     db = get_db()
-    kb_row = db.execute("SELECT local_path, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path, filebase_type FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
-    kb_type = kb_row['kb_type'] or 'local'
+    filebase_type = kb_row['filebase_type'] or 'local'
     old_path = kb_row['local_path']
 
     # 网络文件库：只更新数据库记录，不操作文件系统
-    if kb_type == 'net':
-        db.execute("UPDATE knowledge_bases SET name = ? WHERE id = ?", (name, kb_id))
+    if filebase_type == 'net':
+        db.execute("UPDATE filebases SET name = ? WHERE id = ?", (name, filebase_id))
         db.commit()
         return jsonify({'success': True, 'message': '重命名成功'})
 
@@ -358,7 +362,7 @@ def rename_kb(kb_id):
     except Exception as e:
         return jsonify({'success': False, 'message': '重命名目录失败: ' + str(e)})
 
-    db.execute("UPDATE knowledge_bases SET name = ?, local_path = ? WHERE id = ?", (name, new_path, kb_id))
+    db.execute("UPDATE filebases SET name = ?, local_path = ? WHERE id = ?", (name, new_path, filebase_id))
     db.commit()
     return jsonify({'success': True, 'message': '重命名成功'})
 
@@ -366,29 +370,29 @@ def rename_kb(kb_id):
 @kb_bp.route('/<kb_id>', methods=['DELETE'])
 @login_required
 @_require_kb_permission('manage')
-def delete_kb(kb_id):
+def delete_kb(filebase_id):
     db = get_db()
-    row = db.execute("SELECT id, name, local_path, owner_id, kb_type FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    row = db.execute("SELECT id, name, local_path, owner_id, filebase_type FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = row['local_path']
-    kb_type = row['kb_type'] or 'local'
+    filebase_type = row['filebase_type'] or 'local'
     ws = _get_user_workspace(row['owner_id'])
     trash_dir = os.path.join(ws, '已删除')
 
     # 网络文件库：只删除数据库记录
-    if kb_type == 'net':
-        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
-        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+    if filebase_type == 'net':
+        db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
+        db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
         return jsonify({'success': True, 'message': '网络文件库已删除'})
 
     if local_path.startswith(trash_dir):
         if os.path.isdir(local_path):
             shutil.rmtree(local_path)
-        db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
-        db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+        db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
+        db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
         return jsonify({'success': True, 'message': '文件库已彻底删除'})
 
@@ -400,8 +404,8 @@ def delete_kb(kb_id):
     if os.path.isdir(local_path):
         shutil.move(local_path, target)
 
-    db.execute("DELETE FROM kb_permissions WHERE kb_id = ?", (kb_id,))
-    db.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+    db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
+    db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
     db.commit()
     return jsonify({'success': True, 'message': '文件库已移至已删除目录'})
 
@@ -484,20 +488,20 @@ def restore_from_trash():
     shutil.move(src, dst)
 
     db = get_db()
-    kb_id = str(uuid.uuid4())
+    filebase_id = str(uuid.uuid4())
     now = time.time()
     name = os.path.basename(dst)
     db.execute(
-        "INSERT INTO knowledge_bases (id, name, owner_id, kb_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
-        (kb_id, name, user_id, dst, now)
+        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        (filebase_id, name, user_id, dst, now)
     )
     db.execute(
-        "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-        (kb_id, user_id, 'manage')
+        "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+        (filebase_id, user_id, 'manage')
     )
     db.commit()
 
-    return jsonify({'success': True, 'kb': {'id': kb_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'kb_type': 'local', 'local_path': dst}})
+    return jsonify({'success': True, 'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst}})
 
 
 @kb_bp.route('/trash-item', methods=['DELETE'])
@@ -532,7 +536,7 @@ def delete_trash_item():
 @kb_bp.route('/<kb_id>/transfer', methods=['POST'])
 @login_required
 @_require_kb_permission('manage')
-def transfer_kb(kb_id):
+def transfer_kb(filebase_id):
     data = request.get_json()
     new_owner_id = (data.get('new_owner_id') or '').strip()
     keep_role = (data.get('keep_role') or 'editor').strip()
@@ -543,19 +547,19 @@ def transfer_kb(kb_id):
         keep_role = 'editor'
 
     db = get_db()
-    kb_row = db.execute("SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
-    db.execute("UPDATE knowledge_bases SET owner_id = ? WHERE id = ?", (new_owner_id, kb_id))
+    db.execute("UPDATE filebases SET owner_id = ? WHERE id = ?", (new_owner_id, filebase_id))
 
-    db.execute("DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?", (kb_id, new_owner_id))
-    db.execute("INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-               (kb_id, new_owner_id, 'manage'))
+    db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?", (filebase_id, new_owner_id))
+    db.execute("INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+               (filebase_id, new_owner_id, 'manage'))
 
-    db.execute("DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?", (kb_id, g.user_id))
-    db.execute("INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-               (kb_id, g.user_id, keep_role))
+    db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?", (filebase_id, g.user_id))
+    db.execute("INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+               (filebase_id, g.user_id, keep_role))
 
     db.commit()
     return jsonify({'success': True, 'message': '所有权移交成功'})
@@ -566,7 +570,7 @@ def transfer_kb(kb_id):
 @kb_bp.route('/<kb_id>/members', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def list_members(kb_id):
+def list_members(filebase_id):
     import json
     users_path = os.path.join(_get_auth_data_dir(), 'users.json')
     users = {}
@@ -575,7 +579,7 @@ def list_members(kb_id):
             users = json.load(f)
 
     db = get_db()
-    kb_row = db.execute("SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
 
     members = []
     owner_id = kb_row['owner_id'] if kb_row else None
@@ -589,8 +593,8 @@ def list_members(kb_id):
         })
 
     perm_rows = db.execute(
-        "SELECT user_id, permission_level FROM kb_permissions WHERE kb_id = ? AND user_id != ?",
-        (kb_id, owner_id or '')
+        "SELECT user_id, permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id != ?",
+        (filebase_id, owner_id or '')
     ).fetchall()
 
     for row in perm_rows:
@@ -608,7 +612,7 @@ def list_members(kb_id):
 @kb_bp.route('/<kb_id>/members', methods=['POST'])
 @login_required
 @_require_kb_permission('manage')
-def add_member(kb_id):
+def add_member(filebase_id):
     import json
     users_path = os.path.join(_get_auth_data_dir(), 'users.json')
     users = {}
@@ -634,18 +638,18 @@ def add_member(kb_id):
 
     db = get_db()
     existing = db.execute(
-        "SELECT * FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
-        (kb_id, target_user_id)
+        "SELECT * FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
+        (filebase_id, target_user_id)
     ).fetchone()
     if existing:
         db.execute(
-            "UPDATE kb_permissions SET permission_level = ? WHERE kb_id = ? AND user_id = ?",
-            (permission, kb_id, target_user_id)
+            "UPDATE filebase_permissions SET permission_level = ? WHERE filebase_id = ? AND user_id = ?",
+            (permission, filebase_id, target_user_id)
         )
     else:
         db.execute(
-            "INSERT INTO kb_permissions (kb_id, user_id, permission_level) VALUES (?, ?, ?)",
-            (kb_id, target_user_id, permission)
+            "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
+            (filebase_id, target_user_id, permission)
         )
     db.commit()
 
@@ -655,7 +659,7 @@ def add_member(kb_id):
 @kb_bp.route('/<kb_id>/members/<member_id>', methods=['PUT'])
 @login_required
 @_require_kb_permission('manage')
-def update_member(kb_id, member_id):
+def update_member(filebase_id, member_id):
     data = request.get_json()
     permission = (data.get('permission') or 'view').strip()
     if permission not in ('view', 'edit', 'manage'):
@@ -663,8 +667,8 @@ def update_member(kb_id, member_id):
 
     db = get_db()
     db.execute(
-        "UPDATE kb_permissions SET permission_level = ? WHERE kb_id = ? AND user_id = ?",
-        (permission, kb_id, member_id)
+        "UPDATE filebase_permissions SET permission_level = ? WHERE filebase_id = ? AND user_id = ?",
+        (permission, filebase_id, member_id)
     )
     db.commit()
     return jsonify({'success': True, 'message': '权限已更新'})
@@ -673,11 +677,11 @@ def update_member(kb_id, member_id):
 @kb_bp.route('/<kb_id>/members/<member_id>', methods=['DELETE'])
 @login_required
 @_require_kb_permission('manage')
-def remove_member(kb_id, member_id):
+def remove_member(filebase_id, member_id):
     db = get_db()
     db.execute(
-        "DELETE FROM kb_permissions WHERE kb_id = ? AND user_id = ?",
-        (kb_id, member_id)
+        "DELETE FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
+        (filebase_id, member_id)
     )
     db.commit()
     return jsonify({'success': True, 'message': '成员已移除'})
@@ -702,20 +706,20 @@ def search_documents():
     results = []
     keywords = q.lower().split()
 
-    for kb_id in visible_ids:
-        kb_row = db.execute("SELECT name, kb_type, local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    for filebase_id in visible_ids:
+        kb_row = db.execute("SELECT name, filebase_type, local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
         if not kb_row:
             continue
         kb_name = kb_row['name'] or ''
         local_path = (kb_row['local_path'] if 'local_path' in kb_row.keys() else '') or ''
 
         if local_path and os.path.isdir(local_path):
-            results.extend(_search_local_dir(local_path, kb_id, kb_name, keywords))
+            results.extend(_search_local_dir(local_path, filebase_id, kb_name, keywords))
 
     return jsonify({'success': True, 'results': results, 'query': q})
 
 
-def _search_local_dir(base_path, kb_id, kb_name, keywords):
+def _search_local_dir(base_path, filebase_id, kb_name, keywords):
     results = []
     try:
         for root, dirs, files in os.walk(base_path):
@@ -754,7 +758,7 @@ def _search_local_dir(base_path, kb_id, kb_name, keywords):
                     stat = os.stat(full_path)
                     results.append({
                         'document_id': rel_path,
-                        'kb_id': kb_id,
+                        'kb_id': filebase_id,
                         'kb_name': kb_name,
                         'filename': fname,
                         'file_type': os.path.splitext(fname)[1],
@@ -770,8 +774,8 @@ def _search_local_dir(base_path, kb_id, kb_name, keywords):
 
 # ==================== 本地目录浏览 ====================
 
-def _resolve_local_path(db, kb_id, subdir=''):
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+def _resolve_local_path(db, filebase_id, subdir=''):
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return None, None
     local_path = kb_row['local_path']
@@ -785,10 +789,10 @@ def _resolve_local_path(db, kb_id, subdir=''):
 @kb_bp.route('/<kb_id>/local-files', methods=['POST'])
 @login_required
 @_require_kb_permission('edit')
-def upload_local_files(kb_id):
+def upload_local_files(filebase_id):
     db = get_db()
     subdir = request.args.get('subdir', '').strip()
-    local_path, target_dir = _resolve_local_path(db, kb_id, subdir)
+    local_path, target_dir = _resolve_local_path(db, filebase_id, subdir)
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
 
@@ -816,7 +820,7 @@ def upload_local_files(kb_id):
 @kb_bp.route('/<kb_id>/local-files/dir', methods=['POST'])
 @login_required
 @_require_kb_permission('edit')
-def create_local_dir(kb_id):
+def create_local_dir(filebase_id):
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -826,7 +830,7 @@ def create_local_dir(kb_id):
     if '/' in name or '\\' in name:
         return jsonify({'success': False, 'message': '目录名不能包含路径分隔符'})
 
-    local_path, target_dir = _resolve_local_path(db, kb_id, parent)
+    local_path, target_dir = _resolve_local_path(db, filebase_id, parent)
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
 
@@ -848,7 +852,7 @@ def create_local_dir(kb_id):
 @kb_bp.route('/<kb_id>/local-files/create', methods=['POST'])
 @login_required
 @_require_kb_permission('edit')
-def create_local_file(kb_id):
+def create_local_file(filebase_id):
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -858,7 +862,7 @@ def create_local_file(kb_id):
     if '/' in name or '\\' in name:
         return jsonify({'success': False, 'message': '文件名不能包含路径分隔符'})
 
-    local_path, target_dir = _resolve_local_path(db, kb_id, parent)
+    local_path, target_dir = _resolve_local_path(db, filebase_id, parent)
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
 
@@ -883,7 +887,7 @@ def create_local_file(kb_id):
 @kb_bp.route('/<kb_id>/local-files/content', methods=['PUT'])
 @login_required
 @_require_kb_permission('edit')
-def save_local_file_content(kb_id):
+def save_local_file_content(filebase_id):
     db = get_db()
     data = request.get_json() or {}
     path = (data.get('path') or '').strip()
@@ -892,7 +896,7 @@ def save_local_file_content(kb_id):
     if not path:
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
-    local_path, target = _resolve_local_path(db, kb_id, path)
+    local_path, target = _resolve_local_path(db, filebase_id, path)
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
 
@@ -906,9 +910,9 @@ def save_local_file_content(kb_id):
 @kb_bp.route('/<kb_id>/local-files', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def list_local_files(kb_id):
+def list_local_files(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -977,9 +981,9 @@ def list_local_files(kb_id):
 @kb_bp.route('/<kb_id>/local-categories', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def list_local_categories(kb_id):
+def list_local_categories(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1055,9 +1059,9 @@ def _scan_categories_recursive(target_path, base_path):
 @kb_bp.route('/<kb_id>/local-files/download', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def download_local_file(kb_id):
+def download_local_file(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1081,13 +1085,13 @@ def download_local_file(kb_id):
 @kb_bp.route('/<kb_id>/sync', methods=['POST'])
 @login_required
 @_require_kb_permission('manage')
-def toggle_sync(kb_id):
+def toggle_sync(filebase_id):
     """切换文件库同步状态"""
     data = request.get_json() or {}
     enabled = bool(data.get('enabled', False))
 
     db = get_db()
-    kb_row = db.execute("SELECT owner_id FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
 
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'}), 404
@@ -1095,14 +1099,14 @@ def toggle_sync(kb_id):
     if kb_row['owner_id'] != g.user_id:
         return jsonify({'success': False, 'message': '只有文件库所有者可以管理同步'}), 403
 
-    db.execute("UPDATE knowledge_bases SET sync_to_kb = ? WHERE id = ?", (1 if enabled else 0, kb_id))
+    db.execute("UPDATE filebases SET is_synced_to_kb = ? WHERE id = ?", (1 if enabled else 0, filebase_id))
     db.commit()
 
     if enabled:
         try:
             from kb.sync_worker import get_sync_worker
             worker = get_sync_worker()
-            worker.trigger_sync_now(g.user_id, kb_id)
+            worker.trigger_sync_now(g.user_id, filebase_id)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Failed to trigger sync: {e}")
@@ -1113,10 +1117,10 @@ def toggle_sync(kb_id):
 @kb_bp.route('/<kb_id>/sync-now', methods=['POST'])
 @login_required
 @_require_kb_permission('manage')
-def sync_now(kb_id):
+def sync_now(filebase_id):
     """手动触发立即同步"""
     db = get_db()
-    kb_row = db.execute("SELECT owner_id, sync_to_kb FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT owner_id, is_synced_to_kb FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
 
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'}), 404
@@ -1124,13 +1128,13 @@ def sync_now(kb_id):
     if kb_row['owner_id'] != g.user_id:
         return jsonify({'success': False, 'message': '只有文件库所有者可以触发同步'}), 403
 
-    if not kb_row['sync_to_kb']:
+    if not kb_row['is_synced_to_kb']:
         return jsonify({'success': False, 'message': '请先启用同步功能'}), 400
 
     try:
         from kb.sync_worker import get_sync_worker
         worker = get_sync_worker()
-        worker.trigger_sync_now(g.user_id, kb_id)
+        worker.trigger_sync_now(g.user_id, filebase_id)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"Failed to trigger sync: {e}")
@@ -1141,10 +1145,10 @@ def sync_now(kb_id):
 @kb_bp.route('/<kb_id>/sync-status', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def get_sync_status(kb_id):
+def get_sync_status(filebase_id):
     """获取同步状态"""
     db = get_db()
-    kb_row = db.execute("SELECT owner_id, sync_to_kb, local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT owner_id, is_synced_to_kb, local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
 
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'}), 404
@@ -1152,7 +1156,7 @@ def get_sync_status(kb_id):
     try:
         from kb.sync_state import get_sync_state_manager
         state_manager = get_sync_state_manager()
-        state = state_manager.load_state(kb_row['owner_id'], kb_id)
+        state = state_manager.load_state(kb_row['owner_id'], filebase_id)
 
         total_files = 0
         if os.path.exists(kb_row['local_path']):
@@ -1171,7 +1175,7 @@ def get_sync_status(kb_id):
 
         return jsonify({
             'success': True,
-            'enabled': bool(kb_row['sync_to_kb']),
+            'enabled': bool(kb_row['is_synced_to_kb']),
             'is_owner': kb_row['owner_id'] == g.user_id,
             'status': {
                 'total_files': total_files,
@@ -1185,7 +1189,7 @@ def get_sync_status(kb_id):
         logging.getLogger(__name__).error(f"Failed to get sync status: {e}")
         return jsonify({
             'success': True,
-            'enabled': bool(kb_row['sync_to_kb']),
+            'enabled': bool(kb_row['is_synced_to_kb']),
             'is_owner': kb_row['owner_id'] == g.user_id,
             'status': {
                 'total_files': 0,
@@ -1218,7 +1222,7 @@ TOOL_EXTENSIONS = {
 @kb_bp.route('/<kb_id>/run-tool', methods=['POST'])
 @login_required
 @_require_kb_permission('edit')
-def run_tool_on_kb(kb_id):
+def run_tool_on_kb(filebase_id):
     data = request.get_json()
     tool = data.get('tool')
     subdir = data.get('subdir', '').strip()
@@ -1236,7 +1240,7 @@ def run_tool_on_kb(kb_id):
         return jsonify({'success': False, 'message': f'脚本不存在: {tool}'})
 
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1322,9 +1326,9 @@ def run_tool_on_kb(kb_id):
 @kb_bp.route('/<kb_id>/local-files/content', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def get_local_file_content(kb_id):
+def get_local_file_content(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1376,12 +1380,49 @@ def get_local_file_content(kb_id):
     return jsonify({'success': False, 'message': '不支持在线查看此文件类型的内容'})
 
 
+@kb_bp.route('/<kb_id>/local-files/docx-preview', methods=['GET'])
+@login_required
+@_require_kb_permission('view')
+def docx_preview(filebase_id):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问上级目录'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '文件不存在'})
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext != '.docx':
+        return jsonify({'success': False, 'message': '仅支持 docx 文件预览'})
+
+    try:
+        import mammoth
+        with open(file_path, 'rb') as f:
+            result = mammoth.convert_to_html(f)
+            html = result.value
+            messages = [str(m) for m in result.messages]
+        
+        return jsonify({'success': True, 'html': html, 'messages': messages, 'file_type': ext})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'预览失败: {str(e)}'})
+
+
 @kb_bp.route('/<kb_id>/local-files/batch-download', methods=['POST'])
 @login_required
 @_require_kb_permission('view')
-def batch_download_local(kb_id):
+def batch_download_local(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1415,9 +1456,9 @@ def batch_download_local(kb_id):
 @kb_bp.route('/<kb_id>/local-files/replace', methods=['PUT'])
 @login_required
 @_require_kb_permission('edit')
-def replace_local_file(kb_id):
+def replace_local_file(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1456,9 +1497,9 @@ def replace_local_file(kb_id):
 @kb_bp.route('/<kb_id>/local-files/move', methods=['PUT'])
 @login_required
 @_require_kb_permission('edit')
-def move_local_items(kb_id):
+def move_local_items(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1509,9 +1550,9 @@ def move_local_items(kb_id):
 @kb_bp.route('/<kb_id>/local-files', methods=['DELETE'])
 @login_required
 @_require_kb_permission('edit')
-def delete_local_items(kb_id):
+def delete_local_items(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1548,9 +1589,9 @@ def delete_local_items(kb_id):
 @kb_bp.route('/<kb_id>/local-files/rename', methods=['PUT'])
 @login_required
 @_require_kb_permission('edit')
-def rename_local_item(kb_id):
+def rename_local_item(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1590,9 +1631,9 @@ def rename_local_item(kb_id):
 @kb_bp.route('/<kb_id>/local-files/copy', methods=['POST'])
 @login_required
 @_require_kb_permission('edit')
-def copy_local_items(kb_id):
+def copy_local_items(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -1647,9 +1688,9 @@ def copy_local_items(kb_id):
 @kb_bp.route('/<kb_id>/local-files/open', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def open_local_file(kb_id):
+def open_local_file(filebase_id):
     db = get_db()
-    kb_row = db.execute("SELECT local_path FROM knowledge_bases WHERE id = ?", (kb_id,)).fetchone()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 

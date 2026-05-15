@@ -3,7 +3,7 @@ import sqlite3
 import threading
 import shutil
 
-from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS
+from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS, CREATE_INDEX_SYNC_STATES
 
 _local = threading.local()
 
@@ -47,6 +47,11 @@ def init_db(conn):
             pass
     for sql in CREATE_INDEXES:
         conn.execute(sql)
+    for sql in CREATE_INDEX_SYNC_STATES:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
     conn.commit()
 
 
@@ -71,14 +76,14 @@ def close_db():
 def get_visible_kb_ids(user_id, is_admin=False):
     if is_admin:
         db = get_db()
-        rows = db.execute("SELECT id FROM knowledge_bases").fetchall()
+        rows = db.execute("SELECT id FROM filebases").fetchall()
         return [r['id'] for r in rows]
     db = get_db()
     ids = set()
-    rows = db.execute("SELECT kb_id FROM kb_permissions WHERE user_id = ?", (user_id,)).fetchall()
+    rows = db.execute("SELECT filebase_id FROM filebase_permissions WHERE user_id = ?", (user_id,)).fetchall()
     for r in rows:
-        ids.add(r['kb_id'])
-    rows = db.execute("SELECT id FROM knowledge_bases WHERE owner_id = ?", (user_id,)).fetchall()
+        ids.add(r['filebase_id'])
+    rows = db.execute("SELECT id FROM filebases WHERE owner_id = ?", (user_id,)).fetchall()
     for r in rows:
         ids.add(r['id'])
     return list(ids)

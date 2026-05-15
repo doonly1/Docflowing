@@ -144,6 +144,22 @@ def create_skill(user_id: str, name: str, content: str, category: str = None, cr
         return {"success": False, "error": str(e)}
 
 
+def _get_system_skills_dir() -> Path:
+    from pathlib import Path
+    kb_root = Path(__file__).parent.parent.parent
+    return kb_root / 'kb' / 'skills' / 'system'
+
+
+def _find_system_skill(name: str) -> Optional[Path]:
+    system_dir = _get_system_skills_dir()
+    if not system_dir.exists():
+        return None
+    skill_md = system_dir / name / "SKILL.md"
+    if skill_md.exists():
+        return skill_md
+    return None
+
+
 def get_skill(user_id: str, name: str) -> Dict[str, Any]:
     skill_dir = _get_user_skills_dir(user_id) / name
     skill_md = skill_dir / "SKILL.md"
@@ -153,6 +169,21 @@ def get_skill(user_id: str, name: str) -> Dict[str, Any]:
         if archive_dir.exists():
             skill_md = archive_dir
         else:
+            system_skill_md = _find_system_skill(name)
+            if system_skill_md:
+                try:
+                    content = system_skill_md.read_text(encoding="utf-8")
+                    return {
+                        "success": True,
+                        "name": name,
+                        "content": content,
+                        "frontmatter": _parse_frontmatter(content),
+                        "path": str(system_skill_md),
+                        "source": "system",
+                        "usage": None,
+                    }
+                except (OSError, IOError):
+                    pass
             return {"success": False, "error": f"Skill '{name}' not found."}
 
     try:
@@ -169,6 +200,7 @@ def get_skill(user_id: str, name: str) -> Dict[str, Any]:
         "content": content,
         "frontmatter": _parse_frontmatter(content),
         "path": str(skill_md),
+        "source": "user",
         "usage": record,
     }
 
@@ -311,8 +343,32 @@ def list_skills(user_id: str, category: str = None, state: str = None) -> List[D
             "name": name,
             "frontmatter": fm,
             "exists": skill_md.exists() or (_get_user_skills_dir(user_id) / ".archive" / name / "SKILL.md").exists(),
+            "source": "user",
             "usage": record,
         })
+
+    if state is None or state == "active":
+        system_dir = _get_system_skills_dir()
+        if system_dir.exists():
+            for name in os.listdir(system_dir):
+                skill_dir = system_dir / name
+                if os.path.isdir(skill_dir):
+                    skill_md = skill_dir / "SKILL.md"
+                    if skill_md.exists():
+                        try:
+                            content = skill_md.read_text(encoding="utf-8")
+                            fm = _parse_frontmatter(content)
+                            if category and fm.get("category") != category:
+                                continue
+                            skills.append({
+                                "name": name,
+                                "frontmatter": fm,
+                                "exists": True,
+                                "source": "system",
+                                "usage": None,
+                            })
+                        except (OSError, IOError):
+                            pass
 
     return skills
 

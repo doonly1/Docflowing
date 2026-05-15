@@ -412,6 +412,39 @@
     }
 }
 
+.kb-chat-stop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #e74c3c;
+    background: #fff;
+    border: 1px solid #e74c3c;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.kb-chat-stop-btn:hover {
+    background: #e74c3c;
+    color: #fff;
+}
+
+.kb-chat-message.assistant .kb-chat-message-bubble.interrupted {
+    border-color: #e74c3c;
+    background: #fff5f5;
+}
+
+.kb-chat-interrupted-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #e74c3c;
+    margin-top: 4px;
+}
+
 .kb-chat-context-indicator {
     display: flex;
     align-items: center;

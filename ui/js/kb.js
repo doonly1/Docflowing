@@ -109,7 +109,7 @@ var WikiKnowledge = {
                 // 初始居中区（移除快捷按钮）
                 '<div class="kb-chat-initial-area" id="kb-initial-area">' +
                     '<div class="kb-chat-greeting-title">开始对话</div>' +
-                    '<div class="kb-chat-greeting-desc">输入消息，与AI助手对话</div>' +
+                    '<div class="kb-chat-greeting-desc">输入消息，检索与对话</div>' +
                 '</div>' +
                 // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +
@@ -180,6 +180,12 @@ var WikiKnowledge = {
                                 '<span></span><span></span><span></span>' +
                             '</div>' +
                         '</div>' +
+                        '<div class="kb-chat-stop-btn-wrapper" style="margin-top:8px;text-align:center;">' +
+                            '<button class="kb-chat-stop-btn" onclick="WikiKnowledge.stopResponse()" title="停止响应">' +
+                                '<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>' +
+                                ' 停止' +
+                            '</button>' +
+                        '</div>' +
                     '</div>' +
                 '</div>' +
             '</div>';
@@ -217,8 +223,11 @@ var WikiKnowledge = {
             if (typingEl) typingEl.remove();
 
             var answer = '';
+            var interrupted = data.interrupted || false;
             if (data.success && data.context) {
                 answer = self._generateAnswer(query, data.context, data.sources || [], data.llm_used);
+            } else if (interrupted) {
+                answer = data.context || '(已中断)';
             } else {
                 answer = data.message || '';
             }
@@ -234,6 +243,7 @@ var WikiKnowledge = {
                 role: 'assistant',
                 content: answer,
                 sources: data.sources || [],
+                interrupted: interrupted,
                 time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
             });
 
@@ -252,6 +262,20 @@ var WikiKnowledge = {
 
             self._renderMessages();
             self.isLoading = false;
+        });
+    },
+
+    stopResponse: function() {
+        var self = this;
+        if (!self.sessionId) return;
+        apiFetch('/api/kb/agent/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: self.sessionId })
+        }).then(function(data) {
+            console.log('停止信号已发送:', data);
+        }).catch(function(e) {
+            console.error('停止请求失败:', e);
         });
     },
 
@@ -295,8 +319,9 @@ var WikiKnowledge = {
                 '<div class="kb-chat-message ' + roleClass + '">' +
                     '<div class="kb-chat-message-avatar">' + avatar + '</div>' +
                     '<div class="kb-chat-message-content">' +
-                        '<div class="kb-chat-message-bubble">' +
+                        '<div class="kb-chat-message-bubble' + (msg.interrupted ? ' interrupted' : '') + '">' +
                             this._formatContent(msg.content) +
+                            (msg.interrupted ? '<div class="kb-chat-interrupted-badge">⏹ 已中断</div>' : '') +
                         '</div>';
 
             if (msg.sources && msg.sources.length > 0) {
@@ -384,8 +409,145 @@ var WikiKnowledge = {
 
     viewSource: function(path) {
         if (!path) return;
-        var fileName = path.split('/').pop().replace('.md', '');
-        alert('查看文件: ' + fileName + '\n路径: ' + path);
+        var fileName = path.split('/').pop();
+        var ext = fileName.split('.').pop().toLowerCase();
+        
+        if (ext === 'docx') {
+            this._previewDocxFile(path);
+        } else if (ext === 'md' || ext === 'txt') {
+            this._previewTextFile(path);
+        } else if (ext === 'pdf') {
+            this._previewPdfFile(path);
+        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+            this._previewImageFile(path);
+        } else {
+            window.open('/api/fb/default/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+        }
+    },
+    
+    _previewDocxFile: async function(path) {
+        var fileName = path.split('/').pop();
+        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" id="kb-preview-content">' +
+            '<div style="text-align: center; padding: 40px; color: #999;">' +
+            '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
+            '<div>正在加载预览...</div>' +
+            '</div>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        
+        try {
+            var res = await apiFetch('/api/fb/' + kbId + '/local-files/docx-preview?path=' + encodeURIComponent(path), { method: 'GET' });
+            var data = await res.json();
+            var contentEl = document.getElementById('kb-preview-content');
+            if (data.success) {
+                contentEl.innerHTML = data.html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+            } else {
+                contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (data.message || '未知错误') + '</div>';
+            }
+        } catch (e) {
+            var contentEl = document.getElementById('kb-preview-content');
+            contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
+        }
+    },
+    
+    _previewTextFile: async function(path) {
+        var fileName = path.split('/').pop();
+        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" id="kb-preview-content">' +
+            '<div style="text-align: center; padding: 40px; color: #999;">' +
+            '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
+            '<div>正在加载预览...</div>' +
+            '</div>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        
+        try {
+            var res = await apiFetch('/api/fb/' + kbId + '/local-files/content?path=' + encodeURIComponent(path), { method: 'GET' });
+            var data = await res.json();
+            var contentEl = document.getElementById('kb-preview-content');
+            if (data.success) {
+                var content = escapeHtmlText(data.content || '');
+                if (data.file_type === '.md') {
+                    content = marked.parse(content);
+                } else {
+                    content = '<pre style="white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 13px;">' + content + '</pre>';
+                }
+                contentEl.innerHTML = content || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+            } else {
+                contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (data.message || '未知错误') + '</div>';
+            }
+        } catch (e) {
+            var contentEl = document.getElementById('kb-preview-content');
+            contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
+        }
+    },
+    
+    _closePreview: function() {
+        var overlay = document.querySelector('.kb-docx-preview-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
+    },
+    
+    _previewPdfFile: function(path) {
+        var fileName = path.split('/').pop();
+        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" style="padding:0">' +
+            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+    },
+    
+    _previewImageFile: function(path) {
+        var fileName = path.split('/').pop();
+        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
+        
+        var overlay = document.createElement('div');
+        overlay.className = 'kb-docx-preview-overlay';
+        overlay.innerHTML = 
+            '<div class="kb-docx-preview-container">' +
+            '<div class="kb-docx-preview-header">' +
+            '<span>🖼️ ' + escapeHtmlText(fileName) + '</span>' +
+            '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
+            '</div>' +
+            '<div class="kb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
+            '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
     },
 
     openSidebar: function(title, contentHtml) {

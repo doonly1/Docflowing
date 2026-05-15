@@ -129,9 +129,9 @@ class SyncWorker:
                     pass
 
             rows = db.execute("""
-                SELECT id, owner_id, name, sync_to_kb
-                FROM knowledge_bases
-                WHERE sync_to_kb = 1
+                SELECT id, owner_id, name, is_synced_to_kb
+                FROM filebases
+                WHERE is_synced_to_kb = 1
             """).fetchall()
 
             return [
@@ -197,9 +197,9 @@ class SyncWorker:
 
             db = get_db()
             row = db.execute("""
-                SELECT id, owner_id, name, local_path, sync_to_kb
-                FROM knowledge_bases
-                WHERE id = ? AND sync_to_kb = 1
+                SELECT id, owner_id, name, local_path, is_synced_to_kb
+                FROM filebases
+                WHERE id = ? AND is_synced_to_kb = 1
             """, (filebase_id,)).fetchone()
 
             if row:
@@ -419,11 +419,11 @@ class SyncWorker:
 
             db = get_db()
             row = db.execute(
-                "SELECT sync_to_kb FROM knowledge_bases WHERE id = ?",
+                "SELECT is_synced_to_kb FROM filebases WHERE id = ?",
                 (filebase_id,)
             ).fetchone()
 
-            return row and row['sync_to_kb'] == 1
+            return row and row['is_synced_to_kb'] == 1
 
         except Exception as e:
             logger.error(f"Failed to check sync status for {filebase_id}: {e}")

@@ -8,7 +8,6 @@ from functools import wraps
 from server.auth import login_required, admin_required
 from kb.database import get_db
 from kb.search import search_wiki
-from kb.config import get_kb_section
 from kb.llm import is_llm_available, call_llm
 from kb.context_compressor import ContextCompressor
 from kb.session_db import get_session_db
@@ -69,21 +68,71 @@ def _get_kb_root(usr_id):
     return kb_dir
 
 
+def _get_system_skills_dir() -> str:
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root_dir, 'kb', 'skills', 'system')
+
+
+def _list_system_skills() -> list:
+    system_dir = _get_system_skills_dir()
+    if not os.path.exists(system_dir):
+        return []
+    skills = []
+    for name in os.listdir(system_dir):
+        skill_dir = os.path.join(system_dir, name)
+        if os.path.isdir(skill_dir):
+            skill_md = os.path.join(skill_dir, 'SKILL.md')
+            if os.path.exists(skill_md):
+                try:
+                    content = open(skill_md, 'r', encoding='utf-8').read()
+                    fm = _parse_frontmatter(content)
+                    skills.append({
+                        "name": name,
+                        "frontmatter": fm,
+                        "exists": True,
+                        "source": "system",
+                    })
+                except Exception:
+                    pass
+    return skills
+
+
+def _parse_frontmatter(content: str) -> dict:
+    import re
+    match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+    if not match:
+        return {}
+    fm_text = match.group(1)
+    fm = {}
+    for line in fm_text.split('\n'):
+        line = line.strip()
+        if ':' in line:
+            key, _, value = line.partition(':')
+            fm[key.strip()] = value.strip()
+    return fm
+
+
 def _build_skills_index(usr_id: str) -> str:
     try:
-        from .skills.manager import list_skills
-        skills = list_skills(usr_id, state="active")
-        if not skills:
+        from .skills.manager import list_skills as list_user_skills
+        user_skills = list_user_skills(usr_id, state="active")
+        system_skills = _list_system_skills()
+        all_skills = system_skills + user_skills
+        if not all_skills:
             return ""
         lines = ["## 可用技能索引", ""]
-        for s in skills:
+        current_category = None
+        for s in sorted(all_skills, key=lambda x: (x.get('source', 'user'), x.get('name', ''))):
             name = s.get("name", "")
             fm = s.get("frontmatter", {})
             desc = fm.get("description", "") if isinstance(fm, dict) else ""
             cat = fm.get("category", "") if isinstance(fm, dict) else ""
-            line = f"- **{name}**"
-            if cat:
-                line += f" [{cat}]"
+            source = s.get("source", "user")
+            marker = "🔒" if source == "system" else ""
+            if cat and cat != current_category:
+                lines.append(f"### {cat}")
+                current_category = cat
+            line = f"- **{name}**{marker}"
             if desc:
                 line += f": {desc}"
             lines.append(line)
@@ -457,32 +506,18 @@ def agent_context():
 
         llm_error = None
         if is_llm_available(usr_id):
-            kb_section = get_kb_section(usr_id)
-            wiki_name = kb_section.get('default_name', '知识库')
-
             skills_index = _build_skills_index(usr_id)
 
-            knowledge_section = f"## 知识库内容\n{kb_context}" if kb_context else "## 知识库内容\n（当前知识库中暂无相关文档）"
-            instruction = (
-                "请优先根据上述知识库内容回答用户问题。如果知识库中没有相关信息，你可以根据自己的知识来回答，并告知用户知识库中未找到相关内容。"
-                if kb_context
-                else "当前知识库中没有相关文档。你可以根据自己的知识来回答用户问题。如果问题涉及专业知识，建议用户向知识库中添加相关文档。"
-            )
+            knowledge_section = f"## 参考信息\n{kb_context}" if kb_context else "## 参考信息\n（暂无相关参考信息）"
 
-            system_prompt = f"""你是一个专业的知识库助手，具有自己的通用知识能力。
-
-## 知识库名称
-{wiki_name}
+            system_prompt = f"""参考信息：
 
 {knowledge_section}
 
 {memory_context}
 {skills_index}
 
-{instruction}
-回答要简洁准确，不要编造信息。
-
-你拥有持久化记忆和技能管理能力。当用户要求你记住某些信息，或者你发现值得跨会话保留的知识时，请主动使用工具保存。"""
+回答要简洁准确，不要编造信息。"""
 
             from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
             from .llm import call_llm_with_tools
@@ -518,23 +553,33 @@ def agent_context():
             def _tool_exec(name, args):
                 return execute_tool_call(name, args, usr_id)
 
-            llm_result = call_llm_with_tools(
-                system_prompt=system_prompt,
-                user_query=query,
-                messages_history=messages_history,
-                tools=ALL_TOOL_SCHEMAS,
-                max_tool_rounds=5,
-                tool_executor=_tool_exec,
-                user_id=usr_id,
-            )
+            from .interrupt import InterruptRegistry, InterruptedError
+            interrupt_reg = InterruptRegistry.get_instance()
+            session_key = session_id or f"anon_{usr_id}_{id(query)}"
+            interrupt_event = interrupt_reg.register(session_key)
+
+            try:
+                llm_result = call_llm_with_tools(
+                    system_prompt=system_prompt,
+                    user_query=query,
+                    messages_history=messages_history,
+                    tools=ALL_TOOL_SCHEMAS,
+                    max_tool_rounds=5,
+                    tool_executor=_tool_exec,
+                    user_id=usr_id,
+                    interrupt_event=interrupt_event,
+                )
+            finally:
+                interrupt_reg.unregister(session_key)
 
             llm_error = llm_result.get("error")
+            interrupted = llm_result.get("interrupted", False)
             answer = llm_result.get("content", "")
-            if answer:
+            if answer or interrupted:
                 from .context_fence import sanitize_context
                 answer = sanitize_context(answer)
 
-                if llm_result.get("tool_calls_made"):
+                if llm_result.get("tool_calls_made") and not interrupted:
                     from .auto_extract import auto_extract_async
                     auto_extract_async(usr_id, query, answer)
 
@@ -545,6 +590,7 @@ def agent_context():
                     'session_id': session_id,
                     'llm_used': True,
                     'tool_calls': len(llm_result.get("tool_calls_made", [])),
+                    'interrupted': interrupted,
                 })
 
         message = None
@@ -569,6 +615,28 @@ def agent_context():
         error_detail = traceback.format_exc()
         print(f"[ERROR] agent_context failed: {e}\n{error_detail}")
         return jsonify({'success': False, 'message': f'服务器内部错误: {str(e)}', 'error_detail': error_detail}), 200
+
+
+@wiki_bp.route('/agent/stop', methods=['POST'])
+@login_required
+@_require_wiki_permission('view')
+def agent_stop():
+    try:
+        usr_id = g.user_id
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+
+        from .interrupt import InterruptRegistry
+        interrupt_reg = InterruptRegistry.get_instance()
+
+        if session_id:
+            stopped = interrupt_reg.signal(session_id)
+        else:
+            stopped = False
+
+        return jsonify({'success': True, 'stopped': stopped})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 200
 
 
 # --- LLM 配置接口 ---

@@ -146,7 +146,35 @@ SESSION_SEARCH_SCHEMA = {
 }
 
 
-ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA]
+WEB_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the web for current information. "
+            "Use this when you need up-to-date information that may not be in the knowledge base, "
+            "such as latest news, recent events, current API documentation, or real-time data.\n\n"
+            "Returns a list of search results with titles, snippets, and URLs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query."
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return. Default: 5, max: 10."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+
+ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA]
 
 
 def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str:
@@ -157,6 +185,8 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str
             return _execute_skill_manage(args, user_id)
         elif tool_name == "session_search":
             return _execute_session_search(args, user_id)
+        elif tool_name == "web_search":
+            return _execute_web_search(args)
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
     except Exception as e:
@@ -254,3 +284,55 @@ def _execute_session_search(args: Dict[str, Any], user_id: str) -> str:
     db = get_session_db(user_id)
     results = db.search_messages(query, user_id=user_id, limit=limit)
     return json.dumps({"success": True, "results": results, "count": len(results)}, ensure_ascii=False)
+
+
+def _execute_web_search(args: Dict[str, Any]) -> str:
+    query = args.get("query", "")
+    max_results = min(args.get("max_results", 5), 10)
+    if not query:
+        return json.dumps({"success": False, "error": "query is required"}, ensure_ascii=False)
+
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+
+        resp = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": query},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        results = []
+        for item in soup.select(".result")[:max_results]:
+            title_el = item.select_one(".result__title a")
+            snippet_el = item.select_one(".result__snippet")
+            if not title_el:
+                continue
+            results.append({
+                "title": title_el.get_text(strip=True),
+                "url": title_el.get("href", ""),
+                "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+            })
+
+        return json.dumps({
+            "success": True,
+            "results": results,
+            "count": len(results),
+            "query": query,
+        }, ensure_ascii=False)
+
+    except ImportError:
+        return json.dumps({
+            "success": False,
+            "error": "Web search requires beautifulsoup4. Install with: pip install beautifulsoup4",
+        }, ensure_ascii=False)
+    except requests.exceptions.Timeout:
+        return json.dumps({"success": False, "error": "Web search timed out"}, ensure_ascii=False)
+    except Exception as e:
+        logger.error("Web search failed: %s", e)
+        return json.dumps({"success": False, "error": f"Web search failed: {str(e)}"}, ensure_ascii=False)

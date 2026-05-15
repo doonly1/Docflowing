@@ -7,7 +7,6 @@ FB 文件库同步 - 文件转换器模块
 
 import os
 import re
-import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
 from pathlib import Path
@@ -46,29 +45,6 @@ class BaseConverter(ABC):
     def convert(self, source_path: str) -> Optional[str]:
         """转换文件，返回 Markdown 内容，失败返回 None"""
         pass
-
-    def get_metadata(self, file_path: str) -> dict:
-        """获取文件元数据"""
-        stat = os.stat(file_path)
-        return {
-            "source_type": self.file_type,
-            "source_size": stat.st_size,
-            "source_mtime": stat.st_mtime,
-            "converted_at": time.time()
-        }
-
-    def build_frontmatter(self, metadata: dict, relative_path: str, filebase_id: str) -> str:
-        """构建 Markdown frontmatter"""
-        fm_lines = ["---"]
-        fm_lines.append(f"source_file: {relative_path}")
-        fm_lines.append(f"source_type: {metadata.get('source_type', 'unknown')}")
-        fm_lines.append(f"source_size: {metadata.get('source_size', 0)}")
-        fm_lines.append(f"source_mtime: {metadata.get('source_mtime', 0)}")
-        fm_lines.append(f"filebase_id: {filebase_id}")
-        fm_lines.append(f"synced_at: {metadata.get('converted_at', time.time())}")
-        fm_lines.append("---")
-        fm_lines.append("")
-        return "\n".join(fm_lines)
 
 
 class MarkItDownConverter(BaseConverter):
@@ -122,12 +98,6 @@ class MarkItDownConverter(BaseConverter):
                 f"MarkItDown conversion failed: {source_path}, error: {e}"
             )
             return None
-
-    def get_metadata(self, file_path: str) -> dict:
-        meta = super().get_metadata(file_path)
-        ext = os.path.splitext(file_path)[1].lower()
-        meta["source_type"] = ext.lstrip('.')
-        return meta
 
 
 class DOCXConverter(BaseConverter):
@@ -420,16 +390,9 @@ def can_convert(file_path: str) -> bool:
 
 
 def convert_file(source_path: str, relative_path: str, filebase_id: str) -> Optional[str]:
-    """转换文件，返回带有 frontmatter 的 Markdown"""
+    """转换文件，返回 Markdown 内容"""
     converter = get_converter(source_path)
     if not converter:
         return None
 
-    content = converter.convert(source_path)
-    if not content:
-        return None
-
-    metadata = converter.get_metadata(source_path)
-    frontmatter = converter.build_frontmatter(metadata, relative_path, filebase_id)
-
-    return frontmatter + content
+    return converter.convert(source_path)

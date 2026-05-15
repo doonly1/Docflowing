@@ -122,6 +122,9 @@ def login_required(f):
             token = request.form.get('token') or request.form.get('client_id')
 
         if not token:
+            token = request.args.get('token') or request.args.get('client_id')
+
+        if not token:
             return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
         user_id = _get_user_id_from_token(token)
