@@ -687,6 +687,11 @@ def remove_member(filebase_id, member_id):
     return jsonify({'success': True, 'message': '成员已移除'})
 
 
+def _is_admin(user_id):
+    """检查用户是否为管理员"""
+    return get_user_role(user_id) == 'admin'
+
+
 # ==================== 全文搜索 ====================
 
 @kb_bp.route('/search', methods=['GET'])
@@ -1380,10 +1385,13 @@ def get_local_file_content(filebase_id):
     return jsonify({'success': False, 'message': '不支持在线查看此文件类型的内容'})
 
 
-@kb_bp.route('/<kb_id>/local-files/docx-preview', methods=['GET'])
+SUPPORTED_PREVIEW_EXTS = {'.docx', '.pptx', '.ppt', '.xlsx', '.xls'}
+
+
+@kb_bp.route('/<kb_id>/local-files/preview', methods=['GET'])
 @login_required
 @_require_kb_permission('view')
-def docx_preview(filebase_id):
+def file_preview(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1402,17 +1410,16 @@ def docx_preview(filebase_id):
         return jsonify({'success': False, 'message': '文件不存在'})
 
     ext = os.path.splitext(file_path)[1].lower()
-    if ext != '.docx':
-        return jsonify({'success': False, 'message': '仅支持 docx 文件预览'})
+    if ext not in SUPPORTED_PREVIEW_EXTS:
+        return jsonify({'success': False, 'message': f'不支持的预览格式: {ext}'})
 
     try:
-        import mammoth
-        with open(file_path, 'rb') as f:
-            result = mammoth.convert_to_html(f)
-            html = result.value
-            messages = [str(m) for m in result.messages]
-        
-        return jsonify({'success': True, 'html': html, 'messages': messages, 'file_type': ext})
+        from kb.sync_converters import MarkItDownConverter
+        converter = MarkItDownConverter()
+        markdown = converter.convert(file_path)
+        if markdown is None:
+            return jsonify({'success': False, 'message': '文件转换失败'})
+        return jsonify({'success': True, 'markdown': markdown, 'file_type': ext})
     except Exception as e:
         return jsonify({'success': False, 'message': f'预览失败: {str(e)}'})
 
@@ -1706,4 +1713,9 @@ def open_local_file(filebase_id):
     if not os.path.isfile(file_path):
         return jsonify({'success': False, 'message': '文件不存在'})
 
-    return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+    # PDF、图片等浏览器可直接渲染的类型用 inline 预览，其他类型才强制下载
+    ext = os.path.splitext(file_path)[1].lower()
+    previewable_exts = {'.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.txt', '.csv'}
+    as_attachment = ext not in previewable_exts
+
+    return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path))

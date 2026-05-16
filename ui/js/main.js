@@ -1249,6 +1249,19 @@
                             KnowledgeBase.displayPath = localStorage.getItem('docproc_current_kb_display_path') || '';
                             KnowledgeBase.canEdit = KnowledgeBase.currentPermission === 'edit' || KnowledgeBase.currentPermission === 'manage';
                             KnowledgeBase.canManage = KnowledgeBase.currentPermission === 'manage';
+                            // 恢复上次浏览的子目录
+                            var savedSubdir = localStorage.getItem('docproc_current_subdir');
+                            if (savedSubdir) {
+                                KnowledgeBase.localCurrentSubdir = savedSubdir;
+                                // 重建面包屑路径
+                                var parts = savedSubdir.replace(/\\/g, '/').split('/');
+                                KnowledgeBase.currentPath = [
+                                    { id: savedKbId, name: KnowledgeBase.kbName || '未知文件库', type: 'kb' }
+                                ];
+                                for (var i = 0; i < parts.length; i++) {
+                                    if (parts[i]) KnowledgeBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
+                                }
+                            }
                         }
                         document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
                         var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');

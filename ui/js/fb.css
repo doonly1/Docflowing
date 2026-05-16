@@ -79,23 +79,40 @@
 }
 
 .kb-tree-toggle-btn {
-    width: 16px;
-    height: 14px;
-    border: 1.5px solid #bbb;
-    border-radius: 2px;
+    width: 20px;
+    height: 20px;
+    border: none !important;
+    outline: none !important;
     cursor: pointer;
     padding: 0;
     flex-shrink: 0;
-    margin-right: 2px;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    margin-right: 4px;
+    background: transparent !important;
+    border-radius: 0 !important;
+    transition: background 0.2s ease;
+    position: relative;
+}
+.kb-tree-toggle-btn::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #bbb;
+    border-radius: 2px;
+    box-sizing: border-box;
+}
+.kb-tree-toggle-btn:hover::before {
+    border-color: #999;
 }
 
-.kb-tree-toggle-btn:hover {
-    border-color: #777;
+.kb-explorer-body:not(.collapsed) .kb-tree-toggle-btn::before {
+    background: linear-gradient(to right, #999 40%, transparent 40%);
 }
 
-.kb-explorer-body:not(.collapsed) .kb-tree-toggle-btn {
-    background: linear-gradient(to right, #666 33%, #fff 33%);
+.kb-explorer-body.collapsed .kb-tree-toggle-btn::before {
+    background: linear-gradient(to right, transparent 45%, #bbb 45%, #bbb 47%, transparent 47%);
 }
 
 .kb-explorer-body.collapsed .kb-tree-pane {
@@ -104,10 +121,6 @@
 
 .kb-explorer-body.collapsed .kb-tree-resize-handle {
     display: none;
-}
-
-.kb-explorer-body.collapsed .kb-tree-toggle-btn {
-    background: linear-gradient(to right, transparent 32%, #bbb 32%, #bbb 34%, transparent 34%);
 }
 
 .kb-tree-resize-handle {
@@ -143,19 +156,30 @@ body.kb-resizing {
 
 .kb-tree-toggle {
     display: inline-block;
-    width: 20px;
+    width: 14px;
     text-align: center;
-    font-size: 14px;
-    color: #888;
+    font-size: 0;
     cursor: pointer;
     flex-shrink: 0;
     user-select: none;
-    font-family: Consolas, "Courier New", monospace;
-    transition: transform 0.15s ease;
+    transition: transform 0.12s ease;
+}
+.kb-tree-toggle::before {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid #999;
+    vertical-align: middle;
 }
 
-.kb-tree-toggle.open {
-    transform: rotate(90deg);
+.kb-tree-toggle.open::before {
+    border-top: 5px solid #999;
+    border-bottom: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
 }
 
 .kb-tree-label {

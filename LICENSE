@@ -1,0 +1,46 @@
+GNU AFFERO GENERAL PUBLIC LICENSE
+Version 3, 19 November 2007
+
+Copyright (C) 2026 doonly1
+https://github.com/doonly1/DocProc
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+附加条款（与 AGPL-3.0 第 13 条结合使用）：
+
+尽管 AGPL-3.0 许可证要求您在对通过网络访问本程序的修改版本提供源代码，
+但如果您将此程序部署为网络服务使用（包括但不限于局域网内部署），
+您应当向所有能够访问该服务的用户提供完整的源代码，
+包括通过该服务处理文档时产生的任何修改。
+
+上述源代码提供义务不适用于仅将本程序作为独立桌面应用运行、
+且不通过网络向他人提供服务的个人用户。
+
+如果您违反本附加条款的任何规定，您依据 AGPL-3.0 获得的所有授权将自动终止。
+版权持有人保留追究法律责任的权利。
+
+本程序涉及文档处理功能，版权持有人不对因使用本程序处理文档而导致的任何数据丢失、
+文档损坏、隐私泄露或其他直接或间接损失承担任何责任。
+使用者应当在使用前对重要文档进行备份。
+
+部署者为第三方提供网络服务的，应自行对其用户承担全部责任，
+包括但不限于数据安全、服务可用性和损害赔偿。
+版权持有人与该第三方用户之间不存在任何合同或侵权关系，
+不对因使用部署者提供的服务而产生的任何损失承担责任。
+部署者不得以本程序的名义进行宣传或暗示版权持有人对其服务提供担保。
+
+若您将本程序部署为网络服务，建议（非强制）通过 GitHub Issue 或邮件
+通知版权持有人，以便获取安全更新和重要变更信息。
+

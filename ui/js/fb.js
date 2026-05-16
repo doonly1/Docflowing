@@ -16,6 +16,7 @@ var KnowledgeBase = {
     localCurrentSubdir: '',
     _categoryTree: null,
     _treeLoaded: false,
+    _expandedTreePaths: {},  // 跟踪手动展开的树节点路径
 
     api: function(url, method, body) {
         var o = {
@@ -99,6 +100,8 @@ var KnowledgeBase = {
             this._lsDel('docproc_current_kb_local_path');
             this._lsDel('docproc_current_kb_display_path');
             this._lsDel('docproc_current_kb_permission');
+            this._lsDel('docproc_current_subdir');
+            this._expandedTreePaths = {};
             var role = this.getUserRole();
 
             var kbView = document.getElementById('kb-view');
@@ -399,12 +402,14 @@ var KnowledgeBase = {
         this.currentSort = { field: 'mtime', asc: false };
         this._categoryTree = null;
         this._treeLoaded = false;
+        this._expandedTreePaths = {};
 
         this._lsSet('docproc_current_kb_id', kbId);
         this._lsSet('docproc_current_kb_permission', permission);
         this._lsSet('docproc_current_kb_name', name || '');
         this._lsSet('docproc_current_kb_local_path', localPath || '');
         this._lsSet('docproc_current_kb_display_path', displayPath || '');
+        this._lsDel('docproc_current_subdir');
 
         await this.renderDetail();
     },
@@ -487,6 +492,7 @@ var KnowledgeBase = {
             if (this.currentPath[i].type === 'category') parts.push(this.currentPath[i].id);
         }
         this.localCurrentSubdir = parts.join('/');
+        this._lsSet('docproc_current_subdir', this.localCurrentSubdir);
         await this.renderDetail();
     },
 
@@ -514,18 +520,18 @@ var KnowledgeBase = {
             var nodePath = '/' + (n.path || '').replace(/\\/g, '/').replace(/\/+/g, '/');
             var isActive = activePath === nodePath;
             var isInActivePath = activePath && activePath.indexOf(nodePath + '/') === 0;
-            // 展开条件：默认不展开，仅当节点子目录在活跃路径上时才展开
-            var shouldExpand = isInActivePath;
+            // 展开条件：活跃路径上的默认展开，用户手动展开的也保持
+            var shouldExpand = isInActivePath || !!this._expandedTreePaths[nodePath];
             var h2 = '';
             if (hasChildren) {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
             }
             h += '<div class="kb-tree-node">';
-            h += '<div class="kb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="KnowledgeBase.navigateSubdir(\'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
+            h += '<div class="kb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="KnowledgeBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
             if (hasChildren) {
-                h += '<span class="kb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();KnowledgeBase.toggleTreeNode(this)">' + (shouldExpand ? 'v' : '>') + '</span>';
+                h += '<span class="kb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();KnowledgeBase.toggleTreeNode(this)"></span>';
             } else {
-                h += '<span class="kb-tree-toggle" style="visibility:hidden">></span>';
+                h += '<span class="kb-tree-toggle" style="visibility:hidden"></span>';
             }
             h += '<span class="icon">📁</span>' + escapeHtmlText(n.name);
             h += '</div>';
@@ -539,18 +545,43 @@ var KnowledgeBase = {
         return h;
     },
 
+    _treeLabelClick: function(labelEl, path) {
+        var toggleEl = labelEl.querySelector('.kb-tree-toggle');
+        if (toggleEl && toggleEl.style.visibility !== 'hidden') {
+            var nodePath = '/' + (path || '').replace(/\\/g, '/').replace(/\/+/g, '/');
+            var isCurrentlyOpen = !!KnowledgeBase._expandedTreePaths[nodePath];
+            if (isCurrentlyOpen) {
+                delete KnowledgeBase._expandedTreePaths[nodePath];
+            } else {
+                KnowledgeBase._expandedTreePaths[nodePath] = true;
+            }
+        }
+        KnowledgeBase.navigateSubdir(path);
+    },
+
     toggleTreeNode: function(toggleEl) {
         var childrenDiv = toggleEl.parentElement.nextElementSibling;
         if (!childrenDiv || !childrenDiv.classList.contains('kb-tree-children')) return;
         var isOpen = childrenDiv.classList.contains('open');
+        // 同步更新展开状态数据
+        var labelEl = toggleEl.parentElement;
+        var onclickAttr = labelEl.getAttribute('onclick') || '';
+        var match = onclickAttr.match(/KnowledgeBase\._treeLabelClick\([^,]+,\s*'([^']+)'/);
+        if (match) {
+            var path = match[1];
+            var nodePath = '/' + path.replace(/\\/g, '/').replace(/\/+/g, '/');
+            if (isOpen) {
+                delete KnowledgeBase._expandedTreePaths[nodePath];
+            } else {
+                KnowledgeBase._expandedTreePaths[nodePath] = true;
+            }
+        }
         if (isOpen) {
             childrenDiv.classList.remove('open');
             toggleEl.classList.remove('open');
-            toggleEl.innerHTML = '&gt;'; // >
         } else {
             childrenDiv.classList.add('open');
             toggleEl.classList.add('open');
-            toggleEl.innerHTML = 'v';
         }
     },
 
@@ -558,6 +589,7 @@ var KnowledgeBase = {
         this.localCurrentSubdir = '';
         this.currentSort = { field: 'mtime', asc: false };
         this.selectedDocs = {};
+        this._lsDel('docproc_current_subdir');
         this.renderDetail();
     },
 
@@ -572,6 +604,7 @@ var KnowledgeBase = {
                 this.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
             }
         }
+        this._lsSet('docproc_current_subdir', this.localCurrentSubdir);
         this.renderDetail();
     },
 
@@ -1122,8 +1155,8 @@ var KnowledgeBase = {
         var ext = relPath.split('.').pop().toLowerCase();
         if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
             this.openMarkdownEditor(relPath);
-        } else if (ext === 'docx') {
-            this.openDocxPreview(relPath);
+        } else if (['docx', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext)) {
+            this.openFilePreview(relPath);
         } else if (ext === 'pdf') {
             this.openPdfPreview(relPath);
         } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
@@ -1133,7 +1166,7 @@ var KnowledgeBase = {
         }
     },
     
-    openDocxPreview: async function(relPath) {
+    openFilePreview: async function(relPath) {
         var self = this;
         var fileName = relPath.split('/').pop();
         
@@ -1155,10 +1188,13 @@ var KnowledgeBase = {
         document.body.appendChild(overlay);
         
         try {
-            var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/docx-preview?path=' + encodeURIComponent(relPath), 'GET');
+            var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/preview?path=' + encodeURIComponent(relPath), 'GET');
             var contentEl = document.getElementById('kb-docx-preview-content');
             if (res.success) {
-                contentEl.innerHTML = res.html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+                var html = (typeof marked !== 'undefined' && res.markdown)
+                    ? marked.parse(res.markdown)
+                    : (res.markdown || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>');
+                contentEl.innerHTML = html;
             } else {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (res.message || '未知错误') + '</div>';
             }
