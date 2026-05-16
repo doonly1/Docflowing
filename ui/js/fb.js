@@ -88,7 +88,11 @@ var FileBase = {
 
     refreshKbList: async function() {
         this.hideContextMenu();
-        await this.renderKbList();
+        if (this.currentFbId) {
+            await this.renderDetail();
+        } else {
+            await this.renderKbList();
+        }
     },
 
     renderKbList: async function() {
@@ -285,7 +289,7 @@ var FileBase = {
 
         this.fbHideContextMenuHandler = function() { FileBase.hideContextMenu(); };
         setTimeout(function() {
-            document.addEventListener('click', FileBase._hideContextMenuHandler);
+            document.addEventListener('click', FileBase.fbHideContextMenuHandler);
         }, 0);
     },
 
@@ -301,6 +305,7 @@ var FileBase = {
             h += '<div class="fb-menu-divider"></div>';
             h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到 KB</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon">📄</span> doc转docx</div>';
             h += '<div class="fb-menu-divider"></div>';
             h += '<div class="fb-menu-item" onclick="FileBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
@@ -335,13 +340,24 @@ var FileBase = {
         this.hideContextMenu();
         try {
             var res = await this.api('/api/fb/' + kbId + '/sync-now', 'POST');
-            if (res.success) {
-                alert('同步已触发');
-            } else {
-                alert(res.message || '同步失败');
+            if (!res.success) {
+                alert(res.message || '同步触发失败');
+                return;
             }
+            setTimeout(function() {
+                FileBase._loadSyncStatus(kbId);
+            }, 1000);
         } catch (e) {
             alert('同步失败: ' + e.message);
+        }
+    },
+
+    convertDoc: async function(kbId) {
+        this.hideContextMenu();
+        try {
+            await this.api('/api/fb/' + kbId + '/convert-doc', 'POST');
+        } catch (e) {
+            alert('转换失败: ' + e.message);
         }
     },
 
@@ -950,7 +966,7 @@ var FileBase = {
 
         this.fbHideContextMenuHandler = function() { FileBase.hideContextMenu(); };
         setTimeout(function() {
-            document.addEventListener('click', FileBase._hideContextMenuHandler);
+            document.addEventListener('click', FileBase.fbHideContextMenuHandler);
         }, 0);
     },
 
@@ -980,11 +996,11 @@ var FileBase = {
                 '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
         if (window.authRole === 'admin') {
             h += '<div class="fb-menu-divider"></div>' +
-                 '<div class="fb-menu-item" onclick="FileBase.goBackToList();FileBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>' +
+                 '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>' +
                  '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
         } else {
             h += '<div class="fb-menu-divider"></div>' +
-                 '<div class="fb-menu-item" onclick="FileBase.goBackToList();FileBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>';
+                 '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
         }
         return h;
     },

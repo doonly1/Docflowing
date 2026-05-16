@@ -367,6 +367,17 @@ def rename_fb(filebase_id):
     return jsonify({'success': True, 'message': '重命名成功'})
 
 
+def _cleanup_synced_data(user_id, filebase_id):
+    """删除文件库时清理 KB 中的同步数据"""
+    try:
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+        worker.cleanup_filebase(user_id, filebase_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to cleanup synced data: {e}")
+
+
 @fb_bp.route('/<fb_id>', methods=['DELETE'])
 @login_required
 @_require_fb_permission('manage')
@@ -386,6 +397,7 @@ def delete_fb(filebase_id):
         db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
+        _cleanup_synced_data(row['owner_id'], filebase_id)
         return jsonify({'success': True, 'message': '网络文件库已删除'})
 
     if local_path.startswith(trash_dir):
@@ -394,6 +406,7 @@ def delete_fb(filebase_id):
         db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
+        _cleanup_synced_data(row['owner_id'], filebase_id)
         return jsonify({'success': True, 'message': '文件库已彻底删除'})
 
     fb_name = row['name']
@@ -407,6 +420,7 @@ def delete_fb(filebase_id):
     db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
     db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
     db.commit()
+    _cleanup_synced_data(row['owner_id'], filebase_id)
     return jsonify({'success': True, 'message': '文件库已移至已删除目录'})
 
 
@@ -1178,10 +1192,15 @@ def get_sync_status(filebase_id):
                     if can_convert(os.path.join(root, f)):
                         syncable_count += 1
 
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+        is_syncing = filebase_id in worker._processing_filebases
+
         return jsonify({
             'success': True,
             'enabled': bool(kb_row['is_synced_to_kb']),
             'is_owner': kb_row['owner_id'] == g.user_id,
+            'is_syncing': is_syncing,
             'status': {
                 'total_files': total_files,
                 'syncable_files': syncable_count,
@@ -1196,6 +1215,7 @@ def get_sync_status(filebase_id):
             'success': True,
             'enabled': bool(kb_row['is_synced_to_kb']),
             'is_owner': kb_row['owner_id'] == g.user_id,
+            'is_syncing': False,
             'status': {
                 'total_files': 0,
                 'syncable_files': 0,
@@ -1719,3 +1739,55 @@ def open_local_file(filebase_id):
     as_attachment = ext not in previewable_exts
 
     return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path))
+
+
+@fb_bp.route('/<fb_id>/convert-doc', methods=['POST'])
+@login_required
+@_require_fb_permission('edit')
+def convert_doc_files(filebase_id):
+    """扫描文件库中的 .doc 文件并转换为 .docx（对 KB 同步无感）"""
+    db = get_db()
+    row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not row:
+        return jsonify({'success': False, 'message': '文件库不存在'}), 404
+
+    local_path = row['local_path']
+    if not local_path or not os.path.exists(local_path):
+        return jsonify({'success': False, 'message': '文件库路径不存在'}), 400
+
+    from tools.doc_process import doc_to_docx
+    import logging
+    logger = logging.getLogger(__name__)
+
+    doc_dirs = set()
+    for root, dirs, files in os.walk(local_path):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for f in files:
+            if f.lower().endswith('.doc') and not f.startswith('~$'):
+                doc_dirs.add(root)
+
+    if not doc_dirs:
+        return jsonify({'success': True, 'message': '没有需要转换的 .doc 文件', 'converted': 0, 'failed': 0})
+
+    total_ok = 0
+    total_err = 0
+    errors = []
+
+    for workdir in sorted(doc_dirs):
+        err_msg = doc_to_docx(workdir)
+        if err_msg:
+            total_err += 1
+            errors.append(err_msg)
+            logger.warning(f"doc 转换失败 [{workdir}]: {err_msg}")
+        else:
+            count = sum(1 for f in os.listdir(workdir)
+                        if f.lower().endswith('.doc') and not f.startswith('~$'))
+            total_ok += count
+
+    return jsonify({
+        'success': True,
+        'message': f'转换完成: {total_ok} 成功, {total_err} 个目录有失败',
+        'converted': total_ok,
+        'failed_dirs': total_err,
+        'errors': errors if errors else None
+    })

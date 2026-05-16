@@ -95,7 +95,8 @@ class MarkItDownConverter(BaseConverter):
 
             # 检测扫描版 PDF（无文本层），跳过不同步
             if ext == '.pdf' and (not content or len(content.strip()) < 20):
-                logger.info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
+                import logging
+                logging.getLogger(__name__).info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
                 return None
 
             return content
@@ -165,73 +166,6 @@ class DOCXConverter(BaseConverter):
         return "\n".join(rows)
 
 
-class DOCConverter(BaseConverter):
-    """DOC 文件转换器（先转 DOCX，再提取文本）"""
-
-    @property
-    def file_type(self) -> str:
-        return "doc"
-
-    def can_convert(self, file_path: str) -> bool:
-        return file_path.lower().endswith('.doc')
-
-    def _ensure_com_init(self):
-        """确保 COM 在当前线程中已初始化（win32com 需要）"""
-        try:
-            import pythoncom
-            pythoncom.CoInitialize()
-        except ImportError:
-            pass
-
-    def _convert_via_docx(self, source_path: str) -> Optional[str]:
-        """通过 doc→docx→md 路径转换"""
-        try:
-            from tools.doc_process import doc_to_docx
-            workdir = os.path.dirname(source_path)
-            err_msg = doc_to_docx(workdir)
-            if err_msg:
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"doc→docx failed: {source_path}, reason: {err_msg}"
-                )
-                return None
-
-            basename = os.path.splitext(os.path.basename(source_path))[0]
-            docx_path = os.path.join(workdir, basename + '.docx')
-
-            if os.path.exists(docx_path):
-                docx_converter = MarkItDownConverter()
-                content = docx_converter.convert(docx_path)
-                if content is None:
-                    docx_converter = DOCXConverter()
-                    content = docx_converter.convert(docx_path)
-                try:
-                    os.remove(docx_path)
-                except:
-                    pass
-                return content
-            return None
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"doc→docx conversion failed: {source_path}, error: {e}"
-            )
-            return None
-
-    def convert(self, source_path: str) -> Optional[str]:
-        self._ensure_com_init()
-
-        content = self._convert_via_docx(source_path)
-        if content:
-            return content
-
-        import logging
-        logging.getLogger(__name__).warning(
-            f"无法转换 .doc 文件，请安装 Microsoft Word 或 LibreOffice: {source_path}"
-        )
-        return None
-
-
 class PDFConverter(BaseConverter):
     """PDF 文件转换器（MarkItDown 不可用时的备用方案）"""
 
@@ -258,7 +192,8 @@ class PDFConverter(BaseConverter):
 
             # 检测扫描版 PDF（无文本层），跳过不同步
             if not content or len(content.strip()) < 20:
-                logger.info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
+                import logging
+                logging.getLogger(__name__).info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
                 return None
 
             return content
@@ -347,7 +282,6 @@ CONVERTERS = {}
 for ext in MARKITDOWN_EXTENSIONS:
     CONVERTERS[ext] = MarkItDownConverter()
 
-CONVERTERS['.doc'] = DOCConverter()
 CONVERTERS['.md'] = MDConverter()
 CONVERTERS['.txt'] = TXTConverter()
 

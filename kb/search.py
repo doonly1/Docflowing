@@ -7,7 +7,7 @@ def search_wiki(usr_id, query):
 
     conn = get_db(usr_id)
     search_terms = query.strip().split()
-    fts_query = ' OR '.join(search_terms)
+    fts_query = ' OR '.join(f'title:{t} OR content:{t}' for t in search_terms)
 
     # FTS5 全文搜索（trigram tokenizer 对中文词组匹配良好）
     try:
@@ -21,7 +21,7 @@ def search_wiki(usr_id, query):
     except Exception:
         rows = []
 
-    # trigram 仍可能有遗漏，用 LIKE 补充
+    # LIKE 兜底
     if not rows:
         try:
             rows = conn.execute(

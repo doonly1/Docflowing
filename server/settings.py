@@ -1,7 +1,6 @@
 """用户配置持久化 + 配置管理 API
 
 配置存储位置：workspaces/{user_id}/config/user_config.yaml
-迁移：从旧路径 ~/.config/DocProc/users/{user_id}.yaml 自动迁移
 """
 
 import os

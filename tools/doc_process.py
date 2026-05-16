@@ -75,6 +75,8 @@ def libreoffice_install_hint() -> str:
 def doc_to_docx(workdir: str) -> Optional[str]:
     """将workdir目录下的.doc文件批量转换为.docx格式（跨平台）
 
+    记录转换前的 .docx mtime，只认 mtime 有变化的才算本次转换成功。
+
     Returns:
         None if success, error message string if failed
     """
@@ -83,6 +85,44 @@ def doc_to_docx(workdir: str) -> Optional[str]:
     if not doc_files:
         return None
 
+    # 记录转换前各 .docx 的 mtime，用于判断本次是否真的生成了新文件
+    before_mtimes = {}
+    for f in doc_files:
+        base = os.path.splitext(f)[0]
+        docx_path = os.path.join(workdir, base + '.docx')
+        if os.path.exists(docx_path):
+            before_mtimes[base] = os.path.getmtime(docx_path)
+
+    def _get_converted():
+        """返回本次转换中 .docx 被真正更新的文件列表"""
+        converted = []
+        for f in doc_files:
+            base = os.path.splitext(f)[0]
+            docx_path = os.path.join(workdir, base + '.docx')
+            if not os.path.exists(docx_path):
+                continue
+            if not os.path.getsize(docx_path) > 0:
+                continue
+            old_mtime = before_mtimes.get(base)
+            cur_mtime = os.path.getmtime(docx_path)
+            # 之前没有 .docx 或 mtime 变了 → 本次真正生成了新文件
+            if old_mtime is None or cur_mtime > old_mtime:
+                converted.append(base)
+        return converted
+
+    def _cleanup(converted):
+        """确认转换成功，删除原 .doc"""
+        for base in converted:
+            doc_path = os.path.join(workdir, base + '.doc')
+            try:
+                os.remove(doc_path)
+                logger.debug('已删除原文件: %s', doc_path)
+            except OSError as e:
+                logger.warning('删除原文件失败: %s, %s', doc_path, e)
+
+    convert_errors = []
+
+    # ——— win32com 路径 ———
     try:
         from win32com import client
         word = client.Dispatch("Word.Application")
@@ -90,35 +130,45 @@ def doc_to_docx(workdir: str) -> Optional[str]:
         for file in doc_files:
             logger.info('转化docx：{}'.format(file))
             file_path = os.path.abspath(os.path.normpath(os.path.join(workdir, file)))
-            doc = word.Documents.Open(file_path)
-            new_path = os.path.abspath(os.path.normpath(file_path + "x"))
-            doc.SaveAs(new_path, 12)
-            doc.Close()
             try:
-                os.remove(file_path)
-            except OSError:
-                pass
+                doc = word.Documents.Open(file_path)
+                new_path = os.path.abspath(os.path.normpath(file_path + "x"))
+                doc.SaveAs(new_path, 12)
+                doc.Close()
+            except Exception as e:
+                logger.warning('win32com 转换单个文件失败: %s, %s', file, e)
+                convert_errors.append(file)
         word.Quit()
+
+        _cleanup(_get_converted())
+        if convert_errors:
+            err_msg = f"win32com 部分转换失败: {', '.join(convert_errors)}"
+            logger.warning(err_msg)
+            return err_msg
         return None
     except (ImportError, ModuleNotFoundError):
         logger.info('win32com 不可用，回退到 LibreOffice')
     except Exception as e:
         logger.warning('win32com 转换失败，回退到 LibreOffice: %s', e)
 
+    # ——— LibreOffice 路径 ———
     lo_cmd = find_libreoffice()
     if lo_cmd:
         for file in doc_files:
             logger.info('转化docx(LibreOffice)：{}'.format(file))
+
+        doc_paths = [os.path.join(workdir, f) for f in doc_files]
+
         cmd = [lo_cmd, '--headless', '--convert-to', 'docx',
-               '--outdir', workdir] + [os.path.join(workdir, f) for f in doc_files]
+               '--outdir', workdir] + doc_paths
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-            for file in doc_files:
-                try:
-                    os.remove(os.path.join(workdir, file))
-                except OSError:
-                    pass
+            subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            _cleanup(_get_converted())
             return None
+        except subprocess.TimeoutExpired:
+            err_msg = 'LibreOffice 转换超时（5分钟）'
+            logger.error(err_msg)
+            return err_msg
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or b'').decode('utf-8', errors='replace')[:200]
             err_msg = f'LibreOffice 转换失败: {stderr}'

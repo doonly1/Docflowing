@@ -373,6 +373,8 @@ var WikiKnowledge = {
         var emptyEl = document.getElementById('kb-empty-state');
         if (!messagesEl) return;
 
+        this._allSources = [];
+
         if (this.messages.length === 0) {
             if (emptyEl) emptyEl.style.display = 'flex';
             return;
@@ -400,9 +402,11 @@ var WikiKnowledge = {
                     '<div class="kb-chat-sources-title">📚 参考来源</div>';
                 for (var j = 0; j < msg.sources.length; j++) {
                     var src = msg.sources[j];
+                    var srcIdx = this._allSources.length;
+                    this._allSources.push(src);
                     html += '<div class="kb-chat-source-item">' +
                         '<span class="icon">📄</span>' +
-                        '<a href="#" onclick="WikiKnowledge.viewSource(\'' + (src.path || '').replace(/'/g, "\\'") + '\');return false;">' + (src.title || src.path) + '</a>' +
+                        '<a href="#" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + (src.title || src.path) + '</a>' +
                     '</div>';
                 }
                 html += '</div>';
@@ -488,27 +492,33 @@ var WikiKnowledge = {
         this._switchToInitial();
     },
 
-    viewSource: function(path) {
-        if (!path) return;
-        var fileName = path.split('/').pop();
+    viewSource: function(index) {
+        var src = this._allSources[index];
+        if (!src || !src.path) return;
+        var fileName = src.path.split('/').pop();
         var ext = fileName.split('.').pop().toLowerCase();
-        
+
         if (ext === 'docx') {
-            this._previewDocxFile(path);
+            this._previewDocxFile(src);
         } else if (ext === 'md' || ext === 'txt') {
-            this._previewTextFile(path);
+            this._previewTextFile(src);
         } else if (ext === 'pdf') {
-            this._previewPdfFile(path);
+            this._previewPdfFile(src);
         } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-            this._previewImageFile(path);
+            this._previewImageFile(src);
         } else {
-            window.open('/api/fb/default/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+            if (src.fb_id && src.fb_path) {
+                window.open('/api/fb/' + src.fb_id + '/local-files/open?path=' + encodeURIComponent(src.fb_path) + '&token=' + encodeURIComponent(authToken), '_blank');
+            } else {
+                window.open('/api/kb/files/' + encodeURIComponent(src.path) + '?token=' + encodeURIComponent(authToken), '_blank');
+            }
         }
     },
     
-    _previewDocxFile: async function(path) {
-        var fileName = path.split('/').pop();
-        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
+    _previewDocxFile: async function(src) {
+        var fileName = (src.fb_path || src.path).split('/').pop();
+        var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
+        var filePath = src.fb_path || src.path;
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
@@ -528,7 +538,7 @@ var WikiKnowledge = {
         document.body.appendChild(overlay);
         
         try {
-            var res = await apiFetch('/api/fb/' + kbId + '/local-files/docx-preview?path=' + encodeURIComponent(path), { method: 'GET' });
+            var res = await apiFetch('/api/fb/' + kbId + '/local-files/docx-preview?path=' + encodeURIComponent(filePath), { method: 'GET' });
             var data = await res.json();
             var contentEl = document.getElementById('preview-content');
             if (data.success) {
@@ -542,9 +552,10 @@ var WikiKnowledge = {
         }
     },
     
-    _previewTextFile: async function(path) {
-        var fileName = path.split('/').pop();
-        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
+    _previewTextFile: async function(src) {
+        var fileName = (src.fb_path || src.path).split('/').pop();
+        var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
+        var filePath = src.fb_path || src.path;
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
@@ -564,7 +575,10 @@ var WikiKnowledge = {
         document.body.appendChild(overlay);
         
         try {
-            var res = await apiFetch('/api/fb/' + kbId + '/local-files/content?path=' + encodeURIComponent(path), { method: 'GET' });
+            var apiUrl = src.fb_id
+                ? '/api/fb/' + kbId + '/local-files/content?path=' + encodeURIComponent(filePath)
+                : '/api/kb/files/' + encodeURIComponent(src.path);
+            var res = await apiFetch(apiUrl, { method: 'GET' });
             var data = await res.json();
             var contentEl = document.getElementById('preview-content');
             if (data.success) {
@@ -591,10 +605,11 @@ var WikiKnowledge = {
         }
     },
     
-    _previewPdfFile: function(path) {
-        var fileName = path.split('/').pop();
-        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
-        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
+    _previewPdfFile: function(src) {
+        var fileName = (src.fb_path || src.path).split('/').pop();
+        var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
+        var filePath = src.fb_path || src.path;
+        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(filePath) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
@@ -611,10 +626,11 @@ var WikiKnowledge = {
         document.body.appendChild(overlay);
     },
     
-    _previewImageFile: function(path) {
-        var fileName = path.split('/').pop();
-        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
-        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
+    _previewImageFile: function(src) {
+        var fileName = (src.fb_path || src.path).split('/').pop();
+        var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
+        var filePath = src.fb_path || src.path;
+        var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(filePath) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';

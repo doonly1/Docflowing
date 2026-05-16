@@ -72,8 +72,8 @@ class SyncWorker:
         """同步线程主循环"""
         while self._running:
             try:
-                self._process_triggered_syncs()
                 self._sync_all_enabled_filebases()
+                self._process_triggered_syncs()
             except Exception as e:
                 logger.error(f"Sync worker error: {e}", exc_info=True)
 
@@ -148,8 +148,16 @@ class SyncWorker:
         self._trigger_queue.put((user_id, filebase_id))
 
     def trigger_sync_now(self, user_id: str, filebase_id: str):
-        """立即触发同步（用于手动触发）"""
-        self._trigger_sync(user_id, filebase_id)
+        """立即触发同步（用于手动触发），直接启动线程，不经过周期性队列"""
+        if filebase_id in self._processing_filebases:
+            logger.debug(f"Filebase {filebase_id} is already syncing, starting another")
+
+        thread = threading.Thread(
+            target=self._sync_filebase,
+            args=(user_id, filebase_id),
+            daemon=True
+        )
+        thread.start()
 
     def _sync_filebase(self, user_id: str, filebase_id: str):
         """同步单个文件库"""
@@ -165,7 +173,8 @@ class SyncWorker:
 
             source_dir = filebase_info['local_path']
             if not source_dir or not os.path.exists(source_dir):
-                logger.warning(f"Filebase {filebase_id} has no valid source path")
+                logger.warning(f"Filebase {filebase_id} source directory missing, cleaning up synced data")
+                self.cleanup_filebase(user_id, filebase_id)
                 return
 
             current_files = self._scan_filebase(source_dir)
@@ -255,10 +264,15 @@ class SyncWorker:
             existing = state.files.get(relative_path)
             source_mtime = file_info['mtime']
 
+            # 检查目标 .md 文件是否存在（可能被用户手动删除）
+            target_path = self._get_target_path(user_id, filebase_id, relative_path)
+            target_missing = not os.path.isfile(target_path)
+
             needs_sync = (
                 existing is None or
                 existing.source_mtime < source_mtime or
-                (existing.status == 'failed' and existing.retry_count < 3)
+                (existing.status == 'failed' and existing.retry_count < 3) or
+                target_missing
             )
 
             if needs_sync:
@@ -271,8 +285,16 @@ class SyncWorker:
 
         logger.info(f"Filebase {filebase_id}: {len(files_to_sync)} files to sync")
 
+        deadline = time.time() + 600
+
         for i, (relative_path, file_info) in enumerate(files_to_sync):
-            self._semaphore.acquire()
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                logger.warning(f"Sync timeout for {filebase_id}: no time left to start more conversions")
+                break
+            if not self._semaphore.acquire(timeout=min(remaining, 60)):
+                logger.warning(f"Sync timeout for {filebase_id}: timeout waiting to start conversion of {relative_path}")
+                break
 
             thread = threading.Thread(
                 target=self._convert_and_sync,
@@ -282,7 +304,10 @@ class SyncWorker:
             thread.start()
 
         for _ in range(self._max_concurrent):
-            self._semaphore.acquire()
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            self._semaphore.acquire(timeout=min(remaining, 60))
 
     def _convert_and_sync(self, user_id: str, filebase_id: str,
                          relative_path: str, file_info: Dict, state):
@@ -430,16 +455,28 @@ class SyncWorker:
             return False
 
     def cleanup_filebase(self, user_id: str, filebase_id: str):
-        """清理文件库的同步数据"""
+        """清理文件库的同步数据（.md 文件、同步状态、FTS5 索引）"""
         try:
             kb_root = _get_kb_root(user_id)
             imported_dir = os.path.join(kb_root, 'imported', filebase_id)
 
+            # 清理 .md 文件
             if os.path.exists(imported_dir):
                 import shutil
                 shutil.rmtree(imported_dir)
 
+            # 清理同步状态
             self._state_manager.clear_all_state(user_id, filebase_id)
+
+            # 清理 FTS5 索引
+            from kb.database import get_db
+            conn = get_db(user_id)
+            prefix = f'imported/{filebase_id}/%'
+            conn.execute(
+                "DELETE FROM wiki_fts WHERE usr_id = ? AND path LIKE ?",
+                (user_id, prefix)
+            )
+            conn.commit()
 
             logger.info(f"Cleaned up sync data for filebase {filebase_id}")
 

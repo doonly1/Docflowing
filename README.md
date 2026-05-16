@@ -13,7 +13,7 @@ DocProc（文枢）是一个面向公文处理的 **Web 应用 + 工具集**，�
 pip install -r requirements.txt
 
 # 启动 Web 服务
-python server.py
+python app.py
 # 默认访问 http://localhost:5000
 ```
 
@@ -48,10 +48,13 @@ docker-compose up -d
 
 ### 🗂️ 文件库管理（`fb/`）
 
-- **文件库 CRUD**：创建本地/网络文件库，自动扫描同步
-- **文件操作**：上传、下载（Zip 打包）、删除、重命名
-- **权限管理**：view / edit / manage 三级权限，支持共享
-- **工具集成**：按工具类型过滤显示文件
+- **文件库 CRUD**：创建本地/网络文件库，复制、重命名、删除（移入回收站）、转让所有权
+- **回收站**：列出、恢复、永久删除回收站项目
+- **文件操作**：上传、下载（Zip 打包）、批量下载、在线编辑/预览、重命名、移动、复制、创建目录
+- **权限管理**：view / edit / manage 三级权限，支持共享，成员增删改
+- **工具集成**：SSE 流式执行文档处理工具，按工具类型过滤
+- **KB 同步**：文件库→知识库自动增量同步，支持手动触发
+- **格式转换**：批量 .doc → .docx 转换
 
 ### 🧠 知识库系统（`kb/`）— 进化知识库（Evolving Wiki）
 
@@ -68,6 +71,7 @@ AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进�
 | **自动提取** | `auto_extract.py` | 对话分析，自动提取记忆和技能 |
 | **洞察分析** | `routes_insights.py` + `insights.py` | 使用数据概览、活跃模式、热门会话统计 |
 | **LLM 配置** | `config.py` | OpenAI 兼容 API，Fernet 加密存储密钥 |
+| **同步管理** | `sync_worker.py` + `sync_converters.py` | 文件库→KB 自动同步，增量同步（mtime），并发控制，多格式转 Markdown |
 
 ### 🔐 认证与权限
 
@@ -85,16 +89,15 @@ AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进�
 │   ├── config.yaml             # 公司信息、比对参数
 │   └── kb_config.yaml          # 知识库系统配置（LLM、记忆、技能）
 ├── server/                     # Flask 后端服务核心
-│   ├── __init__.py             # App 工厂
+│   ├── __init__.py             # App 工厂、静态文件服务、全局错误处理
 │   ├── auth.py                 # Token 认证、用户管理、活跃时间
 │   ├── middleware.py           # 请求 ID 中间件
 │   ├── runner.py               # 工具脚本 SSE 流式执行
 │   ├── settings.py             # 用户配置持久化
 │   └── workspace.py            # 工作区管理、文件上传/下载
 ├── fb/                         # 文件库管理
-│   ├── models.py               # 数据库模型
-│   ├── database.py             # SQLite 连接与迁移
-│   └── routes.py               # 文件库 CRUD、权限 API
+│   ├── models.py               # 数据库模型 / 表结构
+│   └── routes.py               # 文件库 CRUD、回收站、文件操作、权限、工具执行、KB 同步
 ├── kb/                         # 知识库系统（进化 Wiki）
 │   ├── routes.py               # 核心 API（文件 CRUD、搜索、权限）
 │   ├── routes_session.py       # 会话管理 API
@@ -106,6 +109,8 @@ AI 核心模块，灵感源自 Hermes Agent，实现记忆与技能的自主进�
 │   ├── models.py               # 库表模型
 │   ├── session_db.py           # 会话消息数据库
 │   ├── search.py               # FTS5 全文搜索
+│   ├── sync_converters.py      # 同步文件格式转换器（策略模式）
+│   ├── sync_worker.py          # 文件库→KB 后台同步线程
 │   ├── memory.py               # 持久记忆存储（安全扫描）
 │   ├── llm.py                  # LLM 调用（OpenAI 兼容）
 │   ├── context_compressor.py   # 上下文压缩
@@ -205,11 +210,12 @@ DocProc（文枢）——本项目源码仅供学习参考，未经授权禁止�
 
 ### 第三方声明
 
-本项目使用了以下开源组件，感谢它们的作者：
+本项目使用了以下开源组件，感谢作者：
 
 | 组件 | 许可证 | 用途 |
 |------|--------|------|
-| [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) | MIT | 知识库进化模块设计思想与代码逻辑（上下文压缩、技能审查、会话洞察、文件安全等） |
+| [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) | MIT | 知识库模块代码逻辑（上下文压缩、技能审查、会话洞察、文件安全等） |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | MIT | 系统级技能（诊断、TDD、原型设计、代码审查等） |
 | [Quill](https://github.com/slab/quill) | BSD-3-Clause | 富文本编辑器 |
 | [Turndown](https://github.com/mixmark-io/turndown) | MIT | HTML 转 Markdown |
 | [Marked.js](https://github.com/markedjs/marked) | MIT | Markdown 渲染 |
@@ -220,14 +226,10 @@ DocProc（文枢）——本项目源码仅供学习参考，未经授权禁止�
 | [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) | MIT | HTML 解析 |
 | [PyYAML](https://github.com/yaml/pyyaml) | MIT | YAML 解析 |
 | [Flask-CORS](https://github.com/corydolphin/flask-cors) | MIT | 跨域请求支持 |
+| [cryptography](https://github.com/pyca/cryptography) | Apache-2.0 / BSD | API 密钥加密存储 |
+| [markitdown](https://github.com/microsoft/markitdown) | MIT | 文档格式转换（PDF/DOCX/PPTX/XLSX 等） |
+| [requests](https://github.com/psf/requests) | Apache-2.0 | LLM API 调用、网页抓取 |
+| [pywin32](https://github.com/mhammond/pywin32) | PSF | Windows COM 支持（Word 文档转换，可选） |
+| [docx2pdf](https://github.com/AlJohri/docx2pdf) | MIT | DOCX 转 PDF（可选） |
 
-以上组件的原始许可证文本可在各自仓库中查看。其中 Hermes Agent 的 MIT 许可证要求如下：
-
-> MIT License
-> Copyright (c) 2025 Nous Research
->
-> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
->
-> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
->
-> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+以上组件的原始许可证文本可在各自仓库中查看。

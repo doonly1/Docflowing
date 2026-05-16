@@ -454,6 +454,25 @@ def search_files():
 
 # ==================== Agent 上下文（预留） ====================
 
+
+def _extract_from_keyword(text, keywords):
+    pos = -1
+    text_lower = text.lower()
+    for kw in keywords:
+        p = text_lower.find(kw.lower())
+        if p != -1:
+            pos = p
+            break
+    if pos == -1:
+        return text
+    sentence_start = 0
+    for sep in ('。', '！', '？', '!', '?', '\n'):
+        idx = text.rfind(sep, 0, pos)
+        if idx != -1:
+            sentence_start = max(sentence_start, idx + len(sep))
+    return text[sentence_start:].strip()
+
+
 @wiki_bp.route('/agent/context', methods=['POST'])
 @login_required
 @_require_wiki_permission('view')
@@ -475,25 +494,33 @@ def agent_context():
         total_chars = 0
 
         # 先收集所有匹配文档的来源（不受字符预算限制）
-        kb_root = _get_kb_root(usr_id)
         for r in results:
-            sources.append({'path': r['path'], 'title': r['title']})
+            src = {'path': r['path'], 'title': r['title']}
+            if r['path'].startswith('imported/'):
+                parts = r['path'].split('/')
+                if len(parts) >= 3:
+                    src['fb_id'] = parts[1]
+                    fb_path = '/'.join(parts[2:])
+                    # 同步时非 .md 文件被追加了 .md 后缀，需还原
+                    base, ext = os.path.splitext(fb_path)
+                    if ext.lower() == '.md' and os.path.splitext(base)[1]:
+                        fb_path = base
+                    src['fb_path'] = fb_path
+            sources.append(src)
 
         keywords = query.lower().split()
         num_results = len(results)
 
-        for i, r in enumerate(results):
-            full_path = os.path.normpath(os.path.join(kb_root, r['path']))
-            if not os.path.isfile(full_path):
-                continue
+        conn = get_db(usr_id)
 
-            try:
-                with open(full_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-            except Exception:
+        for i, r in enumerate(results):
+            row = conn.execute(
+                "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+                (usr_id, r['path'])
+            ).fetchone()
+            if not row or not row['content'].strip():
                 continue
-            if not content.strip():
-                continue
+            content = row['content']
 
             # 按空行分割段落，提取包含关键词的匹配段落
             paragraphs = re.split(r'\n\s*\n', content)
@@ -512,8 +539,11 @@ def agent_context():
             if doc_budget <= 0:
                 continue
 
-            # 拼接匹配段落，按预算截断
-            doc_content = '\n\n'.join(matched_bodies)
+            # 从关键词所在句子开始截取，确保关键词可见
+            trimmed_bodies = []
+            for para in matched_bodies:
+                trimmed_bodies.append(_extract_from_keyword(para, keywords))
+            doc_content = '\n\n'.join(trimmed_bodies)
             if len(doc_content) > doc_budget:
                 doc_content = doc_content[:doc_budget]
 
