@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 
@@ -461,7 +462,7 @@ def agent_context():
         usr_id = g.user_id
         data = request.get_json() or {}
         query = (data.get('query') or '').strip()
-        max_chars = data.get('max_chars', 4000)
+        max_chars = data.get('max_chars', 10000)
         session_id = data.get('session_id')
 
         if not query:
@@ -473,11 +474,15 @@ def agent_context():
         sources = []
         total_chars = 0
 
+        # 先收集所有匹配文档的来源（不受字符预算限制）
+        kb_root = _get_kb_root(usr_id)
         for r in results:
-            if total_chars >= max_chars:
-                break
+            sources.append({'path': r['path'], 'title': r['title']})
 
-            kb_root = _get_kb_root(usr_id)
+        keywords = query.lower().split()
+        num_results = len(results)
+
+        for i, r in enumerate(results):
             full_path = os.path.normpath(os.path.join(kb_root, r['path']))
             if not os.path.isfile(full_path):
                 continue
@@ -487,16 +492,43 @@ def agent_context():
                     content = f.read()
             except Exception:
                 continue
+            if not content.strip():
+                continue
 
-            remaining = max_chars - total_chars
-            if len(content) > remaining:
-                content = content[:remaining]
+            # 按空行分割段落，提取包含关键词的匹配段落
+            paragraphs = re.split(r'\n\s*\n', content)
+            matched_bodies = []
+            for para in paragraphs:
+                if any(kw in para.lower() for kw in keywords):
+                    matched_bodies.append(para.strip())
 
-            context_parts.append(f"## {r['title']}\n\n{content}")
-            sources.append({'path': r['path'], 'title': r['title']})
-            total_chars += len(content)
+            # 兜底：若无关键词匹配到段落（如只匹配了标题），展示开头
+            if not matched_bodies:
+                matched_bodies = [content.strip()[:300]]
+
+            # 公平配额：剩余预算 / 剩余待处理文档数
+            remaining_results = num_results - i
+            doc_budget = (max_chars - total_chars) // remaining_results
+            if doc_budget <= 0:
+                continue
+
+            # 拼接匹配段落，按预算截断
+            doc_content = '\n\n'.join(matched_bodies)
+            if len(doc_content) > doc_budget:
+                doc_content = doc_content[:doc_budget]
+
+            context_parts.append(f"## {r['title']}\n\n{doc_content}")
+            total_chars += len(doc_content)
 
         kb_context = '\n\n---\n\n'.join(context_parts)
+
+        # 对非LLM返回的匹配内容做关键词高亮标记
+        if kb_context and keywords:
+            for kw in keywords:
+                if len(kw) < 1:
+                    continue
+                pattern = re.compile(re.escape(kw), re.IGNORECASE)
+                kb_context = pattern.sub(lambda m: f'<mark>{m.group()}</mark>', kb_context)
 
         from .memory import get_memory_store
         from .context_fence import build_memory_context_block
@@ -508,16 +540,12 @@ def agent_context():
         if is_llm_available(usr_id):
             skills_index = _build_skills_index(usr_id)
 
-            knowledge_section = f"## 参考信息\n{kb_context}" if kb_context else "## 参考信息\n（暂无相关参考信息）"
+            knowledge_section = f"## 参考信息\n{kb_context}" if kb_context else "## 参考信息\n（暂无）"
 
-            system_prompt = f"""参考信息：
-
-{knowledge_section}
-
-{memory_context}
-{skills_index}
-
-回答要简洁准确，不要编造信息。"""
+            system_prompt = f"""{knowledge_section}
+            {memory_context}
+            {skills_index}
+            回答要简洁准确，不要编造信息。"""
 
             from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
             from .llm import call_llm_with_tools
@@ -600,7 +628,7 @@ def agent_context():
             else:
                 message = 'AI 助手暂时不可用，请稍后重试。'
         else:
-            message = '请先在设置中配置 AI 模型。'
+            message = '没有匹配内容，请配置 AI 模型。'
 
         return jsonify({
             'success': True,

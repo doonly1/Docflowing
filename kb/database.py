@@ -44,7 +44,7 @@ ALL_TABLES = [
         title,
         content,
         path,
-        tokenize='unicode61'
+        tokenize='trigram'
     )
     """,
 ]
@@ -73,11 +73,40 @@ def get_db_path(user_id=None):
     return os.path.join(kb_dir, 'wiki.db')
 
 
+def _migrate_fts_tokenizer(conn):
+    """检查现有 wiki_fts 的 tokenizer，非 trigram 则迁移"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='wiki_fts'"
+    ).fetchone()
+    if row and 'trigram' not in (row['sql'] or ''):
+        old_data = conn.execute(
+            "SELECT usr_id, title, content, path FROM wiki_fts"
+        ).fetchall()
+        conn.execute("DROP TABLE IF EXISTS wiki_fts")
+        conn.execute("""
+            CREATE VIRTUAL TABLE wiki_fts USING fts5(
+                usr_id, title, content, path,
+                tokenize='trigram'
+            )
+        """)
+        for old in old_data:
+            try:
+                conn.execute(
+                    "INSERT INTO wiki_fts (usr_id, title, content, path) "
+                    "VALUES (?, ?, ?, ?)",
+                    (old['usr_id'], old['title'], old['content'], old['path'])
+                )
+            except Exception:
+                pass
+        conn.commit()
+
+
 def init_db(conn):
     for sql in ALL_TABLES:
         conn.execute(sql)
     for sql in CREATE_INDEXES:
         conn.execute(sql)
+    _migrate_fts_tokenizer(conn)
     conn.commit()
 
 

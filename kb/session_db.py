@@ -353,6 +353,15 @@ class SessionDB:
             return True
         return self._execute_write(_do)
 
+    def clear_all_sessions(self) -> int:
+        def _do(conn):
+            cursor = conn.execute("SELECT COUNT(*) FROM sessions")
+            count = cursor.fetchone()[0]
+            conn.execute("DELETE FROM messages")
+            conn.execute("DELETE FROM sessions")
+            return count
+        return self._execute_write(_do)
+
     def prune_sessions(self, older_than_days: int = 90) -> int:
         cutoff = time.time() - (older_than_days * 86400)
         def _do(conn):

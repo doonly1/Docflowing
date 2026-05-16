@@ -195,6 +195,26 @@ def register_session_routes(bp: Blueprint):
 
         })
 
+    @bp.route('/sessions', methods=['DELETE'])
+    @login_required
+    def clear_all_sessions():
+
+        user_id = g.user_id
+
+        db = get_session_db(user_id)
+
+        count = db.clear_all_sessions()
+
+        return jsonify({
+
+            'success': True,
+
+            'message': 'All sessions cleared',
+
+            'deleted_count': count,
+
+        })
+
 def _auto_title_async(user_id: str, session_id: str, db):
 
     def _generate():

@@ -9,15 +9,20 @@ def search_wiki(usr_id, query):
     search_terms = query.strip().split()
     fts_query = ' OR '.join(search_terms)
 
-    rows = None
+    # FTS5 全文搜索（trigram tokenizer 对中文词组匹配良好）
     try:
         rows = conn.execute(
-            "SELECT path, title, snippet(wiki_fts, 1, '<mark>', '</mark>', '...', 30) as title_snippet, "
+            "SELECT path, title, "
+            "snippet(wiki_fts, 1, '<mark>', '</mark>', '...', 30) as title_snippet, "
             "snippet(wiki_fts, 2, '<mark>', '</mark>', '...', 60) as content_snippet "
             "FROM wiki_fts WHERE usr_id = ? AND wiki_fts MATCH ?",
             (usr_id, fts_query)
         ).fetchall()
     except Exception:
+        rows = []
+
+    # trigram 仍可能有遗漏，用 LIKE 补充
+    if not rows:
         try:
             rows = conn.execute(
                 "SELECT path, title, '' as title_snippet, '' as content_snippet "
@@ -27,16 +32,8 @@ def search_wiki(usr_id, query):
         except Exception:
             return []
 
-    if rows is None:
-        return []
-
-    results = []
-    for row in rows:
-        results.append({
-            'path': row['path'],
-            'title': row['title'],
-            'title_snippet': row['title_snippet'],
-            'content_snippet': row['content_snippet']
-        })
-
-    return results
+    return [
+        {'path': r['path'], 'title': r['title'],
+         'title_snippet': r['title_snippet'], 'content_snippet': r['content_snippet']}
+        for r in rows
+    ]

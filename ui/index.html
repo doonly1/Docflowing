@@ -701,11 +701,11 @@
             gap: 6px;
         }
 
-        .kb-selector-group {
+        .fb-selector-group {
             margin-bottom: 12px;
         }
 
-        .kb-selector-group-title {
+        .fb-selector-group-title {
             font-size: 13px;
             font-weight: bold;
             color: #333;
@@ -714,7 +714,7 @@
             border-bottom: 1px solid #eee;
         }
 
-        .kb-selector-item {
+        .fb-selector-item {
             padding: 5px 8px;
             margin: 2px 0;
             border: 1px solid #e0e0e0;
@@ -726,29 +726,29 @@
             gap: 8px;
         }
 
-        .kb-selector-item:hover {
+        .fb-selector-item:hover {
             border-color: #e94560;
             background: #fff5f5;
         }
 
-        .kb-selector-item.selected {
+        .fb-selector-item.selected {
             border-color: #e94560;
             background: #fff0f3;
         }
 
-        .kb-selector-item.disabled {
+        .fb-selector-item.disabled {
             opacity: 0.5;
             cursor: not-allowed;
             background: #f5f5f5;
         }
 
-        .kb-selector-subdirs {
+        .fb-selector-subdirs {
             margin-left: 24px;
             border-left: 2px solid #eee;
             padding-left: 12px;
         }
 
-        .kb-subdir-item {
+        .fb-subdir-item {
             padding: 4px 8px;
             margin: 1px 0;
             border: 1px solid transparent;
@@ -760,16 +760,16 @@
             align-items: center;
         }
 
-        .kb-subdir-item:hover {
+        .fb-subdir-item:hover {
             background: #f0f2f5;
         }
 
-        .kb-subdir-item.selected {
+        .fb-subdir-item.selected {
             background: #fff0f3;
             border-color: #e94560;
         }
 
-        .kb-selector-breadcrumb {
+        .fb-selector-breadcrumb {
             padding: 8px 12px;
             background: transparent;
             border-radius: 4px;
@@ -777,22 +777,22 @@
             font-size: 12px;
         }
 
-        .kb-selector-breadcrumb span {
+        .fb-selector-breadcrumb span {
             color: #999;
         }
 
-        .kb-selector-breadcrumb span.active {
+        .fb-selector-breadcrumb span.active {
             color: #333;
             font-weight: bold;
         }
 
-        .kb-selector-breadcrumb a {
+        .fb-selector-breadcrumb a {
             color: #e94560;
             cursor: pointer;
             text-decoration: none;
         }
 
-        .kb-selector-hint {
+        .fb-selector-hint {
             font-size: 11px;
             color: #999;
             padding: 4px 0;
@@ -966,7 +966,7 @@
 
         <div id="result"></div>
             </div>
-            <div id="kb-view" style="display: none;"></div>
+            <div id="content-view" style="display: none;"></div>
         </div>
     </main>
 
@@ -1065,7 +1065,7 @@
 
     <style>
         /* DOCX预览弹窗 */
-        .kb-docx-preview-overlay {
+        .fb-docx-preview-overlay {
             position: fixed;
             top: 0;
             left: 0;
@@ -1078,7 +1078,7 @@
             z-index: 2000;
         }
         
-        .kb-docx-preview-container {
+        .fb-docx-preview-container {
             background: #fff;
             border-radius: 8px;
             width: 92%;
@@ -1091,7 +1091,7 @@
             overflow: hidden;
         }
         
-        .kb-docx-preview-header {
+        .fb-docx-preview-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1101,7 +1101,7 @@
             flex-shrink: 0;
         }
         
-        .kb-docx-preview-header span {
+        .fb-docx-preview-header span {
             font-weight: 500;
             color: #333;
             font-size: 13px;
@@ -1110,7 +1110,7 @@
             text-overflow: ellipsis;
         }
         
-        .kb-docx-preview-header button {
+        .fb-docx-preview-header button {
             background: none;
             border: none;
             font-size: 18px;
@@ -1122,12 +1122,12 @@
             flex-shrink: 0;
         }
         
-        .kb-docx-preview-header button:hover {
+        .fb-docx-preview-header button:hover {
             background: #e9ecef;
             color: #333;
         }
         
-        .kb-docx-preview-content {
+        .fb-docx-preview-content {
             flex: 1;
             padding: 16px;
             overflow-y: auto;
@@ -1137,19 +1137,19 @@
             color: #333;
         }
         
-        .kb-docx-preview-content h1 { font-size: 20px; font-weight: bold; margin: 20px 0 10px; color: #1a1a1a; }
-        .kb-docx-preview-content h2 { font-size: 16px; font-weight: bold; margin: 18px 0 8px; color: #222; }
-        .kb-docx-preview-content h3 { font-size: 14px; font-weight: bold; margin: 16px 0 6px; }
-        .kb-docx-preview-content p { margin: 8px 0; }
-        .kb-docx-preview-content ul, .kb-docx-preview-content ol { padding-left: 24px; margin: 8px 0; }
-        .kb-docx-preview-content li { margin: 4px 0; }
-        .kb-docx-preview-content b, .kb-docx-preview-content strong { font-weight: bold; }
-        .kb-docx-preview-content i, .kb-docx-preview-content em { font-style: italic; }
-        .kb-docx-preview-content u { text-decoration: underline; }
-        .kb-docx-preview-content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
-        .kb-docx-preview-content th, .kb-docx-preview-content td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-        .kb-docx-preview-content th { background: #f5f5f5; font-weight: bold; }
-        .kb-docx-preview-content img { max-width: 100% !important; height: auto !important; }
+        .fb-docx-preview-content h1 { font-size: 20px; font-weight: bold; margin: 20px 0 10px; color: #1a1a1a; }
+        .fb-docx-preview-content h2 { font-size: 16px; font-weight: bold; margin: 18px 0 8px; color: #222; }
+        .fb-docx-preview-content h3 { font-size: 14px; font-weight: bold; margin: 16px 0 6px; }
+        .fb-docx-preview-content p { margin: 8px 0; }
+        .fb-docx-preview-content ul, .fb-docx-preview-content ol { padding-left: 24px; margin: 8px 0; }
+        .fb-docx-preview-content li { margin: 4px 0; }
+        .fb-docx-preview-content b, .fb-docx-preview-content strong { font-weight: bold; }
+        .fb-docx-preview-content i, .fb-docx-preview-content em { font-style: italic; }
+        .fb-docx-preview-content u { text-decoration: underline; }
+        .fb-docx-preview-content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+        .fb-docx-preview-content th, .fb-docx-preview-content td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        .fb-docx-preview-content th { background: #f5f5f5; font-weight: bold; }
+        .fb-docx-preview-content img { max-width: 100% !important; height: auto !important; }
     </style>
     
     <script src="js/main.js"></script>

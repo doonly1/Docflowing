@@ -257,8 +257,8 @@
 
         function getKbInfoFromWorkdir() {
             var el = document.getElementById('workdir');
-            var kbId = el ? el.getAttribute('data-kb-id') : null;
-            var subdir = el ? el.getAttribute('data-kb-subdir') || '' : '';
+            var kbId = el ? el.getAttribute('data-fb-id') : null;
+            var subdir = el ? el.getAttribute('data-fb-subdir') || '' : '';
             return { kbId: kbId, subdir: subdir, isKbMode: !!kbId };
         }
 
@@ -412,8 +412,8 @@
             if (!files || files.length === 0) return;
 
             const workdirInput = document.getElementById('workdir');
-            workdirInput.removeAttribute('data-kb-id');
-            workdirInput.removeAttribute('data-kb-subdir');
+            workdirInput.removeAttribute('data-fb-id');
+            workdirInput.removeAttribute('data-fb-subdir');
 
             const progress = document.getElementById('uploadProgress');
             progress.style.display = 'block';
@@ -1160,8 +1160,8 @@
 
         // ==================== 用户管理 ====================
         window.toggleUserManage = function() {
-            if (typeof KnowledgeBase !== 'undefined' && KnowledgeBase.showUserManage) {
-                KnowledgeBase.showUserManage();
+            if (typeof FileBase !== 'undefined' && FileBase.showUserManage) {
+                FileBase.showUserManage();
             }
             toggleUserMenu();
         };
@@ -1239,27 +1239,27 @@
 
                 var savedView = localStorage.getItem('docproc_current_view');
                 if (savedView === 'fb') {
-                    var savedKbId = localStorage.getItem('docproc_current_kb_id');
+                    var savedKbId = localStorage.getItem('docproc_current_fb_id');
                     if (savedKbId) {
-                        if (typeof KnowledgeBase !== 'undefined') {
-                            KnowledgeBase.currentKbId = savedKbId;
-                            KnowledgeBase.currentPermission = localStorage.getItem('docproc_current_kb_permission') || 'view';
-                            KnowledgeBase.kbName = localStorage.getItem('docproc_current_kb_name') || '';
-                            KnowledgeBase.localPath = localStorage.getItem('docproc_current_kb_local_path') || '';
-                            KnowledgeBase.displayPath = localStorage.getItem('docproc_current_kb_display_path') || '';
-                            KnowledgeBase.canEdit = KnowledgeBase.currentPermission === 'edit' || KnowledgeBase.currentPermission === 'manage';
-                            KnowledgeBase.canManage = KnowledgeBase.currentPermission === 'manage';
+                        if (typeof FileBase !== 'undefined') {
+                            FileBase.currentFbId = savedKbId;
+                            FileBase.fbCurrentPermission = localStorage.getItem('docproc_current_fb_permission') || 'view';
+                            FileBase.fbName = localStorage.getItem('docproc_current_fb_name') || '';
+                            FileBase.fbLocalPath = localStorage.getItem('docproc_current_fb_local_path') || '';
+                            FileBase.fbDisplayPath = localStorage.getItem('docproc_current_fb_display_path') || '';
+                            FileBase.fbCanEdit = FileBase.fbCurrentPermission === 'edit' || FileBase.fbCurrentPermission === 'manage';
+                            FileBase.fbCanManage = FileBase.fbCurrentPermission === 'manage';
                             // 恢复上次浏览的子目录
                             var savedSubdir = localStorage.getItem('docproc_current_subdir');
                             if (savedSubdir) {
-                                KnowledgeBase.localCurrentSubdir = savedSubdir;
+                                FileBase.fbLocalCurrentSubdir = savedSubdir;
                                 // 重建面包屑路径
                                 var parts = savedSubdir.replace(/\\/g, '/').split('/');
-                                KnowledgeBase.currentPath = [
-                                    { id: savedKbId, name: KnowledgeBase.kbName || '未知文件库', type: 'kb' }
+                                FileBase.currentPath = [
+                                    { id: savedKbId, name: FileBase.fbName || '未知文件库', type: 'kb' }
                                 ];
                                 for (var i = 0; i < parts.length; i++) {
-                                    if (parts[i]) KnowledgeBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
+                                    if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
                                 }
                             }
                         }
@@ -1267,10 +1267,10 @@
                         var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');
                         if (navItem) navItem.classList.add('active');
                         var homeView = document.getElementById('home-view');
-                        var kbView = document.getElementById('kb-view');
+                        var kbView = document.getElementById('content-view');
                         if (homeView) homeView.style.display = 'none';
                         if (kbView) kbView.style.display = '';
-                        if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.init();
+                        if (typeof FileBase !== 'undefined') FileBase.init();
                     } else {
                         navigateTo('fb');
                     }
@@ -1279,7 +1279,7 @@
                     var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
                     if (navItem) navItem.classList.add('active');
                     var homeView = document.getElementById('home-view');
-                    var kbView = document.getElementById('kb-view');
+                    var kbView = document.getElementById('content-view');
                     if (homeView) homeView.style.display = 'none';
                     if (kbView) kbView.style.display = '';
                     if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init();
@@ -1338,23 +1338,23 @@ function navigateTo(view) {
     var navItem = document.querySelector('.sidebar-nav-item[data-view="' + view + '"]');
     if (navItem) navItem.classList.add('active');
 
-    var kbView = document.getElementById('kb-view');
+    var kbView = document.getElementById('content-view');
     var homeView = document.getElementById('home-view');
 
     if (view === 'home') {
-        localStorage.removeItem('docproc_current_kb_id');
-        localStorage.removeItem('docproc_current_kb_name');
-        localStorage.removeItem('docproc_current_kb_local_path');
-        localStorage.removeItem('docproc_current_kb_display_path');
-        localStorage.removeItem('docproc_current_kb_permission');
+        localStorage.removeItem('docproc_current_fb_id');
+        localStorage.removeItem('docproc_current_fb_name');
+        localStorage.removeItem('docproc_current_fb_local_path');
+        localStorage.removeItem('docproc_current_fb_display_path');
+        localStorage.removeItem('docproc_current_fb_permission');
         if (kbView) kbView.style.display = 'none';
         if (homeView) homeView.style.display = '';
-        if (typeof KnowledgeBase !== 'undefined') KnowledgeBase.currentKbId = null;
+        if (typeof FileBase !== 'undefined') FileBase.currentFbId = null;
     } else if (view === 'fb') {
         if (!window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
-        if (typeof KnowledgeBase !== 'undefined') { KnowledgeBase.currentKbId = null; KnowledgeBase.init(); }
+        if (typeof FileBase !== 'undefined') { FileBase.currentFbId = null; FileBase.init(); }
     } else if (view === 'kb') {
         if (!window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
@@ -1469,12 +1469,12 @@ function renderKbSelectorItem(kb) {
     var title = canEdit ? (kb.name + ' (' + (kb.permission === 'manage' ? '管理' : '编辑') + ')') : (kb.name + ' (只读)');
     var selClass = (kbSelectorState.selectedKbId === kb.id) ? ' selected' : '';
     var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + kb.id.replace(/'/g, "\\'") + '\')" ondblclick="selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
-    return '<div class="kb-selector-item' + disabledClass + selClass + '"' + clickHandler + ' title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
+    return '<div class="fb-selector-item' + disabledClass + selClass + '"' + clickHandler + ' title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
 }
 
 window.markKbSelected = function(kbId) {
     kbSelectorState.selectedKbId = kbId;
-    var items = document.querySelectorAll('.kb-selector-item');
+    var items = document.querySelectorAll('.fb-selector-item');
     for (var i = 0; i < items.length; i++) {
         items[i].classList.remove('selected');
     }
@@ -1556,13 +1556,13 @@ function renderKbSubdirView(categories) {
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
             var selClass = (kbSelectorState.selectedSubdir === cat.path) ? ' selected' : '';
-            h += '<div class="kb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')" ondblclick="enterKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
+            h += '<div class="fb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')" ondblclick="enterKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
             h += '<span>📁 ' + escapeHtml(cat.name) + '</span>';
             h += '</div>';
         }
     } else {
         var rootSelected = (kbSelectorState.selectedSubdir === '');
-        h += '<div class="kb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')">';
+        h += '<div class="fb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')">';
         h += '<span>📂 根目录</span>';
         h += '</div>';
     }
@@ -1609,7 +1609,7 @@ window.selectKbSubdir = function(subdir) {
     renderKbBreadcrumb();
     _updateWorkdirFromKbState();
 
-    var items = document.querySelectorAll('.kb-subdir-item');
+    var items = document.querySelectorAll('.fb-subdir-item');
     for (var i = 0; i < items.length; i++) {
         items[i].classList.remove('selected');
     }
@@ -1633,8 +1633,8 @@ function _updateWorkdirFromKbState() {
     }
     var workdirInput = document.getElementById('workdir');
     workdirInput.value = displayText;
-    workdirInput.setAttribute('data-kb-id', kbSelectorState.selectedKbId);
-    workdirInput.setAttribute('data-kb-subdir', kbSelectorState.selectedSubdir);
+    workdirInput.setAttribute('data-fb-id', kbSelectorState.selectedKbId);
+    workdirInput.setAttribute('data-fb-subdir', kbSelectorState.selectedSubdir);
 }
 
 window.confirmKbSelection = function() {

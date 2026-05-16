@@ -13,14 +13,14 @@ from flask import Blueprint, request, jsonify, send_file, Response, g
 from functools import wraps
 
 from server.auth import login_required, admin_required, _get_auth_data_dir
-from fb.database import get_db, get_visible_kb_ids, get_user_role
+from fb.database import get_db, get_visible_fb_ids, get_user_role
 
-kb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
+fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
 
-def _check_kb_permission(filebase_id, user_id, required_level):
+def _check_fb_permission(filebase_id, user_id, required_level):
     """检查用户对指定文件库的权限"""
     if not user_id:
         return False
@@ -43,7 +43,7 @@ def _check_kb_permission(filebase_id, user_id, required_level):
     return False
 
 
-def _require_kb_permission(required_level):
+def _require_fb_permission(required_level):
     """FB 专属权限校验装饰器，需在 @login_required 之后使用"""
     def decorator(f):
         @wraps(f)
@@ -55,12 +55,12 @@ def _require_kb_permission(required_level):
             if not user_id:
                 return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
-            kb_id = kwargs.pop('kb_id', None)
-            if kb_id:
-                kwargs['filebase_id'] = kb_id
+            fb_id = kwargs.pop('fb_id', None)
+            if fb_id:
+                kwargs['filebase_id'] = fb_id
 
             filebase_id = kwargs.get('filebase_id')
-            if filebase_id and not _check_kb_permission(filebase_id, user_id, required_level):
+            if filebase_id and not _check_fb_permission(filebase_id, user_id, required_level):
                 return jsonify({'success': False, 'message': '权限不足'}), 403
 
             return f(*args, **kwargs)
@@ -77,7 +77,7 @@ def _get_user_workspace(user_id):
     return ws
 
 
-@kb_bp.route('/create-folder', methods=['POST'])
+@fb_bp.route('/create-folder', methods=['POST'])
 @login_required
 def create_folder():
     user_id = g.user_id
@@ -127,7 +127,7 @@ def create_folder():
 
         return jsonify({
             'success': True,
-            'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'net',
+            'fb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'net',
                    'local_path': network_path}
         })
 
@@ -156,17 +156,17 @@ def create_folder():
 
     return jsonify({
         'success': True,
-        'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local',
+        'fb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local',
                'local_path': local_path}
     })
 
 
-@kb_bp.route('/copy-folder', methods=['POST'])
+@fb_bp.route('/copy-folder', methods=['POST'])
 @login_required
 def copy_folder():
     user_id = g.user_id
     data = request.get_json()
-    filebase_id = (data.get('kb_id') or '').strip()
+    filebase_id = (data.get('fb_id') or '').strip()
     new_name = (data.get('new_name') or '').strip()
 
     if not filebase_id or not new_name:
@@ -212,13 +212,13 @@ def copy_folder():
 
     return jsonify({
         'success': True,
-        'kb': {'id': new_filebase_id, 'name': new_name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst_path}
+        'fb': {'id': new_filebase_id, 'name': new_name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst_path}
     })
 
 
-@kb_bp.route('/list', methods=['GET'])
+@fb_bp.route('/list', methods=['GET'])
 @login_required
-def list_kb():
+def list_fb():
     user_id = g.user_id
     is_admin = (get_user_role(user_id) == 'admin')
     db = get_db()
@@ -279,7 +279,7 @@ def list_kb():
     if is_admin:
         visible_rows = db.execute("SELECT * FROM filebases").fetchall()
     else:
-        visible_ids = get_visible_kb_ids(user_id, False)
+        visible_ids = get_visible_fb_ids(user_id, False)
         visible_rows = []
         for filebase_id in visible_ids:
             r = db.execute("SELECT * FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -328,10 +328,10 @@ def list_kb():
     return jsonify({'success': True, 'kbs': kbs})
 
 
-@kb_bp.route('/<kb_id>', methods=['PUT'])
+@fb_bp.route('/<fb_id>', methods=['PUT'])
 @login_required
-@_require_kb_permission('manage')
-def rename_kb(filebase_id):
+@_require_fb_permission('manage')
+def rename_fb(filebase_id):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     if not name:
@@ -367,10 +367,10 @@ def rename_kb(filebase_id):
     return jsonify({'success': True, 'message': '重命名成功'})
 
 
-@kb_bp.route('/<kb_id>', methods=['DELETE'])
+@fb_bp.route('/<fb_id>', methods=['DELETE'])
 @login_required
-@_require_kb_permission('manage')
-def delete_kb(filebase_id):
+@_require_fb_permission('manage')
+def delete_fb(filebase_id):
     db = get_db()
     row = db.execute("SELECT id, name, local_path, owner_id, filebase_type FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not row:
@@ -396,9 +396,9 @@ def delete_kb(filebase_id):
         db.commit()
         return jsonify({'success': True, 'message': '文件库已彻底删除'})
 
-    kb_name = row['name']
+    fb_name = row['name']
     timestamp = str(int(time.time()))
-    target = os.path.join(trash_dir, kb_name + '_' + timestamp)
+    target = os.path.join(trash_dir, fb_name + '_' + timestamp)
     os.makedirs(trash_dir, exist_ok=True)
 
     if os.path.isdir(local_path):
@@ -410,7 +410,7 @@ def delete_kb(filebase_id):
     return jsonify({'success': True, 'message': '文件库已移至已删除目录'})
 
 
-@kb_bp.route('/trash', methods=['DELETE'])
+@fb_bp.route('/trash', methods=['DELETE'])
 @login_required
 def clear_trash():
     user_id = g.user_id
@@ -435,7 +435,7 @@ def clear_trash():
     return jsonify({'success': True, 'deleted': count, 'message': f'已清空 {count} 个项目'})
 
 
-@kb_bp.route('/trash-list', methods=['GET'])
+@fb_bp.route('/trash-list', methods=['GET'])
 @login_required
 def list_trash():
     user_id = g.user_id
@@ -459,7 +459,7 @@ def list_trash():
     return jsonify({'success': True, 'items': items})
 
 
-@kb_bp.route('/trash-restore', methods=['POST'])
+@fb_bp.route('/trash-restore', methods=['POST'])
 @login_required
 def restore_from_trash():
     user_id = g.user_id
@@ -501,10 +501,10 @@ def restore_from_trash():
     )
     db.commit()
 
-    return jsonify({'success': True, 'kb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst}})
+    return jsonify({'success': True, 'fb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst}})
 
 
-@kb_bp.route('/trash-item', methods=['DELETE'])
+@fb_bp.route('/trash-item', methods=['DELETE'])
 @login_required
 def delete_trash_item():
     user_id = g.user_id
@@ -533,10 +533,10 @@ def delete_trash_item():
     return jsonify({'success': True})
 
 
-@kb_bp.route('/<kb_id>/transfer', methods=['POST'])
+@fb_bp.route('/<fb_id>/transfer', methods=['POST'])
 @login_required
-@_require_kb_permission('manage')
-def transfer_kb(filebase_id):
+@_require_fb_permission('manage')
+def transfer_fb(filebase_id):
     data = request.get_json()
     new_owner_id = (data.get('new_owner_id') or '').strip()
     keep_role = (data.get('keep_role') or 'editor').strip()
@@ -567,9 +567,9 @@ def transfer_kb(filebase_id):
 
 # ==================== 成员权限管理 ====================
 
-@kb_bp.route('/<kb_id>/members', methods=['GET'])
+@fb_bp.route('/<fb_id>/members', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def list_members(filebase_id):
     import json
     users_path = os.path.join(_get_auth_data_dir(), 'users.json')
@@ -609,9 +609,9 @@ def list_members(filebase_id):
     return jsonify({'success': True, 'members': members})
 
 
-@kb_bp.route('/<kb_id>/members', methods=['POST'])
+@fb_bp.route('/<fb_id>/members', methods=['POST'])
 @login_required
-@_require_kb_permission('manage')
+@_require_fb_permission('manage')
 def add_member(filebase_id):
     import json
     users_path = os.path.join(_get_auth_data_dir(), 'users.json')
@@ -656,9 +656,9 @@ def add_member(filebase_id):
     return jsonify({'success': True, 'message': '成员已添加/更新'})
 
 
-@kb_bp.route('/<kb_id>/members/<member_id>', methods=['PUT'])
+@fb_bp.route('/<fb_id>/members/<member_id>', methods=['PUT'])
 @login_required
-@_require_kb_permission('manage')
+@_require_fb_permission('manage')
 def update_member(filebase_id, member_id):
     data = request.get_json()
     permission = (data.get('permission') or 'view').strip()
@@ -674,9 +674,9 @@ def update_member(filebase_id, member_id):
     return jsonify({'success': True, 'message': '权限已更新'})
 
 
-@kb_bp.route('/<kb_id>/members/<member_id>', methods=['DELETE'])
+@fb_bp.route('/<fb_id>/members/<member_id>', methods=['DELETE'])
 @login_required
-@_require_kb_permission('manage')
+@_require_fb_permission('manage')
 def remove_member(filebase_id, member_id):
     db = get_db()
     db.execute(
@@ -694,7 +694,7 @@ def _is_admin(user_id):
 
 # ==================== 全文搜索 ====================
 
-@kb_bp.route('/search', methods=['GET'])
+@fb_bp.route('/search', methods=['GET'])
 @login_required
 def search_documents():
     user_id = g.user_id
@@ -703,7 +703,7 @@ def search_documents():
         return jsonify({'success': True, 'results': []})
 
     is_admin = _is_admin(user_id)
-    visible_ids = get_visible_kb_ids(user_id, is_admin)
+    visible_ids = get_visible_fb_ids(user_id, is_admin)
     if not visible_ids:
         return jsonify({'success': True, 'results': []})
 
@@ -715,16 +715,16 @@ def search_documents():
         kb_row = db.execute("SELECT name, filebase_type, local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
         if not kb_row:
             continue
-        kb_name = kb_row['name'] or ''
+        fb_name = kb_row['name'] or ''
         local_path = (kb_row['local_path'] if 'local_path' in kb_row.keys() else '') or ''
 
         if local_path and os.path.isdir(local_path):
-            results.extend(_search_local_dir(local_path, filebase_id, kb_name, keywords))
+            results.extend(_search_local_dir(local_path, filebase_id, fb_name, keywords))
 
     return jsonify({'success': True, 'results': results, 'query': q})
 
 
-def _search_local_dir(base_path, filebase_id, kb_name, keywords):
+def _search_local_dir(base_path, filebase_id, fb_name, keywords):
     results = []
     try:
         for root, dirs, files in os.walk(base_path):
@@ -763,8 +763,8 @@ def _search_local_dir(base_path, filebase_id, kb_name, keywords):
                     stat = os.stat(full_path)
                     results.append({
                         'document_id': rel_path,
-                        'kb_id': filebase_id,
-                        'kb_name': kb_name,
+                        'fb_id': filebase_id,
+                        'fb_name': fb_name,
                         'filename': fname,
                         'file_type': os.path.splitext(fname)[1],
                         'file_size': stat.st_size,
@@ -791,9 +791,9 @@ def _resolve_local_path(db, filebase_id, subdir=''):
     return local_path, target
 
 
-@kb_bp.route('/<kb_id>/local-files', methods=['POST'])
+@fb_bp.route('/<fb_id>/local-files', methods=['POST'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def upload_local_files(filebase_id):
     db = get_db()
     subdir = request.args.get('subdir', '').strip()
@@ -822,9 +822,9 @@ def upload_local_files(filebase_id):
     return jsonify({'success': True, 'uploaded': uploaded})
 
 
-@kb_bp.route('/<kb_id>/local-files/dir', methods=['POST'])
+@fb_bp.route('/<fb_id>/local-files/dir', methods=['POST'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def create_local_dir(filebase_id):
     db = get_db()
     data = request.get_json() or {}
@@ -854,9 +854,9 @@ def create_local_dir(filebase_id):
     return jsonify({'success': True, 'path': rel})
 
 
-@kb_bp.route('/<kb_id>/local-files/create', methods=['POST'])
+@fb_bp.route('/<fb_id>/local-files/create', methods=['POST'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def create_local_file(filebase_id):
     db = get_db()
     data = request.get_json() or {}
@@ -889,9 +889,9 @@ def create_local_file(filebase_id):
     return jsonify({'success': True, 'path': rel})
 
 
-@kb_bp.route('/<kb_id>/local-files/content', methods=['PUT'])
+@fb_bp.route('/<fb_id>/local-files/content', methods=['PUT'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def save_local_file_content(filebase_id):
     db = get_db()
     data = request.get_json() or {}
@@ -912,9 +912,9 @@ def save_local_file_content(filebase_id):
     return jsonify({'success': True, 'mtime': stat.st_mtime})
 
 
-@kb_bp.route('/<kb_id>/local-files', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-files', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def list_local_files(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -983,9 +983,9 @@ def list_local_files(filebase_id):
     })
 
 
-@kb_bp.route('/<kb_id>/local-categories', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-categories', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def list_local_categories(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1061,9 +1061,9 @@ def _scan_categories_recursive(target_path, base_path):
     return categories
 
 
-@kb_bp.route('/<kb_id>/local-files/download', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-files/download', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def download_local_file(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1087,9 +1087,9 @@ def download_local_file(filebase_id):
 
 # ==================== KB 同步管理 ====================
 
-@kb_bp.route('/<kb_id>/sync', methods=['POST'])
+@fb_bp.route('/<fb_id>/sync', methods=['POST'])
 @login_required
-@_require_kb_permission('manage')
+@_require_fb_permission('manage')
 def toggle_sync(filebase_id):
     """切换文件库同步状态"""
     data = request.get_json() or {}
@@ -1119,9 +1119,9 @@ def toggle_sync(filebase_id):
     return jsonify({'success': True, 'enabled': enabled})
 
 
-@kb_bp.route('/<kb_id>/sync-now', methods=['POST'])
+@fb_bp.route('/<fb_id>/sync-now', methods=['POST'])
 @login_required
-@_require_kb_permission('manage')
+@_require_fb_permission('manage')
 def sync_now(filebase_id):
     """手动触发立即同步"""
     db = get_db()
@@ -1147,9 +1147,9 @@ def sync_now(filebase_id):
     return jsonify({'success': True, 'message': '同步已触发'})
 
 
-@kb_bp.route('/<kb_id>/sync-status', methods=['GET'])
+@fb_bp.route('/<fb_id>/sync-status', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def get_sync_status(filebase_id):
     """获取同步状态"""
     db = get_db()
@@ -1224,10 +1224,10 @@ TOOL_EXTENSIONS = {
 }
 
 
-@kb_bp.route('/<kb_id>/run-tool', methods=['POST'])
+@fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
 @login_required
-@_require_kb_permission('edit')
-def run_tool_on_kb(filebase_id):
+@_require_fb_permission('edit')
+def run_tool_on_fb(filebase_id):
     data = request.get_json()
     tool = data.get('tool')
     subdir = data.get('subdir', '').strip()
@@ -1328,9 +1328,9 @@ def run_tool_on_kb(filebase_id):
     return Response(generate(), mimetype='text/event-stream')
 
 
-@kb_bp.route('/<kb_id>/local-files/content', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-files/content', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def get_local_file_content(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1388,9 +1388,9 @@ def get_local_file_content(filebase_id):
 SUPPORTED_PREVIEW_EXTS = {'.docx', '.pptx', '.ppt', '.xlsx', '.xls'}
 
 
-@kb_bp.route('/<kb_id>/local-files/preview', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-files/preview', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def file_preview(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1424,9 +1424,9 @@ def file_preview(filebase_id):
         return jsonify({'success': False, 'message': f'预览失败: {str(e)}'})
 
 
-@kb_bp.route('/<kb_id>/local-files/batch-download', methods=['POST'])
+@fb_bp.route('/<fb_id>/local-files/batch-download', methods=['POST'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def batch_download_local(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1460,9 +1460,9 @@ def batch_download_local(filebase_id):
                      as_attachment=True, download_name='files.zip')
 
 
-@kb_bp.route('/<kb_id>/local-files/replace', methods=['PUT'])
+@fb_bp.route('/<fb_id>/local-files/replace', methods=['PUT'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def replace_local_file(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1501,9 +1501,9 @@ def replace_local_file(filebase_id):
         return jsonify({'success': False, 'message': str(e)})
 
 
-@kb_bp.route('/<kb_id>/local-files/move', methods=['PUT'])
+@fb_bp.route('/<fb_id>/local-files/move', methods=['PUT'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def move_local_items(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1554,9 +1554,9 @@ def move_local_items(filebase_id):
     })
 
 
-@kb_bp.route('/<kb_id>/local-files', methods=['DELETE'])
+@fb_bp.route('/<fb_id>/local-files', methods=['DELETE'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def delete_local_items(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1593,9 +1593,9 @@ def delete_local_items(filebase_id):
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
-@kb_bp.route('/<kb_id>/local-files/rename', methods=['PUT'])
+@fb_bp.route('/<fb_id>/local-files/rename', methods=['PUT'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def rename_local_item(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1635,9 +1635,9 @@ def rename_local_item(filebase_id):
     return jsonify({'success': True, 'new_path': new_rel})
 
 
-@kb_bp.route('/<kb_id>/local-files/copy', methods=['POST'])
+@fb_bp.route('/<fb_id>/local-files/copy', methods=['POST'])
 @login_required
-@_require_kb_permission('edit')
+@_require_fb_permission('edit')
 def copy_local_items(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -1692,9 +1692,9 @@ def copy_local_items(filebase_id):
     return jsonify({'success': True, 'copied': copied, 'errors': errors})
 
 
-@kb_bp.route('/<kb_id>/local-files/open', methods=['GET'])
+@fb_bp.route('/<fb_id>/local-files/open', methods=['GET'])
 @login_required
-@_require_kb_permission('view')
+@_require_fb_permission('view')
 def open_local_file(filebase_id):
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()

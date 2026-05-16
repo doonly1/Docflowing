@@ -76,9 +76,9 @@ def create_app():
     app.register_blueprint(runner_bp)
 
     # 外部蓝图
-    from fb.routes import kb_bp
+    from fb.routes import fb_bp
     from kb.routes import wiki_bp
-    app.register_blueprint(kb_bp)
+    app.register_blueprint(fb_bp)
     app.register_blueprint(wiki_bp)
 
     # 确保管理员用户存在（无妨多次调用）

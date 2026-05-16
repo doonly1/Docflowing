@@ -7,13 +7,64 @@ var WikiKnowledge = {
     init: function() {
         if (!document.getElementById('kb-messages')) {
             this._renderView();
-            // 从内存恢复会话（文件库 KnowledgeBase 会清空 #kb-view DOM）
-            if (this.messages.length > 0) {
-                this._switchToActive();
-                this._renderMessages();
+            // 从 sessionStorage 恢复会话
+            var savedId = sessionStorage.getItem('kb_session_id');
+            if (savedId) {
+                this._restoreSession(savedId);
             }
         }
         this._loadMemoryUsage();
+    },
+
+    _restoreSession: function(sessionId) {
+        var self = this;
+        self.sessionId = sessionId;
+        apiFetch('/api/kb/session/' + sessionId, { method: 'GET' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success && data.messages) {
+                for (var i = 0; i < data.messages.length; i++) {
+                    var m = data.messages[i];
+                    var d = new Date(m.timestamp * 1000);
+                    // 从非LLM的消息内容中提取 ## 标题，重建参考来源
+                    var sources = [];
+                    if (m.role === 'assistant' && m.content) {
+                        var titleRegex = /^##\s+(.+)$/gm;
+                        var match;
+                        while ((match = titleRegex.exec(m.content)) !== null) {
+                            var title = match[1].trim();
+                            if (title) {
+                                sources.push({ title: title, path: '' });
+                            }
+                        }
+                    }
+                    self.messages.push({
+                        role: m.role,
+                        content: m.content,
+                        sources: sources.length > 0 ? sources : undefined,
+                        time: d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                    });
+                }
+                self._switchToActive();
+                self._renderMessages();
+            } else {
+                // 会话已失效，清除存储
+                sessionStorage.removeItem('kb_session_id');
+                self.sessionId = null;
+            }
+        }).catch(function(e) {
+            console.error('恢复会话失败:', e);
+            sessionStorage.removeItem('kb_session_id');
+            self.sessionId = null;
+        });
+    },
+
+    _saveSessionId: function() {
+        if (this.sessionId) {
+            sessionStorage.setItem('kb_session_id', this.sessionId);
+        } else {
+            sessionStorage.removeItem('kb_session_id');
+        }
     },
 
     _loadMemoryUsage: function() {
@@ -76,6 +127,7 @@ var WikiKnowledge = {
         }).then(function(data) {
             if (data.success) {
                 self.sessionId = data.session_id;
+                self._saveSessionId();
             }
             if (callback) callback();
         }).catch(function(e) {
@@ -84,16 +136,22 @@ var WikiKnowledge = {
     },
 
     _renderView: function() {
-        var viewEl = document.getElementById('kb-view');
+        var viewEl = document.getElementById('content-view');
         if (!viewEl) return;
 
         viewEl.innerHTML =
             '<div class="kb-chat-container" id="kb-container">' +
                 // 右上角图标按钮
-                '<div class="kb-chat-header-actions" style="position:absolute;top:12px;right:16px;display:flex;gap:8px;z-index:10;">' +
-                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">💬</button>' +
-                    '<button onclick="WikiKnowledge.showMemory()" title="持久化记忆" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">🧠</button>' +
-                    '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" style="background:none;border:none;border-radius:6px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;color:#666;hover:background:#f5f5f5;">⚙️</button>' +
+                '<div class="kb-chat-header-actions">' +
+                    '<button onclick="WikiKnowledge.newSession()" title="新建会话" class="kb-header-btn primary">➕</button>' +
+                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" class="kb-header-btn">💬</button>' +
+                    '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" class="kb-header-btn">⚙️</button>' +
+                    '<div class="kb-header-more-wrapper">' +
+                        '<button onclick="WikiKnowledge.toggleMoreMenu(event)" title="更多" class="kb-header-btn">···</button>' +
+                        '<div class="kb-header-more-dropdown" id="kb-header-more-dropdown" style="display:none">' +
+                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showMemory();WikiKnowledge.toggleMoreMenu(event)">🧠 持久化记忆</div>' +
+                        '</div>' +
+                    '</div>' +
                 '</div>' +
                 // 头部（初始隐藏，对话后显示）
                 '<div class="kb-chat-header" id="kb-header" style="display:none">' +
@@ -108,8 +166,8 @@ var WikiKnowledge = {
                 '</div>' +
                 // 初始居中区（移除快捷按钮）
                 '<div class="kb-chat-initial-area" id="kb-initial-area">' +
-                    '<div class="kb-chat-greeting-title">开始对话</div>' +
-                    '<div class="kb-chat-greeting-desc">输入消息，检索与对话</div>' +
+                    '<div class="kb-chat-greeting-title">开始会话</div>' +
+                    '<div class="kb-chat-greeting-desc">输入消息，检索与会话</div>' +
                 '</div>' +
                 // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +
@@ -131,6 +189,19 @@ var WikiKnowledge = {
                 '</div>' +
                 '<div class="kb-sidebar-content" id="kb-sidebar-content"></div>' +
             '</div>';
+
+        // 点击页面其他地方关闭更多下拉菜单
+        if (!window._kbHeaderClickHandler) {
+            window._kbHeaderClickHandler = true;
+            document.addEventListener('click', function(e) {
+                var dropdown = document.getElementById('kb-header-more-dropdown');
+                if (!dropdown || dropdown.style.display === 'none') return;
+                var wrapper = dropdown.closest('.kb-header-more-wrapper');
+                if (wrapper && !wrapper.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
     },
 
     _switchToActive: function() {
@@ -356,7 +427,14 @@ var WikiKnowledge = {
         escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
         escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
         escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // 转换 ## / ### 标题（需在 \n→<br> 之前处理）
+        escaped = escaped.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        escaped = escaped.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        escaped = escaped.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
         escaped = escaped.replace(/\n/g, '<br>');
+
+        // 恢复高亮标签，使 <mark> 被渲染为 HTML 元素
+        escaped = escaped.replace(/&lt;mark&gt;/g, '<mark>').replace(/&lt;\/mark&gt;/g, '</mark>');
 
         return escaped;
     },
@@ -378,6 +456,7 @@ var WikiKnowledge = {
             apiFetch('/api/kb/session/' + this.sessionId, { method: 'DELETE' })
                 .catch(function(e) { console.error('删除会话失败:', e); });
             this.sessionId = null;
+            this._saveSessionId();
         }
 
         this.messages = [];
@@ -389,6 +468,7 @@ var WikiKnowledge = {
 
     newSession: function() {
         var self = this;
+        this.closeSidebar();
         apiFetch('/api/kb/session/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -398,6 +478,7 @@ var WikiKnowledge = {
         }).then(function(data) {
             if (data.success) {
                 self.sessionId = data.session_id;
+                self._saveSessionId();
             }
         }).catch(function(e) {
             console.error('创建会话失败:', e);
@@ -427,17 +508,17 @@ var WikiKnowledge = {
     
     _previewDocxFile: async function(path) {
         var fileName = path.split('/').pop();
-        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" id="kb-preview-content">' +
+            '<div class="fb-docx-preview-content" id="preview-content">' +
             '<div style="text-align: center; padding: 40px; color: #999;">' +
             '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
             '<div>正在加载预览...</div>' +
@@ -449,31 +530,31 @@ var WikiKnowledge = {
         try {
             var res = await apiFetch('/api/fb/' + kbId + '/local-files/docx-preview?path=' + encodeURIComponent(path), { method: 'GET' });
             var data = await res.json();
-            var contentEl = document.getElementById('kb-preview-content');
+            var contentEl = document.getElementById('preview-content');
             if (data.success) {
                 contentEl.innerHTML = data.html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
             } else {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (data.message || '未知错误') + '</div>';
             }
         } catch (e) {
-            var contentEl = document.getElementById('kb-preview-content');
+            var contentEl = document.getElementById('preview-content');
             contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
         }
     },
     
     _previewTextFile: async function(path) {
         var fileName = path.split('/').pop();
-        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" id="kb-preview-content">' +
+            '<div class="fb-docx-preview-content" id="preview-content">' +
             '<div style="text-align: center; padding: 40px; color: #999;">' +
             '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
             '<div>正在加载预览...</div>' +
@@ -485,7 +566,7 @@ var WikiKnowledge = {
         try {
             var res = await apiFetch('/api/fb/' + kbId + '/local-files/content?path=' + encodeURIComponent(path), { method: 'GET' });
             var data = await res.json();
-            var contentEl = document.getElementById('kb-preview-content');
+            var contentEl = document.getElementById('preview-content');
             if (data.success) {
                 var content = escapeHtmlText(data.content || '');
                 if (data.file_type === '.md') {
@@ -498,13 +579,13 @@ var WikiKnowledge = {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (data.message || '未知错误') + '</div>';
             }
         } catch (e) {
-            var contentEl = document.getElementById('kb-preview-content');
+            var contentEl = document.getElementById('preview-content');
             contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
         }
     },
     
     _closePreview: function() {
-        var overlay = document.querySelector('.kb-docx-preview-overlay');
+        var overlay = document.querySelector('.fb-docx-preview-overlay');
         if (overlay) {
             overlay.remove();
         }
@@ -512,18 +593,18 @@ var WikiKnowledge = {
     
     _previewPdfFile: function(path) {
         var fileName = path.split('/').pop();
-        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
         var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" style="padding:0">' +
+            '<div class="fb-docx-preview-content" style="padding:0">' +
             '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
             '</div>' +
             '</div>';
@@ -532,18 +613,18 @@ var WikiKnowledge = {
     
     _previewImageFile: function(path) {
         var fileName = path.split('/').pop();
-        var kbId = (window.KnowledgeBase && KnowledgeBase.currentKbId) || 'default';
+        var kbId = (window.FileBase && FileBase.currentFbId) || 'default';
         var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>🖼️ ' + escapeHtmlText(fileName) + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
+            '<div class="fb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
             '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
             '</div>' +
             '</div>';
@@ -568,6 +649,17 @@ var WikiKnowledge = {
         if (overlay) overlay.classList.remove('show');
     },
 
+    toggleMoreMenu: function(e) {
+        if (e) e.stopPropagation();
+        var dropdown = document.getElementById('kb-header-more-dropdown');
+        if (!dropdown) return;
+        if (dropdown.style.display === 'none' || dropdown.style.display === '') {
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
+    },
+
     showSessions: function() {
         var self = this;
         apiFetch('/api/kb/sessions?limit=50', { method: 'GET' }).then(function(resp) {
@@ -578,8 +670,7 @@ var WikiKnowledge = {
                 return;
             }
 
-            var html = '<div style="padding: 12px; border-bottom: 1px solid #eee;">' +
-                '<button onclick="WikiKnowledge.newSession(); WikiKnowledge.closeSidebar();" style="width: 100%; padding: 10px; background: #4a90d9; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">➕ 新建会话</button>' +
+            var html = '<div style="padding: 12px 12px 0;">' +
             '</div>';
 
             if (!data.sessions || data.sessions.length === 0) {
@@ -603,6 +694,9 @@ var WikiKnowledge = {
                         '<button class="kb-session-delete-btn" onclick="event.stopPropagation(); WikiKnowledge.deleteSession(\'' + s.id.replace(/'/g, "\\'") + '\')" title="删除会话">🗑️</button>' +
                     '</div>';
                 }
+                html += '<div style="padding: 12px; border-top: 1px solid #eee; margin-top: 8px;">' +
+                    '<button onclick="WikiKnowledge.clearAllSessions()" style="width:100%;padding:8px;border:1px solid #e74c3c;border-radius:6px;background:#fff;color:#e74c3c;cursor:pointer;font-size:13px;">🗑️ 清除所有会话</button>' +
+                '</div>';
             }
             self.openSidebar('历史会话', html);
         }).catch(function(e) {
@@ -612,7 +706,9 @@ var WikiKnowledge = {
 
     switchSession: function(sessionId) {
         this.sessionId = sessionId;
+        this._saveSessionId();
         this.messages = [];
+        this._switchToActive();
         var self = this;
 
         apiFetch('/api/kb/session/' + sessionId, { method: 'GET' }).then(function(resp) {
@@ -638,7 +734,6 @@ var WikiKnowledge = {
     },
 
     deleteSession: function(sessionId) {
-        if (!confirm('确定要删除此会话吗？删除后不可恢复。')) return;
 
         var self = this;
         apiFetch('/api/kb/session/' + sessionId, { method: 'DELETE' }).then(function(resp) {
@@ -647,6 +742,7 @@ var WikiKnowledge = {
             if (data.success) {
                 if (self.sessionId === sessionId) {
                     self.sessionId = null;
+                    self._saveSessionId();
                     self.messages = [];
                     self._switchToInitial();
                     self._renderMessages();
@@ -657,6 +753,28 @@ var WikiKnowledge = {
             }
         }).catch(function(e) {
             alert('删除失败: ' + e.message);
+        });
+    },
+
+    clearAllSessions: function() {
+        if (!confirm('确定要清除所有会话吗？此操作不可恢复！')) return;
+
+        var self = this;
+        apiFetch('/api/kb/sessions', { method: 'DELETE' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                self.sessionId = null;
+                self._saveSessionId();
+                self.messages = [];
+                self._switchToInitial();
+                self._renderMessages();
+                self.closeSidebar();
+            } else {
+                alert('清除失败: ' + (data.error || '未知错误'));
+            }
+        }).catch(function(e) {
+            alert('清除失败: ' + e.message);
         });
     },
 

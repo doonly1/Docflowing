@@ -1,22 +1,23 @@
-var KnowledgeBase = {
+var FileBase = {
 
     _lsGet: function(key) { try { return localStorage.getItem(key); } catch(e) { return null; } },
     _lsSet: function(key, val) { try { localStorage.setItem(key, val); } catch(e) {} },
     _lsDel: function(key) { try { localStorage.removeItem(key); } catch(e) {} },
 
-    currentKbId: null,
-    currentPermission: null,
+    currentFbId: null,
+    fbCurrentPermission: null,
     selectedDocs: {},
     currentSort: { field: 'mtime', asc: false },
     currentPath: [],
-    kbName: '',
-    canEdit: false,
-    canManage: false,
-    localPath: '',
-    localCurrentSubdir: '',
-    _categoryTree: null,
-    _treeLoaded: false,
-    _expandedTreePaths: {},  // 跟踪手动展开的树节点路径
+    fbName: '',
+    fbCanEdit: false,
+    fbCanManage: false,
+    fbLocalPath: '',
+    fbLocalCurrentSubdir: '',
+    fbCategoryTree: null,
+    fbTreeLoaded: false,
+    fbExpandedTreePaths: {},  // 跟踪手动展开的树节点路径
+    fbDisplayPath: '',
 
     api: function(url, method, body) {
         var o = {
@@ -46,7 +47,7 @@ var KnowledgeBase = {
     refreshUserCache: async function() {
         try {
             var res = await this.api('/api/users/list', 'GET');
-            if (res.success) this._lsSet('kb_user_list', JSON.stringify(res.users));
+            if (res.success) this._lsSet('fb_user_list', JSON.stringify(res.users));
         } catch (e) {}
     },
 
@@ -59,7 +60,7 @@ var KnowledgeBase = {
         this.currentSort = { field: 'mtime', asc: false };
         await this.refreshAuthRole();
         await this.refreshUserCache();
-        if (this.currentKbId) {
+        if (this.currentFbId) {
             await this.renderDetail();
         } else {
             await this.renderKbList();
@@ -67,20 +68,20 @@ var KnowledgeBase = {
     },
 
     goBackToList: function() {
-        this.currentKbId = null;
-        this.localPath = '';
+        this.currentFbId = null;
+        this.fbLocalPath = '';
         this.renderKbList();
     },
 
     navigateTo: function(view) {
         if (typeof globalNavigateTo === 'function') { globalNavigateTo(view); return; }
         if (view === 'home') {
-            document.getElementById('kb-view').style.display = 'none';
+            document.getElementById('content-view').style.display = 'none';
             document.getElementById('home-view').style.display = '';
-            this.currentKbId = null;
+            this.currentFbId = null;
         } else if (view === 'fb') {
             document.getElementById('home-view').style.display = 'none';
-            document.getElementById('kb-view').style.display = '';
+            document.getElementById('content-view').style.display = '';
             this.init();
         }
     },
@@ -92,70 +93,70 @@ var KnowledgeBase = {
 
     renderKbList: async function() {
         try {
-            this.currentKbId = null;
-            this.localPath = '';
+            this.currentFbId = null;
+            this.fbLocalPath = '';
             this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
-            this._lsDel('docproc_current_kb_id');
-            this._lsDel('docproc_current_kb_name');
-            this._lsDel('docproc_current_kb_local_path');
-            this._lsDel('docproc_current_kb_display_path');
-            this._lsDel('docproc_current_kb_permission');
+            this._lsDel('docproc_current_fb_id');
+            this._lsDel('docproc_current_fb_name');
+            this._lsDel('docproc_current_fb_local_path');
+            this._lsDel('docproc_current_fb_display_path');
+            this._lsDel('docproc_current_fb_permission');
             this._lsDel('docproc_current_subdir');
-            this._expandedTreePaths = {};
+            this.fbExpandedTreePaths = {};
             var role = this.getUserRole();
 
-            var kbView = document.getElementById('kb-view');
+            var kbView = document.getElementById('content-view');
             if (!kbView) {
-                console.warn('kb-view not found, cannot render list');
+                console.warn('content-view not found, cannot render list');
                 return;
             }
 
             // 重新构建整个视图
-            var h = '<div class="kb-explorer">';
-            h += '<div class="kb-breadcrumb"><span class="kb-bc-current">🏠 文件库</span></div>';
-            h += '<div class="kb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
-            h += '<div class="kb-file-pane" style="width:100%">';
-            h += '<div class="kb-file-toolbar">';
-            h += '<input type="text" id="kb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
-            h += '<button onclick="KnowledgeBase.search()">🔍 搜索</button>';
-            h += '<button onclick="KnowledgeBase.showCreateRootFolder()">📁 新建文件库</button>';
-            if (window.authRole === 'admin') h += '<button onclick="KnowledgeBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
-            h += '<span class="kb-toolbar-spacer"></span>';
-            h += '<button onclick="KnowledgeBase.showTrash()">🗑️ 回收站</button>';
+            var h = '<div class="fb-explorer">';
+            h += '<div class="fb-breadcrumb"><span class="fb-bc-current">🏠 文件库</span></div>';
+            h += '<div class="fb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
+            h += '<div class="fb-file-pane" style="width:100%">';
+            h += '<div class="fb-file-toolbar">';
+            h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
+            h += '<button onclick="FileBase.search()">🔍 搜索</button>';
+            h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
+            if (window.authRole === 'admin') h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
+            h += '<span class="fb-toolbar-spacer"></span>';
+            h += '<button onclick="FileBase.showTrash()">🗑️ 回收站</button>';
             h += '</div>';
-            h += '<div class="kb-file-body" id="kb-grid-container" oncontextmenu="KnowledgeBase.showKbListContextMenu(event)"></div>';
+            h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"></div>';
             h += '</div></div></div>';
             kbView.innerHTML = h;
 
-            var grid = document.getElementById('kb-grid-container');
+            var grid = document.getElementById('fb-grid-container');
             if (!grid) {
-                console.warn('kb-grid-container not found');
+                console.warn('fb-grid-container not found');
                 return;
             }
 
             // 显示加载中
-            grid.innerHTML = '<div class="kb-empty">刷新中...</div>';
+            grid.innerHTML = '<div class="fb-empty">刷新中...</div>';
 
             var res = await this.api('/api/fb/list', 'GET');
             if (!res || !res.success) {
-                grid.innerHTML = '<div class="kb-empty">刷新失败: ' + (res?.message || '未知错误') + '</div>';
+                grid.innerHTML = '<div class="fb-empty">刷新失败: ' + (res?.message || '未知错误') + '</div>';
                 return;
             }
 
             var kbs = res.kbs || [];
 
             if (kbs.length === 0) {
-                grid.innerHTML = '<div class="kb-empty">暂无文件库，点击上方按钮创建</div>';
+                grid.innerHTML = '<div class="fb-empty">暂无文件库，点击上方按钮创建</div>';
                 return;
             }
 
-            var html = '<div class="kb-grid">';
+            var html = '<div class="fb-grid">';
             for (var i = 0; i < kbs.length; i++) {
                 var kb = kbs[i];
-                html += '<div class="kb-card" data-kb-id="' + kb.id + '" data-kb-permission="' + kb.permission + '" data-kb-name="' + escapeHtmlText(kb.name) + '" data-kb-type="' + (kb.filebase_type || 'local') + '" data-kb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-kb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="KnowledgeBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
+                html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
-                html += '<div class="kb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
-                html += '<div class="kb-card-sync-status" id="sync-status-' + kb.id + '" data-kb-id="' + kb.id + '"></div>';
+                html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
+                html += '<div class="fb-card-sync-status" id="sync-status-' + kb.id + '" data-fb-id="' + kb.id + '"></div>';
                 html += '</div>';
             }
             html += '</div>';
@@ -167,9 +168,9 @@ var KnowledgeBase = {
             }
         } catch (e) {
             console.error('renderKbList error:', e);
-            var grid = document.getElementById('kb-grid-container');
+            var grid = document.getElementById('fb-grid-container');
             if (grid) {
-                grid.innerHTML = '<div class="kb-empty">刷新出错: ' + e.message + '</div>';
+                grid.innerHTML = '<div class="fb-empty">刷新出错: ' + e.message + '</div>';
             }
         }
     },
@@ -202,23 +203,23 @@ var KnowledgeBase = {
 
     showCreateNetworkRootFolder: function() {
         var self = this;
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal" style="max-width:420px">';
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:420px">';
         h += '<h3>🌐 新建网络文件库</h3>';
         h += '<div style="margin-bottom:12px">';
         h += '<label style="display:block;font-size:13px;color:#555;margin-bottom:4px">网络路径</label>';
-        h += '<input type="text" id="kb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
+        h += '<input type="text" id="fb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
         h += '</div>';
-        h += '<div class="kb-modal-actions">';
-        h += '<button class="btn" onclick="KnowledgeBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
-        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="btn" onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
-        setTimeout(function() { document.getElementById('kb-net-path').focus(); }, 100);
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+        setTimeout(function() { document.getElementById('fb-net-path').focus(); }, 100);
     },
 
     _doCreateNetworkRootFolder: async function() {
-        var networkPath = (document.getElementById('kb-net-path').value || '').trim();
+        var networkPath = (document.getElementById('fb-net-path').value || '').trim();
         if (!networkPath) { alert('请输入网络路径'); return; }
         var parts = networkPath.replace(/\\/g, '/').split('/').filter(function(p) { return p && p !== ''; });
         var name = parts.length > 0 ? parts[parts.length - 1] : '网络文件库';
@@ -256,25 +257,25 @@ var KnowledgeBase = {
         this.hideContextMenu();
 
         var target = event.target;
-        var kbCard = target.closest('.kb-card');
+        var kbCard = target.closest('.fb-card');
 
         var menu = document.createElement('div');
-        menu.className = 'kb-context-menu';
-        menu.id = 'kb-context-menu';
+        menu.className = 'fb-context-menu';
+        menu.id = 'fb-context-menu';
 
         if (kbCard) {
-            var kbId = kbCard.getAttribute('data-kb-id');
-            var kbName = kbCard.getAttribute('data-kb-name');
-            var kbPermission = kbCard.getAttribute('data-kb-permission');
-            var kbLocalPath = kbCard.getAttribute('data-kb-local-path');
-            var kbDisplayPath = kbCard.getAttribute('data-kb-display-path');
+            var kbId = kbCard.getAttribute('data-fb-id');
+            var kbName = kbCard.getAttribute('data-fb-name');
+            var kbPermission = kbCard.getAttribute('data-fb-permission');
+            var kbLocalPath = kbCard.getAttribute('data-fb-local-path');
+            var kbDisplayPath = kbCard.getAttribute('data-fb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            var emptyMenu = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
             if (window.authRole === 'admin') {
-                emptyMenu += '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateNetworkRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
+                emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
             }
-            emptyMenu += '<div class="kb-menu-divider"></div><div class="kb-menu-item" onclick="KnowledgeBase.refreshKbList()"><span class="icon">🔄</span> 刷新</div>';
+            emptyMenu += '<div class="fb-menu-divider"></div><div class="fb-menu-item" onclick="FileBase.refreshKbList()"><span class="icon">🔄</span> 刷新</div>';
             menu.innerHTML = emptyMenu;
         }
 
@@ -282,9 +283,9 @@ var KnowledgeBase = {
         menu.style.top = Math.min(event.clientY, window.innerHeight - 160) + 'px';
         document.body.appendChild(menu);
 
-        this._hideContextMenuHandler = function() { KnowledgeBase.hideContextMenu(); };
+        this.fbHideContextMenuHandler = function() { FileBase.hideContextMenu(); };
         setTimeout(function() {
-            document.addEventListener('click', KnowledgeBase._hideContextMenuHandler);
+            document.addEventListener('click', FileBase._hideContextMenuHandler);
         }, 0);
     },
 
@@ -296,15 +297,15 @@ var KnowledgeBase = {
 
         var h = '';
         if (permission === 'manage') {
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
-            h += '<div class="kb-menu-divider"></div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到 KB</div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
-            h += '<div class="kb-menu-divider"></div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
-            h += '<div class="kb-menu-divider"></div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon">🗑️</span> 删除</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
+            h += '<div class="fb-menu-divider"></div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到 KB</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
+            h += '<div class="fb-menu-divider"></div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
+            h += '<div class="fb-menu-divider"></div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon">🗑️</span> 删除</div>';
         }
         return h;
     },
@@ -346,7 +347,7 @@ var KnowledgeBase = {
 
     kbListManage: function(kbId) {
         this.hideContextMenu();
-        this.currentKbId = kbId;
+        this.currentFbId = kbId;
         this.showSettings();
     },
 
@@ -389,26 +390,26 @@ var KnowledgeBase = {
     },
 
     openKb: async function(kbId, permission, name, localPath, displayPath) {
-        this.currentKbId = kbId;
-        this.currentPermission = permission;
-        this.canEdit = permission === 'edit' || permission === 'manage';
-        this.canManage = permission === 'manage';
+        this.currentFbId = kbId;
+        this.fbCurrentPermission = permission;
+        this.fbCanEdit = permission === 'edit' || permission === 'manage';
+        this.fbCanManage = permission === 'manage';
         this.selectedDocs = {};
-        this.kbName = name || '';
-        this.localPath = localPath || '';
-        this.displayPath = displayPath || '';
-        this.localCurrentSubdir = '';
+        this.fbName = name || '';
+        this.fbLocalPath = localPath || '';
+        this.fbDisplayPath = displayPath || '';
+        this.fbLocalCurrentSubdir = '';
         this.currentPath = [{ id: kbId, name: name || '未知文件库', type: 'kb' }];
         this.currentSort = { field: 'mtime', asc: false };
-        this._categoryTree = null;
-        this._treeLoaded = false;
-        this._expandedTreePaths = {};
+        this.fbCategoryTree = null;
+        this.fbTreeLoaded = false;
+        this.fbExpandedTreePaths = {};
 
-        this._lsSet('docproc_current_kb_id', kbId);
-        this._lsSet('docproc_current_kb_permission', permission);
-        this._lsSet('docproc_current_kb_name', name || '');
-        this._lsSet('docproc_current_kb_local_path', localPath || '');
-        this._lsSet('docproc_current_kb_display_path', displayPath || '');
+        this._lsSet('docproc_current_fb_id', kbId);
+        this._lsSet('docproc_current_fb_permission', permission);
+        this._lsSet('docproc_current_fb_name', name || '');
+        this._lsSet('docproc_current_fb_local_path', localPath || '');
+        this._lsSet('docproc_current_fb_display_path', displayPath || '');
         this._lsDel('docproc_current_subdir');
 
         await this.renderDetail();
@@ -417,52 +418,52 @@ var KnowledgeBase = {
     renderDetail: async function() {
         var self = this;
 
-        var fileContent = document.getElementById('kb-file-content');
+        var fileContent = document.getElementById('fb-file-content');
         if (!fileContent) {
-            var h = '<div class="kb-explorer">';
-            h += '<div class="kb-breadcrumb" id="kb-breadcrumb"></div>';
-            h += '<div class="kb-explorer-body">';
-            h += '<div class="kb-file-toolbar" id="kb-file-toolbar">';
-            h += '<button class="kb-tree-toggle-btn" onclick="KnowledgeBase.toggleTreePane()" title="折叠/展开"></button>';
-            h += '<div class="kb-upload-wrap">';
-            h += '<button onclick="KnowledgeBase.toggleUploadMenu(event)">📤 上传</button>';
-            h += '<div class="kb-upload-menu" style="display:none">';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
-            h += '<div class="kb-menu-item" onclick="KnowledgeBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
+            var h = '<div class="fb-explorer">';
+            h += '<div class="fb-breadcrumb" id="fb-breadcrumb"></div>';
+            h += '<div class="fb-explorer-body">';
+            h += '<div class="fb-file-toolbar" id="fb-file-toolbar">';
+            h += '<button class="fb-tree-toggle-btn" onclick="FileBase.toggleTreePane()" title="折叠/展开"></button>';
+            h += '<div class="fb-upload-wrap">';
+            h += '<button onclick="FileBase.toggleUploadMenu(event)">📤 上传</button>';
+            h += '<div class="fb-upload-menu" style="display:none">';
+            h += '<div class="fb-menu-item" onclick="FileBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
             h += '</div>';
             h += '</div>';
-            h += '<button onclick="KnowledgeBase.showCreateFolderDialog()">📁 新建文件夹</button>';
-            h += '<button onclick="KnowledgeBase.showCreateMdDialog()">📝 新建MD文件</button>';
-            h += '<span class="kb-toolbar-spacer"></span>';
-            h += '<input type="text" id="kb-search-input" placeholder="搜索..." onkeydown="if(event.keyCode===13) KnowledgeBase.search()">';
-            h += '<button onclick="KnowledgeBase.search()">🔍</button>';
-            h += '<button onclick="KnowledgeBase.downloadAction()">📥 下载</button>';
-            h += '<button onclick="KnowledgeBase.showMoveDialog()">📦 移动</button>';
-            h += '<button onclick="KnowledgeBase.batchDelete()">🗑️ 删除</button>';
-            h += '<input type="file" id="kb-file-upload-input" multiple style="display:none" onchange="KnowledgeBase.handleFileUpload(this)">';
-            h += '<input type="file" id="kb-folder-upload-input" webkitdirectory style="display:none" onchange="KnowledgeBase.handleFolderUpload(this)">';
-            h += '<input type="file" id="kb-replace-input" style="display:none" onchange="KnowledgeBase.handleReplace(this)">';
+            h += '<button onclick="FileBase.showCreateFolderDialog()">📁 新建文件夹</button>';
+            h += '<button onclick="FileBase.showCreateMdDialog()">📝 新建MD文件</button>';
+            h += '<span class="fb-toolbar-spacer"></span>';
+            h += '<input type="text" id="fb-search-input" placeholder="搜索..." onkeydown="if(event.keyCode===13) FileBase.search()">';
+            h += '<button onclick="FileBase.search()">🔍</button>';
+            h += '<button onclick="FileBase.downloadAction()">📥 下载</button>';
+            h += '<button onclick="FileBase.showMoveDialog()">📦 移动</button>';
+            h += '<button onclick="FileBase.batchDelete()">🗑️ 删除</button>';
+            h += '<input type="file" id="fb-file-upload-input" multiple style="display:none" onchange="FileBase.handleFileUpload(this)">';
+            h += '<input type="file" id="fb-folder-upload-input" webkitdirectory style="display:none" onchange="FileBase.handleFolderUpload(this)">';
+            h += '<input type="file" id="fb-replace-input" style="display:none" onchange="FileBase.handleReplace(this)">';
             h += '</div>';
-            h += '<div class="kb-body-row">';
-            h += '<div class="kb-tree-pane" id="kb-tree-pane"><div class="kb-tree-title">目录</div><div id="kb-tree-content"></div></div>';
-            h += '<div class="kb-tree-resize-handle" id="kb-tree-resize-handle"></div>';
-            h += '<div class="kb-file-pane" id="kb-file-pane">';
-            h += '<div class="kb-file-body" id="kb-file-body" oncontextmenu="KnowledgeBase.showContextMenu(event)">';
-            h += '<div id="kb-file-content"></div>';
+            h += '<div class="fb-body-row">';
+            h += '<div class="fb-tree-pane" id="fb-tree-pane"><div class="fb-tree-title">目录</div><div id="fb-tree-content"></div></div>';
+            h += '<div class="fb-tree-resize-handle" id="fb-tree-resize-handle"></div>';
+            h += '<div class="fb-file-pane" id="fb-file-pane">';
+            h += '<div class="fb-file-body" id="fb-file-body" oncontextmenu="FileBase.showContextMenu(event)">';
+            h += '<div id="fb-file-content"></div>';
             h += '</div></div></div></div>';
 
-            document.getElementById('kb-view').innerHTML = h;
-            if (this._lsGet('kb_tree_collapsed') === '1') {
-                document.querySelector('.kb-explorer-body').classList.add('collapsed');
+            document.getElementById('content-view').innerHTML = h;
+            if (this._lsGet('fb_tree_collapsed') === '1') {
+                document.querySelector('.fb-explorer-body').classList.add('collapsed');
             }
             this.initTreeResize();
         }
         this.renderBreadcrumb();
 
-        if (!this._treeLoaded) {
-            var res = await this.api('/api/fb/' + this.currentKbId + '/local-categories?recursive=1', 'GET');
-            this._categoryTree = res.success ? (res.categories || []) : [];
-            this._treeLoaded = true;
+        if (!this.fbTreeLoaded) {
+            var res = await this.api('/api/fb/' + this.currentFbId + '/local-categories?recursive=1', 'GET');
+            this.fbCategoryTree = res.success ? (res.categories || []) : [];
+            this.fbTreeLoaded = true;
         }
         this.renderCategoryTree();
         await this.loadFiles();
@@ -470,16 +471,16 @@ var KnowledgeBase = {
     },
 
     renderBreadcrumb: function() {
-        var el = document.getElementById('kb-breadcrumb');
+        var el = document.getElementById('fb-breadcrumb');
         if (!el) return;
-        var h = '<span class="kb-bc-home" onclick="KnowledgeBase.currentKbId=null;KnowledgeBase.renderKbList()">🏠 文件库</span>';
+        var h = '<span class="fb-bc-home" onclick="FileBase.currentFbId=null;FileBase.renderKbList()">🏠 文件库</span>';
         for (var i = 0; i < this.currentPath.length; i++) {
             var p = this.currentPath[i];
-            h += '<span class="kb-bc-sep">›</span>';
+            h += '<span class="fb-bc-sep">›</span>';
             if (i < this.currentPath.length - 1) {
-                h += '<span class="kb-bc-item" onclick="KnowledgeBase.breadcrumbClick(' + i + ')">' + escapeHtmlText(p.name) + '</span>';
+                h += '<span class="fb-bc-item" onclick="FileBase.breadcrumbClick(' + i + ')">' + escapeHtmlText(p.name) + '</span>';
             } else {
-                h += '<span class="kb-bc-current">' + escapeHtmlText(p.name) + '</span>';
+                h += '<span class="fb-bc-current">' + escapeHtmlText(p.name) + '</span>';
             }
         }
         el.innerHTML = h;
@@ -491,23 +492,23 @@ var KnowledgeBase = {
         for (var i = 1; i < this.currentPath.length; i++) {
             if (this.currentPath[i].type === 'category') parts.push(this.currentPath[i].id);
         }
-        this.localCurrentSubdir = parts.join('/');
-        this._lsSet('docproc_current_subdir', this.localCurrentSubdir);
+        this.fbLocalCurrentSubdir = parts.join('/');
+        this._lsSet('docproc_current_subdir', this.fbLocalCurrentSubdir);
         await this.renderDetail();
     },
 
     renderCategoryTree: function() {
-        var content = document.getElementById('kb-tree-content');
+        var content = document.getElementById('fb-tree-content');
         if (!content) return;
 
-        var curPathNorm = (this.localCurrentSubdir || '').replace(/\\/g, '/');
+        var curPathNorm = (this.fbLocalCurrentSubdir || '').replace(/\\/g, '/');
         var pathParts = curPathNorm ? ('/' + curPathNorm).replace(/\/+/g, '/') : '/';
 
-        var h = '<div class="kb-tree-node">';
-        h += '<div class="kb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="KnowledgeBase.goToRoot()">📂 ' + (escapeHtmlText(this.kbName) || '文件库') + '</div>';
+        var h = '<div class="fb-tree-node">';
+        h += '<div class="fb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="FileBase.goToRoot()">📂 ' + (escapeHtmlText(this.fbName) || '文件库') + '</div>';
         h += '</div>';
 
-        h += this._renderTreeNodes(this._categoryTree, 0, pathParts);
+        h += this._renderTreeNodes(this.fbCategoryTree, 0, pathParts);
         content.innerHTML = h;
     },
 
@@ -521,22 +522,22 @@ var KnowledgeBase = {
             var isActive = activePath === nodePath;
             var isInActivePath = activePath && activePath.indexOf(nodePath + '/') === 0;
             // 展开条件：活跃路径上的默认展开，用户手动展开的也保持
-            var shouldExpand = isInActivePath || !!this._expandedTreePaths[nodePath];
+            var shouldExpand = isInActivePath || !!this.fbExpandedTreePaths[nodePath];
             var h2 = '';
             if (hasChildren) {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
             }
-            h += '<div class="kb-tree-node">';
-            h += '<div class="kb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="KnowledgeBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
+            h += '<div class="fb-tree-node">';
+            h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
             if (hasChildren) {
-                h += '<span class="kb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();KnowledgeBase.toggleTreeNode(this)"></span>';
+                h += '<span class="fb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();FileBase.toggleTreeNode(this)"></span>';
             } else {
-                h += '<span class="kb-tree-toggle" style="visibility:hidden"></span>';
+                h += '<span class="fb-tree-toggle" style="visibility:hidden"></span>';
             }
             h += '<span class="icon">📁</span>' + escapeHtmlText(n.name);
             h += '</div>';
             if (hasChildren) {
-                h += '<div class="kb-tree-children' + (shouldExpand ? ' open' : '') + '">';
+                h += '<div class="fb-tree-children' + (shouldExpand ? ' open' : '') + '">';
                 h += h2;
                 h += '</div>';
             }
@@ -546,34 +547,34 @@ var KnowledgeBase = {
     },
 
     _treeLabelClick: function(labelEl, path) {
-        var toggleEl = labelEl.querySelector('.kb-tree-toggle');
+        var toggleEl = labelEl.querySelector('.fb-tree-toggle');
         if (toggleEl && toggleEl.style.visibility !== 'hidden') {
             var nodePath = '/' + (path || '').replace(/\\/g, '/').replace(/\/+/g, '/');
-            var isCurrentlyOpen = !!KnowledgeBase._expandedTreePaths[nodePath];
+            var isCurrentlyOpen = !!FileBase.fbExpandedTreePaths[nodePath];
             if (isCurrentlyOpen) {
-                delete KnowledgeBase._expandedTreePaths[nodePath];
+                delete FileBase.fbExpandedTreePaths[nodePath];
             } else {
-                KnowledgeBase._expandedTreePaths[nodePath] = true;
+                FileBase.fbExpandedTreePaths[nodePath] = true;
             }
         }
-        KnowledgeBase.navigateSubdir(path);
+        FileBase.navigateSubdir(path);
     },
 
     toggleTreeNode: function(toggleEl) {
         var childrenDiv = toggleEl.parentElement.nextElementSibling;
-        if (!childrenDiv || !childrenDiv.classList.contains('kb-tree-children')) return;
+        if (!childrenDiv || !childrenDiv.classList.contains('fb-tree-children')) return;
         var isOpen = childrenDiv.classList.contains('open');
         // 同步更新展开状态数据
         var labelEl = toggleEl.parentElement;
         var onclickAttr = labelEl.getAttribute('onclick') || '';
-        var match = onclickAttr.match(/KnowledgeBase\._treeLabelClick\([^,]+,\s*'([^']+)'/);
+        var match = onclickAttr.match(/FileBase\._treeLabelClick\([^,]+,\s*'([^']+)'/);
         if (match) {
             var path = match[1];
             var nodePath = '/' + path.replace(/\\/g, '/').replace(/\/+/g, '/');
             if (isOpen) {
-                delete KnowledgeBase._expandedTreePaths[nodePath];
+                delete FileBase.fbExpandedTreePaths[nodePath];
             } else {
-                KnowledgeBase._expandedTreePaths[nodePath] = true;
+                FileBase.fbExpandedTreePaths[nodePath] = true;
             }
         }
         if (isOpen) {
@@ -586,7 +587,7 @@ var KnowledgeBase = {
     },
 
     goToRoot: function() {
-        this.localCurrentSubdir = '';
+        this.fbLocalCurrentSubdir = '';
         this.currentSort = { field: 'mtime', asc: false };
         this.selectedDocs = {};
         this._lsDel('docproc_current_subdir');
@@ -594,29 +595,29 @@ var KnowledgeBase = {
     },
 
     navigateSubdir: function(subdir) {
-        this.localCurrentSubdir = subdir || '';
+        this.fbLocalCurrentSubdir = subdir || '';
         this.currentSort = { field: 'mtime', asc: false };
         this.selectedDocs = {};
-        this.currentPath = [{ id: this.currentKbId, name: this.kbName || '未知文件库', type: 'kb' }];
+        this.currentPath = [{ id: this.currentFbId, name: this.fbName || '未知文件库', type: 'kb' }];
         if (subdir) {
             var parts = subdir.replace(/\\/g, '/').split('/');
             for (var i = 0; i < parts.length; i++) {
                 this.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
             }
         }
-        this._lsSet('docproc_current_subdir', this.localCurrentSubdir);
+        this._lsSet('docproc_current_subdir', this.fbLocalCurrentSubdir);
         this.renderDetail();
     },
 
     loadFiles: async function() {
-        var div = document.getElementById('kb-file-content');
+        var div = document.getElementById('fb-file-content');
         if (!div) return;
-        var url = '/api/fb/' + this.currentKbId + '/local-files';
-        if (this.localCurrentSubdir) url += '?subdir=' + encodeURIComponent(this.localCurrentSubdir);
+        var url = '/api/fb/' + this.currentFbId + '/local-files';
+        if (this.fbLocalCurrentSubdir) url += '?subdir=' + encodeURIComponent(this.fbLocalCurrentSubdir);
         var res = await this.api(url, 'GET');
 
         if (!res.success || (!res.files && !res.categories)) {
-            div.innerHTML = '<div class="kb-empty">此目录为空或不可访问</div>';
+            div.innerHTML = '<div class="fb-empty">此目录为空或不可访问</div>';
             return;
         }
 
@@ -637,22 +638,22 @@ var KnowledgeBase = {
         });
 
         var self = this;
-        var h = '<table class="kb-file-table"><thead><tr>';
-        h += '<th class="col-check"><input type="checkbox" id="kb-select-all" onchange="KnowledgeBase.toggleSelectAll(this)" title="全选/取消"></th>';
+        var h = '<table class="fb-file-table"><thead><tr>';
+        h += '<th class="col-check"><input type="checkbox" id="fb-select-all" onchange="FileBase.toggleSelectAll(this)" title="全选/取消"></th>';
         h += '<th class="col-icon"></th>';
-        h += '<th class="col-name" onclick="KnowledgeBase.setSort(\'name\')">名称<span class="sort-arrow">' + (sf === 'name' ? (sa ? '▲' : '▼') : '') + '</span></th>';
-        h += '<th class="col-date" onclick="KnowledgeBase.setSort(\'mtime\')">修改时间<span class="sort-arrow">' + (sf === 'mtime' ? (sa ? '▲' : '▼') : '') + '</span></th>';
-        h += '<th class="col-type" onclick="KnowledgeBase.setSort(\'ext\')">类型<span class="sort-arrow">' + (sf === 'ext' ? (sa ? '▲' : '▼') : '') + '</span></th>';
-        h += '<th class="col-size" onclick="KnowledgeBase.setSort(\'size\')">大小<span class="sort-arrow">' + (sf === 'size' ? (sa ? '▲' : '▼') : '') + '</span></th>';
+        h += '<th class="col-name" onclick="FileBase.setSort(\'name\')">名称<span class="sort-arrow">' + (sf === 'name' ? (sa ? '▲' : '▼') : '') + '</span></th>';
+        h += '<th class="col-date" onclick="FileBase.setSort(\'mtime\')">修改时间<span class="sort-arrow">' + (sf === 'mtime' ? (sa ? '▲' : '▼') : '') + '</span></th>';
+        h += '<th class="col-type" onclick="FileBase.setSort(\'ext\')">类型<span class="sort-arrow">' + (sf === 'ext' ? (sa ? '▲' : '▼') : '') + '</span></th>';
+        h += '<th class="col-size" onclick="FileBase.setSort(\'size\')">大小<span class="sort-arrow">' + (sf === 'size' ? (sa ? '▲' : '▼') : '') + '</span></th>';
         h += '<th class="col-actions">操作</th></tr></thead><tbody>';
 
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
             var catEscPathAttr = cat.path.replace(/'/g, "\\'");
-            h += '<tr class="kb-file-row kb-local-dir" data-local-path="' + catEscPathAttr + '">';
-            h += '<td class="col-check"><input type="checkbox" class="kb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
-            h += '<td class="col-icon"><span class="kb-file-icon">📁</span></td>';
-            h += '<td class="col-name"><div class="kb-file-name" onclick="KnowledgeBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
+            h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '">';
+            h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
+            h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
+            h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
             h += '<td class="col-type">文件夹</td>';
             h += '<td class="col-size"></td>';
@@ -669,16 +670,16 @@ var KnowledgeBase = {
             var escPath = f.path.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
             var escPathAttr = f.path.replace(/'/g, "\\'");
 
-            h += '<tr class="kb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '">';
-            h += '<td class="col-check"><input type="checkbox" class="kb-item-check" data-path="' + escPathAttr + '" data-type="file" onclick="event.stopPropagation()"></td>';
-            h += '<td class="col-icon"><span class="kb-file-icon">' + icon + '</span></td>';
-            h += '<td class="col-name"><div class="kb-file-name" ondblclick="KnowledgeBase.dblClickFile(event)" onclick="event.stopPropagation()">' + fname + '<span class="kb-file-type-tag">' + ext + '</span></div></td>';
-            h += '<td class="col-date"><span class="kb-file-date">' + date + '</span></td>';
+            h += '<tr class="fb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '">';
+            h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + escPathAttr + '" data-type="file" onclick="event.stopPropagation()"></td>';
+            h += '<td class="col-icon"><span class="fb-file-icon">' + icon + '</span></td>';
+            h += '<td class="col-name"><div class="fb-file-name" ondblclick="FileBase.dblClickFile(event)" onclick="event.stopPropagation()">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
+            h += '<td class="col-date"><span class="fb-file-date">' + date + '</span></td>';
             h += '<td class="col-type">' + ext + '</td>';
-            h += '<td class="col-size"><span class="kb-file-size">' + size + '</span></td>';
-            h += '<td class="col-actions"><span class="kb-file-actions">';
-            h += '<a href="#" onclick="KnowledgeBase.triggerReplace(\'' + escPathAttr + '\');return false">替换</a>';
-            h += '<a href="#" onclick="KnowledgeBase.openFile(\'' + escPath + '\');return false">打开</a>';
+            h += '<td class="col-size"><span class="fb-file-size">' + size + '</span></td>';
+            h += '<td class="col-actions"><span class="fb-file-actions">';
+            h += '<a href="#" onclick="FileBase.triggerReplace(\'' + escPathAttr + '\');return false">替换</a>';
+            h += '<a href="#" onclick="FileBase.openFile(\'' + escPath + '\');return false">打开</a>';
             h += '</span></td></tr>';
         }
         h += '</tbody></table>';
@@ -686,14 +687,14 @@ var KnowledgeBase = {
     },
 
     toggleSelectAll: function(el) {
-        var checks = document.querySelectorAll('.kb-item-check');
+        var checks = document.querySelectorAll('.fb-item-check');
         for (var i = 0; i < checks.length; i++) {
             checks[i].checked = el.checked;
         }
     },
 
     getSelectedPaths: function() {
-        var checks = document.querySelectorAll('.kb-item-check:checked');
+        var checks = document.querySelectorAll('.fb-item-check:checked');
         var paths = [];
         for (var i = 0; i < checks.length; i++) {
             var chk = checks[i];
@@ -709,7 +710,7 @@ var KnowledgeBase = {
             return;
         }
         if (items.length === 1 && items[0].type === 'file') {
-            window.open('/api/fb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
+            window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
         } else {
             var paths = [];
             for (var i = 0; i < items.length; i++) {
@@ -719,7 +720,7 @@ var KnowledgeBase = {
                 alert('请至少选择一个文件或文件夹');
                 return;
             }
-            var url = '/api/fb/' + this.currentKbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
+            var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
             try {
                 var resp = await fetch(url, {
                     method: 'POST',
@@ -751,10 +752,10 @@ var KnowledgeBase = {
         var paths = [];
         for (var i = 0; i < items.length; i++) paths.push(items[i].path);
         var self = this;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files', 'DELETE', { paths: paths });
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: paths });
         if (res.success) {
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             if (res.errors && res.errors.length > 0) {
                 alert('成功删除 ' + res.deleted + ' 个，失败: ' + res.errors.join(', '));
             }
@@ -765,27 +766,27 @@ var KnowledgeBase = {
     },
 
     triggerReplace: function(relPath) {
-        this._replacePath = relPath;
-        var inp = document.getElementById('kb-replace-input');
+        this.fbReplacePath = relPath;
+        var inp = document.getElementById('fb-replace-input');
         if (inp) inp.click();
     },
 
     handleReplace: async function(fileInput) {
-        var relPath = this._replacePath;
+        var relPath = this.fbReplacePath;
         if (!relPath || !fileInput.files || !fileInput.files[0]) return;
-        this._replacePath = null;
+        this.fbReplacePath = null;
 
         var formData = new FormData();
         formData.append('file', fileInput.files[0]);
 
-        var url = '/api/fb/' + this.currentKbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentFbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'PUT', body: formData });
         var res = await resp.json();
         fileInput.value = '';
 
         if (res.success) {
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
             alert(res.message || '替换失败');
@@ -794,14 +795,14 @@ var KnowledgeBase = {
 
     toggleUploadMenu: function(e) {
         e.stopPropagation();
-        var menu = document.querySelector('.kb-upload-menu');
+        var menu = document.querySelector('.fb-upload-menu');
         if (!menu) return;
         var isVisible = menu.style.display === 'block';
         this._hideAllMenus();
         if (!isVisible) {
             menu.style.display = 'block';
             var self = this;
-            this._hideUploadMenuHandler = function() { self._hideAllMenus(); };
+            this.fbHideUploadMenuHandler = function() { self._hideAllMenus(); };
             setTimeout(function() {
                 document.addEventListener('click', self._hideUploadMenuHandler);
             }, 0);
@@ -809,30 +810,30 @@ var KnowledgeBase = {
     },
 
     _hideAllMenus: function() {
-        var menus = document.querySelectorAll('.kb-upload-menu');
+        var menus = document.querySelectorAll('.fb-upload-menu');
         for (var i = 0; i < menus.length; i++) {
             menus[i].style.display = 'none';
         }
-        if (this._hideUploadMenuHandler) {
-            document.removeEventListener('click', this._hideUploadMenuHandler);
-            this._hideUploadMenuHandler = null;
+        if (this.fbHideUploadMenuHandler) {
+            document.removeEventListener('click', this.fbHideUploadMenuHandler);
+            this.fbHideUploadMenuHandler = null;
         }
     },
 
     triggerFileUpload: function() {
         this._hideAllMenus();
-        var inp = document.getElementById('kb-file-upload-input');
+        var inp = document.getElementById('fb-file-upload-input');
         if (inp) inp.click();
     },
 
     triggerFolderUpload: function() {
         this._hideAllMenus();
-        var inp = document.getElementById('kb-folder-upload-input');
+        var inp = document.getElementById('fb-folder-upload-input');
         if (inp) inp.click();
     },
 
     triggerUpload: function() {
-        var inp = document.getElementById('kb-file-upload-input');
+        var inp = document.getElementById('fb-file-upload-input');
         if (inp) inp.click();
     },
 
@@ -844,15 +845,15 @@ var KnowledgeBase = {
             formData.append('files', fileInput.files[i]);
         }
 
-        var subdir = this.localCurrentSubdir || '';
-        var url = '/api/fb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var subdir = this.fbLocalCurrentSubdir || '';
+        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
 
         if (res.success) {
-            self._categoryTree = null;
-            self._treeLoaded = false;
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
             alert(res.message || '上传失败');
@@ -869,15 +870,15 @@ var KnowledgeBase = {
             formData.append('files', f, relativePath);
         }
 
-        var subdir = this.localCurrentSubdir || '';
-        var url = '/api/fb/' + this.currentKbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var subdir = this.fbLocalCurrentSubdir || '';
+        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
 
         if (res.success) {
-            self._categoryTree = null;
-            self._treeLoaded = false;
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
             alert(res.message || '上传失败');
@@ -890,13 +891,13 @@ var KnowledgeBase = {
 
     _createFolder: async function(name) {
         var self = this;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/dir', 'POST', {
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/dir', 'POST', {
             name: name,
-            parent: this.localCurrentSubdir || ''
+            parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
-            self._categoryTree = null;
-            self._treeLoaded = false;
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
             alert(res.message || '创建失败');
@@ -909,13 +910,13 @@ var KnowledgeBase = {
 
     _createMdFile: async function(name) {
         var self = this;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/create', 'POST', {
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/create', 'POST', {
             name: name,
-            parent: this.localCurrentSubdir || ''
+            parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
-            self._categoryTree = null;
-            self._treeLoaded = false;
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
             self.openMarkdownEditor(res.path);
         } else {
             alert(res.message || '创建失败');
@@ -928,16 +929,16 @@ var KnowledgeBase = {
         this.hideContextMenu();
 
         var target = event.target;
-        var fileRow = target.closest('.kb-file-row');
+        var fileRow = target.closest('.fb-file-row');
 
         var menu = document.createElement('div');
-        menu.className = 'kb-context-menu';
-        menu.id = 'kb-context-menu';
+        menu.className = 'fb-context-menu';
+        menu.id = 'fb-context-menu';
         menu.style.zIndex = '4000';
 
         if (fileRow) {
             var path = fileRow.getAttribute('data-local-path') || '';
-            var isDir = fileRow.classList.contains('kb-local-dir');
+            var isDir = fileRow.classList.contains('fb-local-dir');
             menu.innerHTML = this._buildFileContextMenu(path, isDir);
         } else {
             menu.innerHTML = this._buildEmptyContextMenu();
@@ -947,43 +948,43 @@ var KnowledgeBase = {
         menu.style.top = Math.min(event.clientY, window.innerHeight - 220) + 'px';
         document.body.appendChild(menu);
 
-        this._hideContextMenuHandler = function() { KnowledgeBase.hideContextMenu(); };
+        this.fbHideContextMenuHandler = function() { FileBase.hideContextMenu(); };
         setTimeout(function() {
-            document.addEventListener('click', KnowledgeBase._hideContextMenuHandler);
+            document.addEventListener('click', FileBase._hideContextMenuHandler);
         }, 0);
     },
 
     hideContextMenu: function() {
-        var menu = document.getElementById('kb-context-menu');
+        var menu = document.getElementById('fb-context-menu');
         if (menu) menu.remove();
-        if (this._hideContextMenuHandler) {
-            document.removeEventListener('click', this._hideContextMenuHandler);
-            this._hideContextMenuHandler = null;
+        if (this.fbHideContextMenuHandler) {
+            document.removeEventListener('click', this.fbHideContextMenuHandler);
+            this.fbHideContextMenuHandler = null;
         }
     },
 
     _buildFileContextMenu: function(path, isDir) {
         var escPath = path.replace(/'/g, "\\'");
         var h = '';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextRename(\'' + escPath + '\')"><span class="icon">✏️</span> 重命名</div>';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextCopyOne(\'' + escPath + '\')"><span class="icon">📋</span> 复制</div>';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextMoveOne(\'' + escPath + '\')"><span class="icon">📦</span> 移动</div>';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon">📥</span> 下载</div>';
-        h += '<div class="kb-menu-divider"></div>';
-        h += '<div class="kb-menu-item" onclick="KnowledgeBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon">🗑️</span> 删除</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon">✏️</span> 重命名</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon">📋</span> 复制</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon">📦</span> 移动</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon">📥</span> 下载</div>';
+        h += '<div class="fb-menu-divider"></div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon">🗑️</span> 删除</div>';
         return h;
     },
 
     _buildEmptyContextMenu: function() {
-        var h = '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateFolderDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
-                '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateMdDialog();KnowledgeBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
+        var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
         if (window.authRole === 'admin') {
-            h += '<div class="kb-menu-divider"></div>' +
-                 '<div class="kb-menu-item" onclick="KnowledgeBase.goBackToList();KnowledgeBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>' +
-                 '<div class="kb-menu-item" onclick="KnowledgeBase.showCreateNetworkRootFolder();KnowledgeBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
+            h += '<div class="fb-menu-divider"></div>' +
+                 '<div class="fb-menu-item" onclick="FileBase.goBackToList();FileBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>' +
+                 '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
         } else {
-            h += '<div class="kb-menu-divider"></div>' +
-                 '<div class="kb-menu-item" onclick="KnowledgeBase.goBackToList();KnowledgeBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>';
+            h += '<div class="fb-menu-divider"></div>' +
+                 '<div class="fb-menu-item" onclick="FileBase.goBackToList();FileBase.hideContextMenu()"><span class="icon">🔙</span> 返回文件库列表</div>';
         }
         return h;
     },
@@ -993,13 +994,13 @@ var KnowledgeBase = {
         var oldName = path.split('/').pop();
         var newName = prompt('重命名为：', oldName);
         if (!newName || !newName.trim() || newName.trim() === oldName) return;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/rename', 'PUT', {
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/rename', 'PUT', {
             path: path,
             new_name: newName.trim()
         });
         if (res.success) {
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
             alert(res.message || '重命名失败');
@@ -1009,35 +1010,35 @@ var KnowledgeBase = {
     contextCopyOne: async function(path) {
         this.hideContextMenu();
         var self = this;
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
         h += '<h3>📋 复制到</h3>';
         h += '<p style="color:#666;font-size:12px">' + escapeHtmlText(path) + '</p>';
-        h += '<div class="kb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
-        h += '<div class="kb-tree-node"><div class="kb-tree-label active" onclick="KnowledgeBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
-        h += this._renderMoveTree(this._categoryTree, 0);
+        h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this.fbCategoryTree, 0);
         h += '</div>';
-        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="kb-move-dest-label">根目录</span></div>';
-        h += '<div class="kb-modal-actions">';
-        h += '<button class="btn" onclick="KnowledgeBase.doCopyOne()">复制</button>';
-        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="btn" onclick="FileBase.doCopyOne()">复制</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
-        this._copySource = path;
-        this._moveDest = '';
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+        this.fbCopySource = path;
+        this.fbMoveDest = '';
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
     doCopyOne: async function() {
-        var src = this._copySource;
-        var dest = this._moveDest || '';
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/copy', 'POST', {
+        var src = this.fbCopySource;
+        var dest = this.fbMoveDest || '';
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/copy', 'POST', {
             sources: [src],
             dest: dest
         });
         this.closeModal();
         if (res.success) {
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
             alert(res.message || '复制失败');
@@ -1046,9 +1047,9 @@ var KnowledgeBase = {
 
     contextMoveOne: function(path) {
         this.hideContextMenu();
-        var row = document.querySelector('.kb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
         if (row) {
-            var chk = row.querySelector('.kb-item-check');
+            var chk = row.querySelector('.fb-item-check');
             if (chk) chk.checked = true;
         }
         this.showMoveDialog();
@@ -1056,16 +1057,16 @@ var KnowledgeBase = {
 
     contextDownloadOne: function(path) {
         this.hideContextMenu();
-        window.open('/api/fb/' + this.currentKbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+        window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
     },
 
     contextDeleteOne: async function(path) {
         this.hideContextMenu();
         if (!confirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）')) return;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files', 'DELETE', { paths: [path] });
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: [path] });
         if (res.success) {
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
             alert(res.message || '删除失败');
@@ -1079,21 +1080,21 @@ var KnowledgeBase = {
             return;
         }
         var self = this;
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
         h += '<h3>📦 移动到</h3>';
         h += '<p style="color:#666;font-size:12px">已选择 ' + items.length + ' 个项目</p>';
-        h += '<div class="kb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
-        h += '<div class="kb-tree-node"><div class="kb-tree-label active" onclick="KnowledgeBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
-        h += this._renderMoveTree(this._categoryTree, 0);
+        h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this.fbCategoryTree, 0);
         h += '</div>';
-        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="kb-move-dest-label">根目录</span></div>';
-        h += '<div class="kb-modal-actions">';
-        h += '<button class="btn" onclick="KnowledgeBase.doMove()">移动</button>';
-        h += '<button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">取消</button>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="btn" onclick="FileBase.doMove()">移动</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
-        this._moveDest = '';
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+        this.fbMoveDest = '';
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
     _renderMoveTree: function(nodes, depth) {
@@ -1102,8 +1103,8 @@ var KnowledgeBase = {
         for (var i = 0; i < nodes.length; i++) {
             var n = nodes[i];
             var hasChildren = n.children && n.children.length > 0;
-            h += '<div class="kb-tree-node">';
-            h += '<div class="kb-tree-label" style="padding-left:' + ml + 'px" onclick="KnowledgeBase._selectMoveDest(\'' + (n.path || '').replace(/'/g, "\\'") + '\', this)" data-dest="' + (n.path || '') + '">📁 ' + escapeHtmlText(n.name) + '</div>';
+            h += '<div class="fb-tree-node">';
+            h += '<div class="fb-tree-label" style="padding-left:' + ml + 'px" onclick="FileBase._selectMoveDest(\'' + (n.path || '').replace(/'/g, "\\'") + '\', this)" data-dest="' + (n.path || '') + '">📁 ' + escapeHtmlText(n.name) + '</div>';
             if (hasChildren) {
                 h += '<div style="display:block">';
                 h += this._renderMoveTree(n.children, depth + 1);
@@ -1115,11 +1116,11 @@ var KnowledgeBase = {
     },
 
     _selectMoveDest: function(dest, el) {
-        this._moveDest = dest;
-        var labels = document.querySelectorAll('#kb-modal-overlay .kb-tree-label');
+        this.fbMoveDest = dest;
+        var labels = document.querySelectorAll('#fb-modal-overlay .fb-tree-label');
         for (var i = 0; i < labels.length; i++) labels[i].classList.remove('active');
         el.classList.add('active');
-        var label = document.getElementById('kb-move-dest-label');
+        var label = document.getElementById('fb-move-dest-label');
         if (label) label.textContent = dest || '根目录';
     },
 
@@ -1128,16 +1129,16 @@ var KnowledgeBase = {
         if (items.length === 0) return;
         var sources = [];
         for (var i = 0; i < items.length; i++) sources.push(items[i].path);
-        var dest = this._moveDest || '';
+        var dest = this.fbMoveDest || '';
 
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
         this.closeModal();
         if (res.success) {
             if (res.errors && res.errors.length > 0) {
                 alert('成功移动 ' + res.moved + ' 个，失败: ' + res.errors.join(', '));
             }
-            this._categoryTree = null;
-            this._treeLoaded = false;
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
             alert(res.message || '移动失败');
@@ -1145,7 +1146,7 @@ var KnowledgeBase = {
     },
 
     dblClickFile: function(event) {
-        var row = event.target.closest('.kb-file-row');
+        var row = event.target.closest('.fb-file-row');
         if (!row) return;
         var path = row.getAttribute('data-local-path');
         if (path) this.openFile(path);
@@ -1162,7 +1163,7 @@ var KnowledgeBase = {
         } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
             this.openImagePreview(relPath);
         } else {
-            window.open('/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
+            window.open('/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
         }
     },
     
@@ -1171,14 +1172,14 @@ var KnowledgeBase = {
         var fileName = relPath.split('/').pop();
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
-            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '<button onclick="FileBase._closeDocxPreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" id="kb-docx-preview-content">' +
+            '<div class="fb-docx-preview-content" id="fb-docx-preview-content">' +
             '<div style="text-align: center; padding: 40px; color: #999;">' +
             '<div style="font-size: 48px; margin-bottom: 12px;">📄</div>' +
             '<div>正在加载预览...</div>' +
@@ -1188,8 +1189,8 @@ var KnowledgeBase = {
         document.body.appendChild(overlay);
         
         try {
-            var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/preview?path=' + encodeURIComponent(relPath), 'GET');
-            var contentEl = document.getElementById('kb-docx-preview-content');
+            var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/preview?path=' + encodeURIComponent(relPath), 'GET');
+            var contentEl = document.getElementById('fb-docx-preview-content');
             if (res.success) {
                 var html = (typeof marked !== 'undefined' && res.markdown)
                     ? marked.parse(res.markdown)
@@ -1199,13 +1200,13 @@ var KnowledgeBase = {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (res.message || '未知错误') + '</div>';
             }
         } catch (e) {
-            var contentEl = document.getElementById('kb-docx-preview-content');
+            var contentEl = document.getElementById('fb-docx-preview-content');
             contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + e.message + '</div>';
         }
     },
     
     _closeDocxPreview: function() {
-        var overlay = document.querySelector('.kb-docx-preview-overlay');
+        var overlay = document.querySelector('.fb-docx-preview-overlay');
         if (overlay) {
             overlay.remove();
         }
@@ -1213,17 +1214,17 @@ var KnowledgeBase = {
     
     openPdfPreview: function(relPath) {
         var fileName = relPath.split('/').pop();
-        var fileUrl = '/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
-            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '<button onclick="FileBase._closeDocxPreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" style="padding:0">' +
+            '<div class="fb-docx-preview-content" style="padding:0">' +
             '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
             '</div>' +
             '</div>';
@@ -1232,17 +1233,17 @@ var KnowledgeBase = {
     
     openImagePreview: function(relPath) {
         var fileName = relPath.split('/').pop();
-        var fileUrl = '/api/fb/' + this.currentKbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
         
         var overlay = document.createElement('div');
-        overlay.className = 'kb-docx-preview-overlay';
+        overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
-            '<div class="kb-docx-preview-container">' +
-            '<div class="kb-docx-preview-header">' +
+            '<div class="fb-docx-preview-container">' +
+            '<div class="fb-docx-preview-header">' +
             '<span>🖼️ ' + escapeHtmlText(fileName) + '</span>' +
-            '<button onclick="KnowledgeBase._closeDocxPreview()">✖</button>' +
+            '<button onclick="FileBase._closeDocxPreview()">✖</button>' +
             '</div>' +
-            '<div class="kb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
+            '<div class="fb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
             '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
             '</div>' +
             '</div>';
@@ -1251,28 +1252,28 @@ var KnowledgeBase = {
 
     openMarkdownEditor: async function(relPath) {
         var self = this;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/content?path=' + encodeURIComponent(relPath), 'GET');
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/content?path=' + encodeURIComponent(relPath), 'GET');
         var content = res.success ? (res.content || '') : '';
         var fileName = relPath.split('/').pop();
 
         var overlay = document.createElement('div');
-        overlay.className = 'kb-md-editor-overlay';
-        overlay.id = 'kb-md-editor-overlay';
+        overlay.className = 'fb-md-editor-overlay';
+        overlay.id = 'fb-md-editor-overlay';
         overlay.innerHTML =
-            '<div class="kb-md-editor-container">' +
-            '<div class="kb-md-editor-header">' +
-            '<span class="kb-md-editor-title">📝 ' + escapeHtmlText(fileName) + '</span>' +
-            '<div class="kb-md-editor-actions">' +
-            '<button class="kb-md-btn-save" onclick="KnowledgeBase._saveMdContent()">💾 保存</button>' +
-            '<button class="kb-md-btn-close" onclick="KnowledgeBase._closeMdEditor()">✖ 关闭</button>' +
+            '<div class="fb-md-editor-container">' +
+            '<div class="fb-md-editor-header">' +
+            '<span class="fb-md-editor-title">📝 ' + escapeHtmlText(fileName) + '</span>' +
+            '<div class="fb-md-editor-actions">' +
+            '<button class="fb-md-btn-save" onclick="FileBase._saveMdContent()">💾 保存</button>' +
+            '<button class="fb-md-btn-close" onclick="FileBase._closeMdEditor()">✖ 关闭</button>' +
             '</div></div>' +
-            '<div id="kb-wysiwyg-editor"></div>' +
+            '<div id="fb-wysiwyg-editor"></div>' +
             '</div>';
         document.body.appendChild(overlay);
 
-        this._mdEditorRelPath = relPath;
+        this.fbMdEditorRelPath = relPath;
 
-        var editorEl = document.getElementById('kb-wysiwyg-editor');
+        var editorEl = document.getElementById('fb-wysiwyg-editor');
         if (typeof Quill !== 'undefined') {
             var quill = new Quill(editorEl, {
                 theme: 'snow',
@@ -1298,7 +1299,7 @@ var KnowledgeBase = {
                 quill.clipboard.dangerouslyPasteHTML(html);
             }
 
-            this._mdEditorInstance = quill;
+            this.fbMdEditorInstance = quill;
         } else {
             editorEl.innerHTML = '<div style="padding:20px;color:#999;">编辑器加载失败，请刷新页面重试</div>';
         }
@@ -1310,8 +1311,8 @@ var KnowledgeBase = {
 
     _saveMdContent: async function() {
         var content = '';
-        if (this._mdEditorInstance && typeof this._mdEditorInstance.root !== 'undefined') {
-            var html = this._mdEditorInstance.root.innerHTML;
+        if (this.fbMdEditorInstance && typeof this.fbMdEditorInstance.root !== 'undefined') {
+            var html = this.fbMdEditorInstance.root.innerHTML;
             if (typeof TurndownService !== 'undefined') {
                 var turndownService = new TurndownService({
                     headingStyle: 'atx',
@@ -1328,8 +1329,8 @@ var KnowledgeBase = {
             }
         }
 
-        var res = await this.api('/api/fb/' + this.currentKbId + '/local-files/content', 'PUT', {
-            path: this._mdEditorRelPath,
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/content', 'PUT', {
+            path: this.fbMdEditorRelPath,
             content: content
         });
 
@@ -1342,9 +1343,9 @@ var KnowledgeBase = {
     },
 
     _closeMdEditor: function() {
-        this._mdEditorInstance = null;
-        this._mdEditorRelPath = null;
-        var overlay = document.getElementById('kb-md-editor-overlay');
+        this.fbMdEditorInstance = null;
+        this.fbMdEditorRelPath = null;
+        var overlay = document.getElementById('fb-md-editor-overlay');
         if (overlay) overlay.remove();
     },
 
@@ -1359,18 +1360,18 @@ var KnowledgeBase = {
     },
 
     toggleTreePane: function() {
-        var body = document.querySelector('.kb-explorer-body');
+        var body = document.querySelector('.fb-explorer-body');
         if (!body) return;
         body.classList.toggle('collapsed');
-        this._lsSet('kb_tree_collapsed', body.classList.contains('collapsed') ? '1' : '0');
+        this._lsSet('fb_tree_collapsed', body.classList.contains('collapsed') ? '1' : '0');
     },
 
     initTreeResize: function() {
-        var handle = document.getElementById('kb-tree-resize-handle');
-        var pane = document.getElementById('kb-tree-pane');
+        var handle = document.getElementById('fb-tree-resize-handle');
+        var pane = document.getElementById('fb-tree-pane');
         if (!handle || !pane) return;
 
-        var saved = this._lsGet('kb_tree_width');
+        var saved = this._lsGet('fb_tree_width');
         if (saved) { pane.style.width = saved + 'px'; }
 
         var self = this;
@@ -1380,7 +1381,7 @@ var KnowledgeBase = {
             e.preventDefault();
             startX = e.clientX;
             startW = pane.offsetWidth;
-            document.body.classList.add('kb-resizing');
+            document.body.classList.add('fb-resizing');
             handle.classList.add('active');
         });
 
@@ -1393,51 +1394,51 @@ var KnowledgeBase = {
 
         document.addEventListener('mouseup', function() {
             if (startW) {
-                self._lsSet('kb_tree_width', pane.offsetWidth);
+                self._lsSet('fb_tree_width', pane.offsetWidth);
                 startW = null;
-                document.body.classList.remove('kb-resizing');
+                document.body.classList.remove('fb-resizing');
                 handle.classList.remove('active');
             }
         });
     },
 
     _displayLocalPath: function() {
-        return this.displayPath || this.localPath || '';
+        return this.fbDisplayPath || this.fbLocalPath || '';
     },
 
     showSettings: async function() {
         var self = this;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/members', 'GET');
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        var res = await this.api('/api/fb/' + this.currentFbId + '/members', 'GET');
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
         h += '<h3>⚙ 文件库设置</h3><h4>成员管理</h4>';
         if (res.success && res.members) {
-            h += '<table class="kb-member-table"><thead><tr><th>用户名</th><th>权限</th><th>操作</th></tr></thead><tbody>';
+            h += '<table class="fb-member-table"><thead><tr><th>用户名</th><th>权限</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < res.members.length; i++) {
                 var m = res.members[i];
                 h += '<tr><td>' + escapeHtmlText(m.username) + (m.is_owner ? ' (所有者)' : '') + '</td><td>';
                 if (m.is_owner) { h += '管理'; }
                 else {
-                    h += '<select onchange="KnowledgeBase._updateMemberPerm(\'' + m.user_id + '\', this.value)">';
+                    h += '<select onchange="FileBase._updateMemberPerm(\'' + m.user_id + '\', this.value)">';
                     h += '<option value="view"' + (m.permission==='view'?' selected':'') + '>查看</option>';
                     h += '<option value="edit"' + (m.permission==='edit'?' selected':'') + '>编辑</option>';
                     h += '<option value="manage"' + (m.permission==='manage'?' selected':'') + '>管理</option>';
                     h += '</select>';
                 }
                 h += '</td><td>';
-                if (!m.is_owner) h += '<button class="kb-btn-remove" onclick="KnowledgeBase._removeMemberAct(\'' + m.user_id + '\')">移除</button>';
+                if (!m.is_owner) h += '<button class="fb-btn-remove" onclick="FileBase._removeMemberAct(\'' + m.user_id + '\')">移除</button>';
                 h += '</td></tr>';
             }
             h += '</tbody></table>';
         }
-        h += '<div class="kb-add-member"><input type="text" id="kb-new-member" placeholder="用户名"><select id="kb-new-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select><button onclick="KnowledgeBase._addMemberAct()">添加</button></div>';
+        h += '<div class="fb-add-member"><input type="text" id="fb-new-member" placeholder="用户名"><select id="fb-new-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select><button onclick="FileBase._addMemberAct()">添加</button></div>';
         h += '<hr style="margin:16px 0"><h4>批量设置用户权限</h4>';
         h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
-        h += '<select id="kb-batch-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select>';
-        h += '<button onclick="KnowledgeBase._batchSetUsers()">应用到所选用户</button>';
-        h += '<button onclick="KnowledgeBase._batchSetAllUsers()">应用到所有用户</button>';
+        h += '<select id="fb-batch-perm"><option value="view">查看</option><option value="edit">编辑</option><option value="manage">管理</option></select>';
+        h += '<button onclick="FileBase._batchSetUsers()">应用到所选用户</button>';
+        h += '<button onclick="FileBase._batchSetAllUsers()">应用到所有用户</button>';
         h += '</div>';
-        h += '<div class="kb-batch-user-list" style="max-height:200px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px">';
-        var allUsers = JSON.parse(this._lsGet('kb_user_list') || '[]');
+        h += '<div class="fb-batch-user-list" style="max-height:200px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px">';
+        var allUsers = JSON.parse(this._lsGet('fb_user_list') || '[]');
         var memberMap = {};
         if (res.success && res.members) {
             for (var j = 0; j < res.members.length; j++) {
@@ -1450,51 +1451,51 @@ var KnowledgeBase = {
             var curPerm = memberMap[u.username] ? memberMap[u.username].permission : '';
             var checked = curPerm ? ' checked' : '';
             h += '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer">';
-            h += '<input type="checkbox" class="kb-batch-user-chk" data-username="' + escapeHtmlText(u.username) + '"' + checked + '>';
+            h += '<input type="checkbox" class="fb-batch-user-chk" data-username="' + escapeHtmlText(u.username) + '"' + checked + '>';
             h += escapeHtmlText(u.username) + (curPerm ? ' <span style="color:#888;font-size:11px">(' + (curPerm === 'manage' ? '管理' : curPerm === 'edit' ? '编辑' : '查看') + ')</span>' : '');
             h += '</label>';
         }
         h += '</div>';
         h += '<hr style="margin:16px 0"><h4>转让所有权</h4>';
-        h += '<div class="kb-add-member"><input type="text" id="kb-transfer-user" placeholder="新所有者用户名"><button onclick="KnowledgeBase._transferAct()">转让</button></div>';
-        h += '<div class="kb-modal-actions"><button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">关闭</button></div>';
+        h += '<div class="fb-add-member"><input type="text" id="fb-transfer-user" placeholder="新所有者用户名"><button onclick="FileBase._transferAct()">转让</button></div>';
+        h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
     closeModal: function() {
-        var ov = document.getElementById('kb-modal-overlay');
+        var ov = document.getElementById('fb-modal-overlay');
         if (ov) ov.remove();
     },
 
     _updateMemberPerm: async function(uid, perm) {
-        await this.api('/api/fb/' + this.currentKbId + '/members/' + uid, 'PUT', { permission: perm });
+        await this.api('/api/fb/' + this.currentFbId + '/members/' + uid, 'PUT', { permission: perm });
     },
 
     _removeMemberAct: async function(uid) {
         if (!confirm('确定要移除该成员吗？')) return;
-        await this.api('/api/fb/' + this.currentKbId + '/members/' + uid, 'DELETE');
+        await this.api('/api/fb/' + this.currentFbId + '/members/' + uid, 'DELETE');
         var self = this; self.closeModal(); await self.showSettings();
     },
 
     _addMemberAct: async function() {
-        var uname = document.getElementById('kb-new-member').value.trim();
-        var perm = document.getElementById('kb-new-perm').value;
+        var uname = document.getElementById('fb-new-member').value.trim();
+        var perm = document.getElementById('fb-new-perm').value;
         if (!uname) return;
-        var res = await this.api('/api/fb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
+        var res = await this.api('/api/fb/' + this.currentFbId + '/members', 'POST', { username: uname, permission: perm });
         if (res.success) { var self = this; self.closeModal(); await self.showSettings(); }
         else alert(res.message);
     },
 
     _batchSetUsers: async function() {
-        var perm = document.getElementById('kb-batch-perm').value;
-        var chks = document.querySelectorAll('.kb-batch-user-chk:checked');
+        var perm = document.getElementById('fb-batch-perm').value;
+        var chks = document.querySelectorAll('.fb-batch-user-chk:checked');
         var count = 0;
         for (var i = 0; i < chks.length; i++) {
             var uname = chks[i].getAttribute('data-username');
             try {
-                await this.api('/api/fb/' + this.currentKbId + '/members', 'POST', { username: uname, permission: perm });
+                await this.api('/api/fb/' + this.currentFbId + '/members', 'POST', { username: uname, permission: perm });
                 count++;
             } catch (e) {}
         }
@@ -1504,45 +1505,45 @@ var KnowledgeBase = {
     },
 
     _batchSetAllUsers: async function() {
-        var chks = document.querySelectorAll('.kb-batch-user-chk');
+        var chks = document.querySelectorAll('.fb-batch-user-chk');
         for (var i = 0; i < chks.length; i++) chks[i].checked = true;
         await this._batchSetUsers();
     },
 
     _transferAct: async function() {
-        var uname = document.getElementById('kb-transfer-user').value.trim();
+        var uname = document.getElementById('fb-transfer-user').value.trim();
         if (!uname) return;
         if (!confirm('确定将文件库所有权转让给 ' + uname + ' 吗？')) return;
-        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
+        var users = JSON.parse(this._lsGet('fb_user_list') || '[]');
         var tid = null;
         for (var i = 0; i < users.length; i++) {
             if (users[i].username === uname) { tid = users[i].user_id; break; }
         }
         if (!tid) { alert('用户不存在'); return; }
-        var res = await this.api('/api/fb/' + this.currentKbId + '/transfer', 'POST', { new_owner_id: tid });
-        if (res.success) { this.closeModal(); this.currentKbId = null; await this.renderKbList(); }
+        var res = await this.api('/api/fb/' + this.currentFbId + '/transfer', 'POST', { new_owner_id: tid });
+        if (res.success) { this.closeModal(); this.currentFbId = null; await this.renderKbList(); }
         else alert(res.message);
     },
 
     _deleteKbAct: async function() {
         if (!confirm('确定要删除此文件库吗？')) return;
-        var res = await this.api('/api/fb/' + this.currentKbId, 'DELETE');
-        if (res.success) { this.closeModal(); this.currentKbId = null; await this.renderKbList(); }
+        var res = await this.api('/api/fb/' + this.currentFbId, 'DELETE');
+        if (res.success) { this.closeModal(); this.currentFbId = null; await this.renderKbList(); }
         else alert(res.message);
     },
 
     showUserManage: async function() {
         await this.refreshAuthRole();
         await this.refreshUserCache();
-        var users = JSON.parse(this._lsGet('kb_user_list') || '[]');
-        var h = '<div class="kb-modal-overlay" id="kb-modal-overlay"><div class="kb-modal">';
+        var users = JSON.parse(this._lsGet('fb_user_list') || '[]');
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
         h += '<h3>👥 用户管理</h3>';
-        h += '<table class="kb-member-table"><thead><tr><th>用户名</th><th>全局角色</th></tr></thead><tbody>';
+        h += '<table class="fb-member-table"><thead><tr><th>用户名</th><th>全局角色</th></tr></thead><tbody>';
         for (var i = 0; i < users.length; i++) {
             var u = users[i];
             var isSelf = (u.user_id === window.authUserId);
             h += '<tr' + (isSelf ? ' style="background:#f0f8ff"' : '') + '><td>' + escapeHtmlText(u.username) + (isSelf ? ' <span style="color:#999;font-size:11px">(当前)</span>' : '') + '</td>';
-            h += '<td><select' + (isSelf ? ' disabled' : '') + ' onchange="KnowledgeBase._updateUserRole(\'' + u.user_id + '\', this.value)">';
+            h += '<td><select' + (isSelf ? ' disabled' : '') + ' onchange="FileBase._updateUserRole(\'' + u.user_id + '\', this.value)">';
             h += '<option value="admin"' + (u.role==='admin'?' selected':'') + '>管理员</option>';
             h += '<option value="editor"' + (u.role==='editor'?' selected':'') + '>编辑者</option>';
             h += '<option value="viewer"' + (u.role==='viewer'?' selected':'') + '>阅读者</option>';
@@ -1550,11 +1551,11 @@ var KnowledgeBase = {
         }
         h += '</tbody></table>';
         h += '<p style="font-size:12px;color:#999;margin:6px 0 0">注：当前用户不可修改自身角色（防止误操作），可由其他管理员调整</p>';
-        h += '<div class="kb-modal-actions"><button class="kb-btn-cancel" onclick="KnowledgeBase.closeModal()">关闭</button></div>';
+        h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
         var self = this;
-        document.getElementById('kb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'kb-modal-overlay') self.closeModal(); });
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
     _updateUserRole: async function(uid, role) {
@@ -1564,44 +1565,44 @@ var KnowledgeBase = {
     },
 
     search: async function() {
-        var qEl = document.getElementById('kb-search-input');
+        var qEl = document.getElementById('fb-search-input');
         var q = qEl ? qEl.value.trim() : '';
         if (!q) return;
 
         var res = await this.api('/api/fb/search?q=' + encodeURIComponent(q), 'GET');
         var h = '<h3>🔍 搜索: ' + escapeHtmlText(q) + '</h3>';
-        h += '<button onclick="KnowledgeBase.init()" style="margin-bottom:8px">← 返回</button>';
+        h += '<button onclick="FileBase.init()" style="margin-bottom:8px">← 返回</button>';
         if (res.success && res.results && res.results.length > 0) {
-            h += '<table class="kb-file-table"><thead><tr><th>文件库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
+            h += '<table class="fb-file-table"><thead><tr><th>文件库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < res.results.length; i++) {
                 var r = res.results[i];
                 if (!r.rel_path && !r.filebase_type) continue;
                 var dirPath = r.rel_path ? r.rel_path.replace(/\\/g, '/').replace(/\/[^\/]+$/, '') : '';
-                var clickAction = 'KnowledgeBase._openFromSearch(\'' + r.kb_id + '\',\'' + escapeHtmlText(r.kb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
-                var downloadUrl = '/api/fb/' + r.kb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);
+                var clickAction = 'FileBase._openFromSearch(\'' + r.fb_id + '\',\'' + escapeHtmlText(r.fb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
+                var downloadUrl = '/api/fb/' + r.fb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);
                 h += '<tr>';
-                h += '<td>' + escapeHtmlText(r.kb_name) + '</td>';
-                h += '<td><span class="kb-file-name" onclick="' + clickAction + '">' + escapeHtmlText(r.filename) + '</span></td>';
+                h += '<td>' + escapeHtmlText(r.fb_name) + '</td>';
+                h += '<td><span class="fb-file-name" onclick="' + clickAction + '">' + escapeHtmlText(r.filename) + '</span></td>';
                 h += '<td>' + (r.match_type === 'filename' ? '文件名' : '内容') + '</td>';
                 h += '<td><a href="' + downloadUrl + '" target="_blank">下载</a></td>';
                 h += '</tr>';
             }
             h += '</tbody></table>';
         } else {
-            h += '<div class="kb-empty">未找到匹配结果</div>';
+            h += '<div class="fb-empty">未找到匹配结果</div>';
         }
-        document.getElementById('kb-view').innerHTML = h;
+        document.getElementById('content-view').innerHTML = h;
     },
 
     _openFromSearch: async function(kbId, kbName, subdir) {
-        this.currentKbId = kbId;
-        this.currentPermission = 'view';
-        this.canEdit = false;
-        this.canManage = false;
+        this.currentFbId = kbId;
+        this.fbCurrentPermission = 'view';
+        this.fbCanEdit = false;
+        this.fbCanManage = false;
         this.selectedDocs = {};
-        this.kbName = kbName;
-        this.localPath = '';
-        this.localCurrentSubdir = subdir || '';
+        this.fbName = kbName;
+        this.fbLocalPath = '';
+        this.fbLocalCurrentSubdir = subdir || '';
         this.currentPath = [{ id: kbId, name: kbName, type: 'kb' }];
         if (subdir) {
             var parts = subdir.split('/');
@@ -1611,11 +1612,11 @@ var KnowledgeBase = {
         }
         this.currentSort = { field: 'mtime', asc: false };
 
-        this._lsSet('docproc_current_kb_id', kbId);
-        this._lsSet('docproc_current_kb_permission', 'view');
-        this._lsSet('docproc_current_kb_name', kbName);
-        this._lsSet('docproc_current_kb_local_path', '');
-        this._lsSet('docproc_current_kb_display_path', '');
+        this._lsSet('docproc_current_fb_id', kbId);
+        this._lsSet('docproc_current_fb_permission', 'view');
+        this._lsSet('docproc_current_fb_name', kbName);
+        this._lsSet('docproc_current_fb_local_path', '');
+        this._lsSet('docproc_current_fb_display_path', '');
 
         await this.renderDetail();
     },
@@ -1625,33 +1626,33 @@ var KnowledgeBase = {
         var res = await this.api('/api/fb/trash-list', 'GET');
         var items = res.success ? (res.items || []) : [];
 
-        var h = '<div class="kb-explorer"><div class="kb-breadcrumb">';
-        h += '<span class="kb-bc-home" onclick="KnowledgeBase.renderKbList()">📁 文件库首页</span>';
-        h += '<span class="kb-bc-sep">›</span><span class="kb-bc-current">🗑️ 回收站</span>';
-        h += '</div><div class="kb-explorer-body" style="flex-direction:column;border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
+        var h = '<div class="fb-explorer"><div class="fb-breadcrumb">';
+        h += '<span class="fb-bc-home" onclick="FileBase.renderKbList()">📁 文件库首页</span>';
+        h += '<span class="fb-bc-sep">›</span><span class="fb-bc-current">🗑️ 回收站</span>';
+        h += '</div><div class="fb-explorer-body" style="flex-direction:column;border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
 
         if (items.length === 0) {
-            h += '<div class="kb-empty">回收站为空</div>';
+            h += '<div class="fb-empty">回收站为空</div>';
         } else {
             h += '<div style="display:flex;padding:8px 12px;gap:8px;border-bottom:1px solid #e1e4e8;background:#fafbfc">';
-            h += '<button onclick="KnowledgeBase.clearTrash()" class="kb-btn-danger" style="padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px">🧹 清空回收站</button>';
+            h += '<button onclick="FileBase.clearTrash()" class="fb-btn-danger" style="padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px">🧹 清空回收站</button>';
             h += '</div>';
             h += '<div style="padding:0;overflow-y:auto;flex:1">';
             for (var i = 0; i < items.length; i++) {
                 var it = items[i];
                 var escName = it.name.replace(/'/g, "\\'");
-                h += '<div class="kb-trash-item" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #f0f0f0">';
+                h += '<div class="fb-trash-item" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #f0f0f0">';
                 h += '<div><strong>🗑️ ' + escapeHtmlText(it.name) + '</strong><br><small style="color:#888">' + new Date(it.mtime * 1000).toLocaleString('zh-CN') + '</small></div>';
                 h += '<div style="display:flex;gap:8px">';
-                h += '<button onclick="KnowledgeBase.restoreTrashItem(\'' + escName + '\')" style="padding:5px 14px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:4px;cursor:pointer;font-size:12px">↩ 恢复</button>';
-                h += '<button onclick="KnowledgeBase.deleteTrashItem(\'' + escName + '\')" class="kb-btn-remove" style="padding:5px 14px;border-radius:4px;cursor:pointer;font-size:12px">彻底删除</button>';
+                h += '<button onclick="FileBase.restoreTrashItem(\'' + escName + '\')" style="padding:5px 14px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:4px;cursor:pointer;font-size:12px">↩ 恢复</button>';
+                h += '<button onclick="FileBase.deleteTrashItem(\'' + escName + '\')" class="fb-btn-remove" style="padding:5px 14px;border-radius:4px;cursor:pointer;font-size:12px">彻底删除</button>';
                 h += '</div></div>';
             }
             h += '</div>';
         }
 
         h += '</div></div>';
-        document.getElementById('kb-view').innerHTML = h;
+        document.getElementById('content-view').innerHTML = h;
     },
 
     restoreTrashItem: async function(name) {
@@ -1678,16 +1679,16 @@ var KnowledgeBase = {
 
     getFileIcon: function(ext) {
         var e = (ext || '').toLowerCase();
-        var cls = 'kb-file-icon-file kb-icon-other', label = '?';
-        if (e === '.doc' || e === '.docx') { cls = 'kb-file-icon-file kb-icon-doc'; label = 'W'; }
-        else if (e === '.xls' || e === '.xlsx') { cls = 'kb-file-icon-file kb-icon-xls'; label = 'X'; }
-        else if (e === '.ppt' || e === '.pptx') { cls = 'kb-file-icon-file kb-icon-ppt'; label = 'P'; }
-        else if (e === '.pdf') { cls = 'kb-file-icon-file kb-icon-pdf'; label = 'P'; }
-        else if (e === '.md') { cls = 'kb-file-icon-file kb-icon-md'; label = 'M'; }
-        else if (e === '.txt') { cls = 'kb-file-icon-file kb-icon-txt'; label = 'T'; }
-        else if (e === '.html' || e === '.htm') { cls = 'kb-file-icon-file kb-icon-html'; label = 'H'; }
-        else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-img'; label = 'I'; }
-        else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'kb-file-icon-file kb-icon-zip'; label = 'Z'; }
+        var cls = 'fb-file-icon-file fb-icon-other', label = '?';
+        if (e === '.doc' || e === '.docx') { cls = 'fb-file-icon-file fb-icon-doc'; label = 'W'; }
+        else if (e === '.xls' || e === '.xlsx') { cls = 'fb-file-icon-file fb-icon-xls'; label = 'X'; }
+        else if (e === '.ppt' || e === '.pptx') { cls = 'fb-file-icon-file fb-icon-ppt'; label = 'P'; }
+        else if (e === '.pdf') { cls = 'fb-file-icon-file fb-icon-pdf'; label = 'P'; }
+        else if (e === '.md') { cls = 'fb-file-icon-file fb-icon-md'; label = 'M'; }
+        else if (e === '.txt') { cls = 'fb-file-icon-file fb-icon-txt'; label = 'T'; }
+        else if (e === '.html' || e === '.htm') { cls = 'fb-file-icon-file fb-icon-html'; label = 'H'; }
+        else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-img'; label = 'I'; }
+        else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-zip'; label = 'Z'; }
         return '<span class="' + cls + '" style="overflow:hidden;">' + label + '</span>';
     },
 

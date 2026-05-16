@@ -23,7 +23,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
     title,
     content,
     path,
-    tokenize='unicode61'
+    tokenize='trigram'
 )
 """
 

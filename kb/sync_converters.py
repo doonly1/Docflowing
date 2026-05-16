@@ -91,7 +91,14 @@ class MarkItDownConverter(BaseConverter):
                 stream_info = _StreamInfo(extension=ext)
                 result = converter.convert(f, stream_info=stream_info)
 
-            return result.markdown if result else None
+            content = result.markdown if result else None
+
+            # 检测扫描版 PDF（无文本层），跳过不同步
+            if ext == '.pdf' and (not content or len(content.strip()) < 20):
+                logger.info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
+                return None
+
+            return content
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(
@@ -181,7 +188,13 @@ class DOCConverter(BaseConverter):
         try:
             from tools.doc_process import doc_to_docx
             workdir = os.path.dirname(source_path)
-            doc_to_docx(workdir)
+            err_msg = doc_to_docx(workdir)
+            if err_msg:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"doc→docx failed: {source_path}, reason: {err_msg}"
+                )
+                return None
 
             basename = os.path.splitext(os.path.basename(source_path))[0]
             docx_path = os.path.join(workdir, basename + '.docx')
@@ -200,50 +213,8 @@ class DOCConverter(BaseConverter):
             return None
         except Exception as e:
             import logging
-            logging.getLogger(__name__).debug(
+            logging.getLogger(__name__).warning(
                 f"doc→docx conversion failed: {source_path}, error: {e}"
-            )
-            return None
-
-    def _extract_text_binary(self, source_path: str) -> Optional[str]:
-        """直接从 .doc 二进制文件中提取文本（无需 Word/LibreOffice）"""
-        try:
-            with open(source_path, 'rb') as f:
-                raw = f.read()
-
-            lines = []
-            buf = []
-            i = 0
-            while i + 1 < len(raw):
-                hi, lo = raw[i + 1], raw[i]
-                cp = hi * 256 + lo
-
-                if 0x20 <= cp <= 0x7E or 0x4E00 <= cp <= 0x9FFF or cp in (
-                    0x3001, 0x3002, 0xFF0C, 0xFF1A, 0xFF1B,
-                    0x2018, 0x2019, 0x201C, 0x201D, 0x2014, 0x2013,
-                    0xFF08, 0xFF09, 0x300A, 0x300B, 0x3010, 0x3011,
-                    0x300C, 0x300D, 0x300E, 0x300F,
-                    0x00B7, 0x2026,
-                ):
-                    buf.append(chr(cp))
-                else:
-                    if buf:
-                        text = ''.join(buf).strip()
-                        if len(text) >= 2:
-                            lines.append(text)
-                        buf = []
-                i += 2
-
-            if buf:
-                text = ''.join(buf).strip()
-                if len(text) >= 2:
-                    lines.append(text)
-
-            return '\n'.join(lines) if lines else None
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(
-                f"binary text extraction failed: {source_path}, error: {e}"
             )
             return None
 
@@ -251,10 +222,6 @@ class DOCConverter(BaseConverter):
         self._ensure_com_init()
 
         content = self._convert_via_docx(source_path)
-        if content:
-            return content
-
-        content = self._extract_text_binary(source_path)
         if content:
             return content
 
@@ -287,7 +254,14 @@ class PDFConverter(BaseConverter):
                         text = self._clean_pdf_text(text)
                         all_text.append(f"## 第 {page_num} 页\n\n{text}")
 
-            return "\n\n".join(all_text) if all_text else None
+            content = "\n\n".join(all_text) if all_text else None
+
+            # 检测扫描版 PDF（无文本层），跳过不同步
+            if not content or len(content.strip()) < 20:
+                logger.info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
+                return None
+
+            return content
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"PDF conversion failed: {source_path}, error: {e}")

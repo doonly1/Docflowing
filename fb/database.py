@@ -73,7 +73,7 @@ def close_db():
         _local.conn = None
 
 
-def get_visible_kb_ids(user_id, is_admin=False):
+def get_visible_fb_ids(user_id, is_admin=False):
     if is_admin:
         db = get_db()
         rows = db.execute("SELECT id FROM filebases").fetchall()

@@ -72,12 +72,16 @@ def libreoffice_install_hint() -> str:
         return '请安装 LibreOffice: sudo apt install libreoffice  (或 yum/dnf/pacman 等对应命令)'
 
 
-def doc_to_docx(workdir: str) -> None:
-    """将workdir目录下的.doc文件批量转换为.docx格式（跨平台）"""
+def doc_to_docx(workdir: str) -> Optional[str]:
+    """将workdir目录下的.doc文件批量转换为.docx格式（跨平台）
+
+    Returns:
+        None if success, error message string if failed
+    """
     doc_files = [f for f in os.listdir(workdir)
                  if f.lower().endswith('.doc') and not f.startswith("~$")]
     if not doc_files:
-        return
+        return None
 
     try:
         from win32com import client
@@ -95,7 +99,7 @@ def doc_to_docx(workdir: str) -> None:
             except OSError:
                 pass
         word.Quit()
-        return
+        return None
     except (ImportError, ModuleNotFoundError):
         logger.info('win32com 不可用，回退到 LibreOffice')
     except Exception as e:
@@ -114,12 +118,21 @@ def doc_to_docx(workdir: str) -> None:
                     os.remove(os.path.join(workdir, file))
                 except OSError:
                     pass
+            return None
         except subprocess.CalledProcessError as e:
-            logger.error('LibreOffice 转换失败: %s', e)
-        return
+            stderr = (e.stderr or b'').decode('utf-8', errors='replace')[:200]
+            err_msg = f'LibreOffice 转换失败: {stderr}'
+            logger.error(err_msg)
+            return err_msg
+        except Exception as e:
+            err_msg = f'LibreOffice 转换异常: {e}'
+            logger.error(err_msg)
+            return err_msg
 
-    logger.warning('警告：无法转换 .doc 文件 — 需要 Microsoft Word 或 LibreOffice')
+    err_msg = '未找到 Microsoft Word 或 LibreOffice，无法转换 .doc 文件'
+    logger.warning(err_msg)
     logger.warning(libreoffice_install_hint())
+    return err_msg
 
 
 def save_docx(doc: Document, doc_name: str, workdir: Optional[str] = None) -> Optional[str]:

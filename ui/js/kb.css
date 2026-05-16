@@ -21,25 +21,68 @@
 
 
 .kb-chat-header-actions {
+    position: absolute;
+    top: 14px;
+    right: 20px;
     display: flex;
-    gap: 6px;
+    gap: 2px;
+    z-index: 10;
 }
 
-.kb-chat-header-actions button {
+.kb-header-btn {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 6px 10px;
+    padding: 5px 7px;
     border-radius: 6px;
-    font-size: 13px;
-    color: #666;
+    font-size: 15px;
+    line-height: 1;
+    color: #999;
     transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 4px;
 }
 
-.kb-chat-header-actions button:hover {
+.kb-header-btn:hover {
+    background: #f0f0f0;
+    color: #555;
+}
+
+.kb-header-btn.primary {
+    color: #999;
+}
+
+.kb-header-btn.primary:hover {
+    background: #f0f0f0;
+    color: #555;
+}
+
+.kb-header-more-wrapper {
+    position: relative;
+}
+
+.kb-header-more-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    min-width: 140px;
+    padding: 4px 0;
+    z-index: 20;
+}
+
+.kb-header-more-item {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #555;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.1s;
+}
+
+.kb-header-more-item:hover {
     background: #f5f5f5;
     color: #333;
 }
@@ -158,6 +201,42 @@
     color: #333;
     border: 1px solid #eee;
     border-bottom-left-radius: 4px;
+}
+
+.kb-chat-message-bubble mark {
+    background: #fef08a;
+    color: #854d0e;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+.kb-chat-message.user .kb-chat-message-bubble mark {
+    background: rgba(255,255,255,0.3);
+    color: #fff;
+    font-weight: 600;
+}
+
+.kb-chat-message-bubble h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #222;
+    margin: 12px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+}
+
+.kb-chat-message-bubble h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin: 10px 0 6px;
+}
+
+.kb-chat-message.user .kb-chat-message-bubble h2,
+.kb-chat-message.user .kb-chat-message-bubble h3 {
+    color: #fff;
+    border-bottom-color: rgba(255,255,255,0.2);
 }
 
 .kb-chat-message-bubble code {

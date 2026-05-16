@@ -174,7 +174,32 @@ WEB_SEARCH_SCHEMA = {
 }
 
 
-ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA]
+WIKI_READ_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "wiki_read",
+        "description": (
+            "Read the full content of a knowledge base (wiki) document by its path. "
+            "Use this when you've retrieved matched excerpts via the reference information "
+            "but need to read an entire document for complete context.\n\n"
+            "The path corresponds to the 'path' field in the sources list provided alongside "
+            "search results. Only paths appearing in the sources are valid."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The relative path of the wiki document to read, as shown in the sources list."
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}
+
+
+ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA]
 
 
 def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str:
@@ -187,6 +212,8 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str
             return _execute_session_search(args, user_id)
         elif tool_name == "web_search":
             return _execute_web_search(args)
+        elif tool_name == "wiki_read":
+            return _execute_wiki_read(args, user_id)
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
     except Exception as e:
@@ -336,3 +363,32 @@ def _execute_web_search(args: Dict[str, Any]) -> str:
     except Exception as e:
         logger.error("Web search failed: %s", e)
         return json.dumps({"success": False, "error": f"Web search failed: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_wiki_read(args: Dict[str, Any], user_id: str) -> str:
+    import os
+    path = args.get("path", "")
+    if not path:
+        return json.dumps({"success": False, "error": "path is required"}, ensure_ascii=False)
+
+    # 构建 wiki 文档的完整路径
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    kb_root = os.path.join(root_dir, 'workspaces', user_id, 'kb')
+    full_path = os.path.normpath(os.path.join(kb_root, path))
+
+    # 路径安全检查：确保最终路径在 kb_root 下
+    if not full_path.startswith(os.path.normpath(kb_root)):
+        return json.dumps({"success": False, "error": "Invalid path"}, ensure_ascii=False)
+
+    if not os.path.isfile(full_path):
+        return json.dumps({"success": False, "error": f"Document not found: {path}"}, ensure_ascii=False)
+
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # 限制返回长度，防止溢出
+        if len(content) > 50000:
+            content = content[:50000] + "\n\n... (truncated at 50000 characters)"
+        return json.dumps({"success": True, "path": path, "content": content}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Failed to read document: {str(e)}"}, ensure_ascii=False)
