@@ -126,6 +126,7 @@ var FileBase = {
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
             if (window.authRole === 'admin') h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
+            h += '<button onclick="FileBase.openKbFilebase()" id="fb-kb-btn" style="display:none" title="知识库文件">✨ KB</button>';
             h += '<button onclick="FileBase.showTrash()">🗑️ 回收站</button>';
             h += '</div>';
             h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"></div>';
@@ -154,9 +155,25 @@ var FileBase = {
                 return;
             }
 
-            var html = '<div class="fb-grid">';
+            // 从列表中分离出 "kb" 文件库
+            var kbItem = null;
+            var displayKbs = [];
             for (var i = 0; i < kbs.length; i++) {
-                var kb = kbs[i];
+                if (kbs[i].name === 'kb') {
+                    kbItem = kbs[i];
+                } else {
+                    displayKbs.push(kbs[i]);
+                }
+            }
+            if (kbItem) {
+                this._kbFilebase = kbItem;
+                var kbBtn = document.getElementById('fb-kb-btn');
+                if (kbBtn) kbBtn.style.display = '';
+            }
+
+            var html = '<div class="fb-grid">';
+            for (var i = 0; i < displayKbs.length; i++) {
+                var kb = displayKbs[i];
                 html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
@@ -167,8 +184,8 @@ var FileBase = {
             grid.innerHTML = html;
 
             // 加载所有文件库的同步状态
-            for (var i = 0; i < kbs.length; i++) {
-                this._loadSyncStatus(kbs[i].id);
+            for (var i = 0; i < displayKbs.length; i++) {
+                this._loadSyncStatus(displayKbs[i].id);
             }
         } catch (e) {
             console.error('renderKbList error:', e);
@@ -1635,6 +1652,12 @@ var FileBase = {
         this._lsSet('docproc_current_fb_display_path', '');
 
         await this.renderDetail();
+    },
+
+    openKbFilebase: function() {
+        if (!this._kbFilebase) return;
+        var kb = this._kbFilebase;
+        this.openKb(kb.id, kb.permission, kb.name, kb.local_path || '', kb.display_path || '');
     },
 
     showTrash: async function() {

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,36 @@ WIKI_READ_SCHEMA = {
 }
 
 
-ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA]
+WIKI_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "wiki_search",
+        "description": (
+            "PRIMARY search tool: Search the user's local knowledge base (wiki) for documents matching a query. "
+            "Always use this tool FIRST before falling back to web_search, because the wiki contains "
+            "private/custom knowledge specific to the user and is faster than web search.\n\n"
+            "Returns a list of matching documents with their paths, titles, and content snippets. "
+            "Use wiki_read afterwards to read a specific document in full."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query — keywords or phrases to find in the knowledge base."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return. Default: 5, max: 10."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+
+ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA]
 
 
 def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str:
@@ -214,6 +244,8 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str
             return _execute_web_search(args)
         elif tool_name == "wiki_read":
             return _execute_wiki_read(args, user_id)
+        elif tool_name == "wiki_search":
+            return _execute_wiki_search(args, user_id)
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
     except Exception as e:
@@ -365,6 +397,63 @@ def _execute_web_search(args: Dict[str, Any]) -> str:
         return json.dumps({"success": False, "error": f"Web search failed: {str(e)}"}, ensure_ascii=False)
 
 
+def _extract_from_keyword(text: str, keywords: list) -> str:
+    """从关键词所在句子的开头截取文本，使上下文更紧凑且有针对性。"""
+    pos = -1
+    text_lower = text.lower()
+    for kw in keywords:
+        p = text_lower.find(kw.lower())
+        if p != -1:
+            pos = p
+            break
+    if pos == -1:
+        return text
+    sentence_start = 0
+    for sep in ('。', '！', '？', '!', '?', '\n'):
+        idx = text.rfind(sep, 0, pos)
+        if idx != -1:
+            sentence_start = max(sentence_start, idx + len(sep))
+    return text[sentence_start:].strip()
+
+
+def _extract_relevant_snippets(content: str, keywords: list, max_chars: int = 3000) -> str:
+    """提取包含关键词的段落，从关键词所在句子开头截取，限制总长度。
+
+    Args:
+        content: 文档全文
+        keywords: 关键词列表（小写）
+        max_chars: 最大返回字符数
+
+    Returns:
+        经截取和修剪后的文本片段
+    """
+    if not content.strip():
+        return ""
+
+    # 按空行分割段落，提取包含关键词的段落
+    paragraphs = re.split(r'\n\s*\n', content)
+    matched_bodies = []
+    for para in paragraphs:
+        if any(kw in para.lower() for kw in keywords):
+            matched_bodies.append(para.strip())
+
+    # 兜底：无匹配段落则展示开头
+    if not matched_bodies:
+        matched_bodies = [content.strip()[:300]]
+
+    # 从关键词所在句子开头截取
+    trimmed_bodies = []
+    for para in matched_bodies:
+        trimmed_bodies.append(_extract_from_keyword(para, keywords))
+
+    # 限制总长
+    snippet = '\n\n'.join(trimmed_bodies)
+    if len(snippet) > max_chars:
+        snippet = snippet[:max_chars] + f"\n\n... (truncated at {max_chars} chars)"
+
+    return snippet
+
+
 def _execute_wiki_read(args: Dict[str, Any], user_id: str) -> str:
     import os
     path = args.get("path", "")
@@ -392,3 +481,49 @@ def _execute_wiki_read(args: Dict[str, Any], user_id: str) -> str:
         return json.dumps({"success": True, "path": path, "content": content}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": f"Failed to read document: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_wiki_search(args: Dict[str, Any], user_id: str) -> str:
+    from .search import search_wiki
+    from .database import get_db
+
+    query = args.get("query", "")
+    limit = min(args.get("limit", 5), 10)
+    if not query:
+        return json.dumps({"success": False, "error": "query is required"}, ensure_ascii=False)
+
+    try:
+        results = search_wiki(user_id, query)
+        if limit:
+            results = results[:limit]
+
+        conn = get_db(user_id)
+        enriched = []
+        keywords = query.lower().split()
+        max_snippet_chars = 3000
+
+        for r in results:
+            row = conn.execute(
+                "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+                (user_id, r['path'])
+            ).fetchone()
+            content = row['content'] if row else ""
+            if not content.strip():
+                continue
+
+            snippet = _extract_relevant_snippets(content, keywords, max_snippet_chars)
+            enriched.append({
+                "path": r['path'],
+                "title": r['title'],
+                "content_snippet": snippet,
+            })
+
+        return json.dumps({
+            "success": True,
+            "results": enriched,
+            "count": len(enriched),
+            "query": query,
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.error("Wiki search failed: %s", e)
+        return json.dumps({"success": False, "error": f"Wiki search failed: {str(e)}"}, ensure_ascii=False)

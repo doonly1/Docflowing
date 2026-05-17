@@ -26,22 +26,14 @@ var WikiKnowledge = {
                 for (var i = 0; i < data.messages.length; i++) {
                     var m = data.messages[i];
                     var d = new Date(m.timestamp * 1000);
-                    // 从非LLM的消息内容中提取 ## 标题，重建参考来源
-                    var sources = [];
-                    if (m.role === 'assistant' && m.content) {
-                        var titleRegex = /^##\s+(.+)$/gm;
-                        var match;
-                        while ((match = titleRegex.exec(m.content)) !== null) {
-                            var title = match[1].trim();
-                            if (title) {
-                                sources.push({ title: title, path: '' });
-                            }
-                        }
+                    var sources;
+                    if (m.sources) {
+                        try { sources = JSON.parse(m.sources); } catch(e) { sources = undefined; }
                     }
                     self.messages.push({
                         role: m.role,
                         content: m.content,
-                        sources: sources.length > 0 ? sources : undefined,
+                        sources: sources,
                         time: d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
                     });
                 }
@@ -149,7 +141,8 @@ var WikiKnowledge = {
                     '<div class="kb-header-more-wrapper">' +
                         '<button onclick="WikiKnowledge.toggleMoreMenu(event)" title="更多" class="kb-header-btn">···</button>' +
                         '<div class="kb-header-more-dropdown" id="kb-header-more-dropdown" style="display:none">' +
-                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showMemory();WikiKnowledge.toggleMoreMenu(event)">🧠 持久化记忆</div>' +
+                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showMemory();WikiKnowledge.toggleMoreMenu(event)">🧠 长期记忆</div>' +
+                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showSkills();WikiKnowledge.toggleMoreMenu(event)">📚 可用技能</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -242,7 +235,6 @@ var WikiKnowledge = {
 
         var typingHtml =
             '<div class="kb-chat-message assistant" id="kb-typing">' +
-                '<div class="kb-chat-message-avatar">🤖</div>' +
                 '<div class="kb-chat-message-content">' +
                     '<div class="kb-chat-message-bubble">' +
                         '<div class="kb-chat-typing">' +
@@ -267,7 +259,7 @@ var WikiKnowledge = {
             self._scrollToBottom();
         }
 
-        var bodyData = { query: query, max_chars: 4000 };
+        var bodyData = { query: query, max_chars: 4000, stream: true };
         if (self.sessionId) {
             bodyData.session_id = self.sessionId;
         }
@@ -277,50 +269,18 @@ var WikiKnowledge = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(bodyData)
         }).then(function(resp) {
-            // 检查响应状态
             if (!resp.ok) {
                 throw new Error('服务器错误: ' + resp.status);
             }
-            // 检查响应类型
             var contentType = resp.headers.get('content-type');
-            if (!contentType || contentType.indexOf('application/json') === -1) {
-                return resp.text().then(function(text) {
-                    throw new Error('服务器返回了非JSON响应: ' + text.substring(0, 100));
-                });
+            // SSE 流式响应
+            if (contentType && contentType.indexOf('text/event-stream') !== -1) {
+                return self._handleStreamResponse(resp, query);
             }
-            return resp.json();
-        }).then(function(data) {
-            var typingEl = document.getElementById('kb-typing');
-            if (typingEl) typingEl.remove();
-
-            var answer = '';
-            var interrupted = data.interrupted || false;
-            if (data.success && data.context) {
-                answer = self._generateAnswer(query, data.context, data.sources || [], data.llm_used);
-            } else if (interrupted) {
-                answer = data.context || '(已中断)';
-            } else {
-                answer = data.message || '';
-            }
-
-            if (data.session_id) {
-                self.sessionId = data.session_id;
-            }
-            if (data.memory_usage) {
-                self.memoryUsage = data.memory_usage;
-            }
-
-            self.messages.push({
-                role: 'assistant',
-                content: answer,
-                sources: data.sources || [],
-                interrupted: interrupted,
-                time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+            // 非流式 JSON 降级
+            return resp.json().then(function(data) {
+                self._handleJsonResponse(data, query);
             });
-
-            self._recordMessage('assistant', answer);
-            self._renderMessages();
-            self.isLoading = false;
         }).catch(function(e) {
             var typingEl = document.getElementById('kb-typing');
             if (typingEl) typingEl.remove();
@@ -334,6 +294,243 @@ var WikiKnowledge = {
             self._renderMessages();
             self.isLoading = false;
         });
+    },
+
+    // ==================== 流式 SSE 处理 ====================
+
+    _handleStreamResponse: function(response, query) {
+        var self = this;
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var fullContent = '';
+        var sources = [];
+        var doneContent = '';
+        var hasFirstToken = false;
+
+        function processSSELine(line) {
+            if (!line.startsWith('data: ')) return;
+            var jsonStr = line.substring(6);
+            var event;
+            try {
+                event = JSON.parse(jsonStr);
+            } catch (e) {
+                return;
+            }
+
+            switch (event.type) {
+                case 'source':
+                    sources = event.sources || [];
+                    break;
+
+                case 'token':
+                    if (!hasFirstToken) {
+                        hasFirstToken = true;
+                        self._replaceTypingWithStreaming(event.content);
+                    } else {
+                        self._appendStreamContent(event.content);
+                    }
+                    fullContent += event.content;
+                    break;
+
+                case 'tool_call':
+                    (function(evt) {
+                        var typingEl = document.getElementById('kb-typing');
+                        if (!typingEl) return;
+                        var typingDiv = typingEl.querySelector('.kb-chat-typing');
+                        if (!typingDiv) return;
+                        var label = evt.name === 'wiki_search' ? '知识库' :
+                                    evt.name === 'wiki_read' ? '读取文档' :
+                                    (evt.name || '工具');
+                        var queryText = '';
+                        if (evt.arguments && evt.arguments.query) {
+                            queryText = '「' + String(evt.arguments.query).substring(0, 60) + '」';
+                        } else if (evt.arguments && evt.arguments.path) {
+                            queryText = '「' + String(evt.arguments.path).substring(0, 60) + '」';
+                        }
+                        typingDiv.innerHTML =
+                            '<div style="color:#888;font-size:13px;margin-bottom:4px;">🔍 正在' + label + queryText + '</div>' +
+                            '<div class="kb-chat-typing-dots"><span></span><span></span><span></span></div>';
+                    })(event);
+                    break;
+
+                case 'tool_result':
+                    (function(evt) {
+                        var typingEl = document.getElementById('kb-typing');
+                        if (!typingEl) return;
+                        var typingDiv = typingEl.querySelector('.kb-chat-typing');
+                        if (!typingDiv) return;
+                        if (evt.tool_name === 'wiki_search') {
+                            try {
+                                var resultData = JSON.parse(evt.result);
+                                if (resultData.success) {
+                                    var count = resultData.count || 0;
+                                    typingDiv.innerHTML =
+                                        '<div style="color:#888;font-size:13px;margin-bottom:4px;">📄 已找到 <strong>' + count + '</strong> 篇相关文档</div>' +
+                                        '<div class="kb-chat-typing-dots"><span></span><span></span><span></span></div>';
+                                }
+                            } catch(e) {
+                                // JSON 解析失败，忽略
+                            }
+                        } else if (evt.tool_name === 'wiki_read') {
+                            typingDiv.innerHTML =
+                                '<div style="color:#888;font-size:13px;margin-bottom:4px;">📖 文档内容已获取</div>' +
+                                '<div class="kb-chat-typing-dots"><span></span><span></span><span></span></div>';
+                        }
+                    })(event);
+                    break;
+
+                case 'done':
+                    doneContent = event.content || fullContent;
+                    self._finalizeStream(doneContent, sources, query, event);
+                    break;
+
+                case 'interrupted':
+                    self._finalizeStream(fullContent || '(已中断)', sources, query, {interrupted: true});
+                    break;
+
+                case 'error':
+                    self._finalizeStreamError(event.message || '未知错误');
+                    break;
+            }
+        }
+
+        function pump() {
+            reader.read().then(function(result) {
+                if (result.done) {
+                    // 处理 buffer 中剩余的内容
+                    var remaining = buffer;
+                    buffer = '';
+                    var lines = remaining.split('\n');
+                    for (var i = 0; i < lines.length; i++) {
+                        var l = lines[i].trim();
+                        if (l) processSSELine(l);
+                    }
+                    // 流结束但未收到 done 事件（降级）
+                    if (!doneContent && fullContent) {
+                        self._finalizeStream(fullContent, sources, query, {});
+                    }
+                    return;
+                }
+
+                buffer += decoder.decode(result.value, {stream: true});
+                var lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (var i = 0; i < lines.length; i++) {
+                    var l = lines[i].trim();
+                    if (l) processSSELine(l);
+                }
+
+                pump();
+            }).catch(function(e) {
+                self._finalizeStreamError(e.message);
+            });
+        }
+
+        pump();
+    },
+
+    _replaceTypingWithStreaming: function(firstContent) {
+        var typingEl = document.getElementById('kb-typing');
+        if (!typingEl) return;
+        typingEl.id = 'kb-streaming';
+        var bubble = typingEl.querySelector('.kb-chat-message-bubble');
+        if (bubble) {
+            bubble.innerHTML = this._formatContent(firstContent);
+            this._scrollToBottom();
+        }
+    },
+
+    _appendStreamContent: function(content) {
+        var streamEl = document.getElementById('kb-streaming');
+        if (!streamEl) {
+            // 兜底：如果流式消息元素不存在，使用 typing 元素
+            streamEl = document.getElementById('kb-typing');
+            if (streamEl) streamEl.id = 'kb-streaming';
+        }
+        if (!streamEl) return;
+        var bubble = streamEl.querySelector('.kb-chat-message-bubble');
+        if (bubble) {
+            // 获取当前文本内容 + 追加新 token，重新渲染
+            var currentText = bubble.textContent || '';
+            bubble.innerHTML = this._formatContent(currentText + content);
+            this._scrollToBottom();
+        }
+    },
+
+    _finalizeStream: function(content, sources, query, event) {
+        var self = this;
+        var streamEl = document.getElementById('kb-streaming');
+        var typingEl = document.getElementById('kb-typing');
+        var el = streamEl || typingEl;
+        if (el) el.remove();
+
+        var interrupted = event.interrupted || false;
+
+        self.messages.push({
+            role: 'assistant',
+            content: content || '',
+            sources: sources || [],
+            interrupted: interrupted,
+            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        });
+
+        self._recordMessage('assistant', content || '', sources);
+        self._renderMessages();
+        self.isLoading = false;
+    },
+
+    _finalizeStreamError: function(message) {
+        var self = this;
+        var streamEl = document.getElementById('kb-streaming');
+        var typingEl = document.getElementById('kb-typing');
+        var el = streamEl || typingEl;
+        if (el) el.remove();
+
+        self.messages.push({
+            role: 'assistant',
+            content: '抱歉，发生了错误: ' + message + '。请稍后重试。',
+            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        });
+
+        self._renderMessages();
+        self.isLoading = false;
+    },
+
+    _handleJsonResponse: function(data, query) {
+        var self = this;
+        var typingEl = document.getElementById('kb-typing');
+        if (typingEl) typingEl.remove();
+
+        var answer = '';
+        var interrupted = data.interrupted || false;
+        if (data.success && data.context) {
+            answer = self._generateAnswer(query, data.context, data.sources || [], data.llm_used);
+        } else if (interrupted) {
+            answer = data.context || '(已中断)';
+        } else {
+            answer = data.message || '';
+        }
+
+        if (data.session_id) {
+            self.sessionId = data.session_id;
+        }
+        if (data.memory_usage) {
+            self.memoryUsage = data.memory_usage;
+        }
+
+        self.messages.push({
+            role: 'assistant',
+            content: answer,
+            sources: data.sources || [],
+            interrupted: interrupted,
+            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        });
+
+        self._recordMessage('assistant', answer, data.sources);
+        self._renderMessages();
+        self.isLoading = false;
     },
 
     stopResponse: function() {
@@ -350,15 +547,16 @@ var WikiKnowledge = {
         });
     },
 
-    _recordMessage: function(role, content) {
+    _recordMessage: function(role, content, sources) {
         if (!this.sessionId) return;
+        var body = { role: role, content: content };
+        if (sources && sources.length > 0) {
+            body.sources = JSON.stringify(sources);
+        }
         apiFetch('/api/kb/session/' + this.sessionId + '/message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                role: role,
-                content: content,
-            })
+            body: JSON.stringify(body)
         }).catch(function(e) {
             console.error('记录消息失败:', e);
         });
@@ -385,12 +583,10 @@ var WikiKnowledge = {
         var html = '';
         for (var i = 0; i < this.messages.length; i++) {
             var msg = this.messages[i];
-            var avatar = msg.role === 'user' ? '👤' : '🤖';
             var roleClass = msg.role;
 
             html +=
                 '<div class="kb-chat-message ' + roleClass + '">' +
-                    '<div class="kb-chat-message-avatar">' + avatar + '</div>' +
                     '<div class="kb-chat-message-content">' +
                         '<div class="kb-chat-message-bubble' + (msg.interrupted ? ' interrupted' : '') + '">' +
                             this._formatContent(msg.content) +
@@ -398,16 +594,20 @@ var WikiKnowledge = {
                         '</div>';
 
             if (msg.sources && msg.sources.length > 0) {
-                html += '<div class="kb-chat-sources">' +
-                    '<div class="kb-chat-sources-title">📚 参考来源</div>';
+                var maxVisible = 3;
+                html += '<div class="kb-chat-sources" id="kb-src-' + i + '">' +
+                    '<div class="kb-chat-sources-title">🔗 参考来源</div>';
                 for (var j = 0; j < msg.sources.length; j++) {
                     var src = msg.sources[j];
                     var srcIdx = this._allSources.length;
                     this._allSources.push(src);
-                    html += '<div class="kb-chat-source-item">' +
-                        '<span class="icon">📄</span>' +
+                    html += '<div class="kb-chat-source-item"' + (j >= maxVisible ? ' style="display:none"' : '') + '>' +
+                        '<span class="icon">' + (src._type === 'web' ? '🌐' : '📄') + '</span>' +
                         '<a href="#" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + (src.title || src.path) + '</a>' +
                     '</div>';
+                }
+                if (msg.sources.length > maxVisible) {
+                    html += '<div class="kb-chat-source-toggle" onclick="WikiKnowledge.toggleSources(' + i + ')">📖 更多 ' + (msg.sources.length - maxVisible) + ' 条</div>';
                 }
                 html += '</div>';
             }
@@ -428,16 +628,114 @@ var WikiKnowledge = {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
 
+        // 代码块（保持原样）
         escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
+
+        // 连续引用块 > text
+        escaped = escaped.replace(/((?:^&gt;\s?.*\n?)+)/gm, function(m) {
+            var lines = m.split('\n').filter(function(l) { return l.trim(); });
+            return '<blockquote>' + lines.map(function(l) { return l.replace(/^&gt;\s?/, ''); }).join('<br>') + '</blockquote>';
+        });
+
+        // 无序列表（支持嵌套和任务列表）
+        escaped = escaped.replace(/((?:^[ \t]*[\*\-]\s+.*\n?)+)/gm, function(m) {
+            var lines = m.split('\n').filter(function(l) { return l.trim(); });
+            var items = lines.map(function(l) {
+                var indent = l.search(/\S/);
+                var raw = l.trim().replace(/^[\*\-]\s+/, '');
+                var task = raw.match(/^\[([ x])\]\s*/);
+                return {
+                    indent: indent,
+                    content: task ? raw.replace(/^\[[ x]\]\s*/, '') : raw,
+                    isTask: !!task,
+                    checked: task && task[1] === 'x'
+                };
+            });
+
+            function build(start, parentIndent) {
+                var html = '<ul>';
+                var i = start;
+                while (i < items.length) {
+                    if (items[i].indent <= parentIndent && i > start) break;
+                    var it = items[i];
+                    var label = it.isTask
+                        ? '<input type="checkbox" class="kb-task-checkbox"' + (it.checked ? ' checked' : '') + ' disabled>' + it.content
+                        : it.content;
+                    if (i + 1 < items.length && items[i + 1].indent > it.indent) {
+                        var sub = build(i + 1, it.indent);
+                        html += '<li>' + label + sub + '</li>';
+                        i = sub.nextIdx;
+                    } else {
+                        html += '<li>' + label + '</li>';
+                        i++;
+                    }
+                }
+                html += '</ul>';
+                return { html: html, nextIdx: i };
+            }
+
+            return build(0, -1).html;
+        });
+
+        // 有序列表 1. item（连续行）
+        escaped = escaped.replace(/((?:^\d+\.\s+.*\n?)+)/gm, function(m) {
+            var items = m.split('\n').filter(function(l) { return l.trim(); });
+            return '<ol>' + items.map(function(l) { return '<li>' + l.replace(/^\d+\.\s+/, '') + '</li>'; }).join('') + '</ol>';
+        });
+
+        // 水平分割线
+        escaped = escaped.replace(/^[-*_]{3,}\s*$/gm, '<hr>');
+
+        // 图片（在链接之前处理）
+        escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="kb-inline-img">');
+
+        // 内联格式
         escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
         escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        // 转换 ## / ### 标题（需在 \n→<br> 之前处理）
+        escaped = escaped.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        escaped = escaped.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+        // 标题（在 \n→<br> 之前处理）
         escaped = escaped.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
         escaped = escaped.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
         escaped = escaped.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+        // 表格（在 \n→<br> 之前处理）
+        escaped = escaped.replace(/((?:^\|.*(?:\n|$))+)/gm, function(m) {
+            var lines = m.split('\n').filter(function(l) { return l.trim(); });
+            if (lines.length < 2) return m;
+            if (!/^\|[-:|\s]+\|$/.test(lines[1].trim())) return m;
+
+            var parseRow = function(line) {
+                var row = line.trim();
+                if (row.charAt(0) === '|') row = row.substring(1);
+                if (row.charAt(row.length - 1) === '|') row = row.substring(0, row.length - 1);
+                return row.split('|').map(function(c) { return c.trim(); });
+            };
+
+            var headerCells = parseRow(lines[0]);
+            var html = '<table><thead><tr>';
+            headerCells.forEach(function(c) { html += '<th>' + c + '</th>'; });
+            html += '</tr></thead><tbody>';
+
+            for (var i = 2; i < lines.length; i++) {
+                var rowCells = parseRow(lines[i]);
+                if (rowCells.length > 0) {
+                    html += '<tr>';
+                    rowCells.forEach(function(c) { html += '<td>' + c + '</td>'; });
+                    html += '</tr>';
+                }
+            }
+
+            html += '</tbody></table>';
+            return html;
+        });
+
+        // 换行
         escaped = escaped.replace(/\n/g, '<br>');
 
-        // 恢复高亮标签，使 <mark> 被渲染为 HTML 元素
+        // 恢复高亮标签
         escaped = escaped.replace(/&lt;mark&gt;/g, '<mark>').replace(/&lt;\/mark&gt;/g, '</mark>');
 
         return escaped;
@@ -492,9 +790,29 @@ var WikiKnowledge = {
         this._switchToInitial();
     },
 
+    toggleSources: function(msgIdx) {
+        var container = document.getElementById('kb-src-' + msgIdx);
+        if (!container) return;
+        var toggle = container.querySelector('.kb-chat-source-toggle');
+        if (!toggle) return;
+        var items = container.querySelectorAll('.kb-chat-source-item');
+        if (items.length <= 3) return;
+        var expanded = toggle.getAttribute('data-expanded') === '1';
+        for (var k = 3; k < items.length; k++) {
+            items[k].style.display = expanded ? 'none' : '';
+        }
+        toggle.textContent = expanded ? '📖 更多 ' + (items.length - 3) + ' 条' : '📖 收起';
+        toggle.setAttribute('data-expanded', expanded ? '0' : '1');
+    },
+
     viewSource: function(index) {
         var src = this._allSources[index];
         if (!src || !src.path) return;
+        // 网页搜索结果，直接打开 URL
+        if (src._type === 'web') {
+            window.open(src.path, '_blank');
+            return;
+        }
         var fileName = src.path.split('/').pop();
         var ext = fileName.split('.').pop().toLowerCase();
 
@@ -854,7 +1172,7 @@ var WikiKnowledge = {
                 '<button onclick="WikiKnowledge.addMemory()">添加记忆</button>' +
             '</div>';
 
-            self.openSidebar('🧠 持久化记忆', html);
+            self.openSidebar('持久化记忆', html);
         }).catch(function(e) {
             self.openSidebar('持久化记忆', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
         });
@@ -909,21 +1227,33 @@ var WikiKnowledge = {
                     var usage = skill.usage || {};
                     var stateClass = (usage.state || 'active');
                     var stateLabel = stateClass === 'active' ? '活跃' : stateClass === 'stale' ? '过期' : '已归档';
+                    var isUserSkill = skill.source === 'user';
 
                     html += '<div class="kb-skill-item">' +
-                        '<div class="name">' + self._escapeHtml(fm.name || skill.name) + '</div>' +
-                        (fm.category ? '<div class="category">' + self._escapeHtml(fm.category) + '</div>' : '') +
-                        '<div class="stats">' +
-                            '<span>📈 使用 ' + (usage.use_count || 0) + ' 次</span>' +
-                            '<span>👁 查看 ' + (usage.view_count || 0) + ' 次</span>' +
+                        '<div class="kb-skill-item-header">' +
+                            '<div class="name">' + self._escapeHtml(fm.name || skill.name) + '</div>' +
+                            (isUserSkill
+                                ? '<div class="kb-skill-actions">' +
+                                    '<button class="kb-skill-btn" onclick="WikiKnowledge.editSkill(\'' + skill.name + '\')" title="编辑">✏️</button>' +
+                                    '<button class="kb-skill-btn kb-skill-btn-del" onclick="WikiKnowledge.deleteSkill(\'' + skill.name + '\')" title="删除">🗑️</button>' +
+                                  '</div>'
+                                : '<span class="kb-skill-system-badge">内置</span>') +
                         '</div>' +
-                        '<div style="margin-top: 6px;"><span class="kb-skill-item state ' + stateClass + '">' + stateLabel + '</span></div>' +
+                        '<div class="meta-row">' +
+                            (fm.category ? '<span class="category">' + self._escapeHtml(fm.category) + '</span>' : '') +
+                            '<span class="state ' + stateClass + '">' + stateLabel + '</span>' +
+                            '<span class="stats">使用 ' + (usage.use_count || 0) + ' · 查看 ' + (usage.view_count || 0) + '</span>' +
+                        '</div>' +
                     '</div>';
                 }
             }
 
             html += '<div class="kb-sidebar-input-area">' +
-                '<textarea id="kb-skill-input" rows="5" placeholder="输入技能内容 (SKILL.md 格式)...\n\n---\nname: my-skill\ncategory: general\n---\n# 技能名称\n## 描述\n..."></textarea>' +
+                '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+                    '<input id="kb-skill-name" placeholder="技能名称（必填）" style="flex:1;padding:8px 10px;border:1px solid #e8e8e8;border-radius:6px;font-size:13px;outline:none">' +
+                    '<input id="kb-skill-category" placeholder="分类（可选）" style="flex:1;padding:8px 10px;border:1px solid #e8e8e8;border-radius:6px;font-size:13px;outline:none">' +
+                '</div>' +
+                '<textarea id="kb-skill-input" rows="4" placeholder="描述这个技能的规则，以及 AI 应该在什么情况下使用..."></textarea>' +
                 '<button onclick="WikiKnowledge.createSkill()">创建技能</button>' +
             '</div>';
 
@@ -934,31 +1264,45 @@ var WikiKnowledge = {
     },
 
     createSkill: function() {
+        var nameEl = document.getElementById('kb-skill-name');
+        var catEl = document.getElementById('kb-skill-category');
         var inputEl = document.getElementById('kb-skill-input');
-        if (!inputEl) return;
+        if (!nameEl || !inputEl) return;
 
-        var content = inputEl.value.trim();
-        if (!content) return;
+        var rawName = nameEl.value.trim();
+        var category = catEl ? catEl.value.trim() : '';
+        var description = inputEl.value.trim();
 
-        var nameMatch = content.match(/^---\s*\n.*?name:\s*(\S+)/ms);
-        var name = nameMatch ? nameMatch[1] : '';
-        if (!name) {
-            alert('技能内容必须包含 name 字段在前置元数据中');
+        if (!rawName) {
+            alert('请输入技能名称');
+            nameEl.focus();
+            return;
+        }
+        if (!description) {
+            alert('请输入技能描述');
+            inputEl.focus();
             return;
         }
 
-        var catMatch = content.match(/^---\s*\n.*?category:\s*(\S+)/ms);
-        var category = catMatch ? catMatch[1] : null;
+        // 自动转成小写 slug，中文和特殊字符去掉
+        var name = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        if (!name || name === '-') name = 'skill-' + Date.now();
+
+        var content = '---\nname: ' + name + '\n';
+        if (category) content += 'category: ' + category + '\n';
+        content += '---\n\n# ' + rawName + '\n\n' + description;
 
         var self = this;
         apiFetch('/api/kb/skills/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, content: content, category: category, created_by: 'user' })
+            body: JSON.stringify({ name: name, content: content, category: category || null, created_by: 'user' })
         }).then(function(resp) {
             return resp.json();
         }).then(function(data) {
             if (data.success) {
+                nameEl.value = '';
+                if (catEl) catEl.value = '';
                 inputEl.value = '';
                 self.showSkills();
             } else {
@@ -966,6 +1310,86 @@ var WikiKnowledge = {
             }
         }).catch(function(e) {
             alert('创建失败: ' + e.message);
+        });
+    },
+
+    editSkill: function(skillName) {
+        var self = this;
+        apiFetch('/api/kb/skills/' + skillName, { method: 'GET' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (!data.success) { alert(data.error || '加载失败'); return; }
+            var fm = data.frontmatter || {};
+            var cat = fm.category || '';
+            // 从 content 中去掉 frontmatter 得到描述
+            var desc = data.content || '';
+            desc = desc.replace(/^---[\s\S]*?---\n*/m, '').replace(/^#\s+.*\n*/m, '').trim();
+
+            var html = '<div class="kb-sidebar-input-area">' +
+                '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+                    '<input id="kb-skill-name" value="' + self._escapeHtml(fm.name || skillName) + '" style="flex:1;padding:8px 10px;border:1px solid #e8e8e8;border-radius:6px;font-size:13px;outline:none" readonly>' +
+                    '<input id="kb-skill-category" value="' + self._escapeHtml(cat) + '" placeholder="分类（可选）" style="flex:1;padding:8px 10px;border:1px solid #e8e8e8;border-radius:6px;font-size:13px;outline:none">' +
+                '</div>' +
+                '<textarea id="kb-skill-input" rows="8">' + self._escapeHtml(desc) + '</textarea>' +
+                '<div style="display:flex;gap:6px">' +
+                    '<button onclick="WikiKnowledge.saveSkill(\'' + skillName + '\')" style="flex:1">保存修改</button>' +
+                    '<button onclick="WikiKnowledge.showSkills()" style="flex:1;background:#999">取消</button>' +
+                '</div>' +
+            '</div>';
+            self.openSidebar('📝 编辑技能', html);
+        }).catch(function(e) {
+            alert('加载失败: ' + e.message);
+        });
+    },
+
+    saveSkill: function(skillName) {
+        var catEl = document.getElementById('kb-skill-category');
+        var inputEl = document.getElementById('kb-skill-input');
+        var nameEl = document.getElementById('kb-skill-name');
+        if (!inputEl) return;
+        var category = catEl ? catEl.value.trim() : '';
+        var description = inputEl.value.trim();
+        if (!description) { alert('请输入技能描述'); return; }
+        var name = nameEl ? nameEl.value.trim() : skillName;
+        var content = '---\nname: ' + name + '\n';
+        if (category) content += 'category: ' + category + '\n';
+        content += '---\n\n# ' + name + '\n\n' + description;
+
+        var self = this;
+        apiFetch('/api/kb/skills/' + skillName + '/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content })
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                self.showSkills();
+            } else {
+                alert(data.error || '保存失败');
+            }
+        }).catch(function(e) {
+            alert('保存失败: ' + e.message);
+        });
+    },
+
+    deleteSkill: function(skillName) {
+        if (!confirm('确定要删除技能 "' + skillName + '" 吗？')) return;
+        var self = this;
+        apiFetch('/api/kb/skills/' + skillName, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                self.showSkills();
+            } else {
+                alert(data.error || '删除失败');
+            }
+        }).catch(function(e) {
+            alert('删除失败: ' + e.message);
         });
     },
 

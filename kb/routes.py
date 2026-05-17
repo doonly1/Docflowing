@@ -3,7 +3,7 @@ import re
 import time
 import json
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, Response, stream_with_context
 from functools import wraps
 
 from server.auth import login_required, admin_required
@@ -12,6 +12,7 @@ from kb.search import search_wiki
 from kb.llm import is_llm_available, call_llm
 from kb.context_compressor import ContextCompressor
 from kb.session_db import get_session_db
+from kb.tools import _extract_relevant_snippets
 
 wiki_bp = Blueprint('wiki', __name__, url_prefix='/api/kb')
 
@@ -452,27 +453,6 @@ def search_files():
     return jsonify({'success': True, 'results': results, 'query': q})
 
 
-# ==================== Agent 上下文（预留） ====================
-
-
-def _extract_from_keyword(text, keywords):
-    pos = -1
-    text_lower = text.lower()
-    for kw in keywords:
-        p = text_lower.find(kw.lower())
-        if p != -1:
-            pos = p
-            break
-    if pos == -1:
-        return text
-    sentence_start = 0
-    for sep in ('。', '！', '？', '!', '?', '\n'):
-        idx = text.rfind(sep, 0, pos)
-        if idx != -1:
-            sentence_start = max(sentence_start, idx + len(sep))
-    return text[sentence_start:].strip()
-
-
 @wiki_bp.route('/agent/context', methods=['POST'])
 @login_required
 @_require_wiki_permission('view')
@@ -483,6 +463,7 @@ def agent_context():
         query = (data.get('query') or '').strip()
         max_chars = data.get('max_chars', 10000)
         session_id = data.get('session_id')
+        stream = data.get('stream', False)
 
         if not query:
             return jsonify({'success': True, 'context': '', 'sources': [], 'session_id': session_id, 'llm_used': False})
@@ -520,18 +501,6 @@ def agent_context():
             ).fetchone()
             if not row or not row['content'].strip():
                 continue
-            content = row['content']
-
-            # 按空行分割段落，提取包含关键词的匹配段落
-            paragraphs = re.split(r'\n\s*\n', content)
-            matched_bodies = []
-            for para in paragraphs:
-                if any(kw in para.lower() for kw in keywords):
-                    matched_bodies.append(para.strip())
-
-            # 兜底：若无关键词匹配到段落（如只匹配了标题），展示开头
-            if not matched_bodies:
-                matched_bodies = [content.strip()[:300]]
 
             # 公平配额：剩余预算 / 剩余待处理文档数
             remaining_results = num_results - i
@@ -539,14 +508,7 @@ def agent_context():
             if doc_budget <= 0:
                 continue
 
-            # 从关键词所在句子开始截取，确保关键词可见
-            trimmed_bodies = []
-            for para in matched_bodies:
-                trimmed_bodies.append(_extract_from_keyword(para, keywords))
-            doc_content = '\n\n'.join(trimmed_bodies)
-            if len(doc_content) > doc_budget:
-                doc_content = doc_content[:doc_budget]
-
+            doc_content = _extract_relevant_snippets(row['content'], keywords, doc_budget)
             context_parts.append(f"## {r['title']}\n\n{doc_content}")
             total_chars += len(doc_content)
 
@@ -558,7 +520,7 @@ def agent_context():
                 if len(kw) < 1:
                     continue
                 pattern = re.compile(re.escape(kw), re.IGNORECASE)
-                kb_context = pattern.sub(lambda m: f'<mark>{m.group()}</mark>', kb_context)
+                kb_context_marked = pattern.sub(lambda m: f'<mark>{m.group()}</mark>', kb_context)
 
         from .memory import get_memory_store
         from .context_fence import build_memory_context_block
@@ -570,15 +532,13 @@ def agent_context():
         if is_llm_available(usr_id):
             skills_index = _build_skills_index(usr_id)
 
-            knowledge_section = f"## 参考信息\n{kb_context}" if kb_context else "## 参考信息\n（暂无）"
-
-            system_prompt = f"""{knowledge_section}
-            {memory_context}
-            {skills_index}
-            回答要简洁准确，不要编造信息。"""
+            kb_context = f"优先使用wiki_search工具获取用户知识库信息，以下是首次检索结果：\n{kb_context}" if kb_context else "没有结果，可能需要尝试更多关键词。\n"
+            system_prompt = f"""{kb_context}
+长期记忆：{memory_context}
+可用技能：{skills_index}"""
 
             from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
-            from .llm import call_llm_with_tools
+            from .llm import call_llm_with_tools, call_llm_with_tools_stream
 
             messages_history = None
             if session_id:
@@ -616,6 +576,47 @@ def agent_context():
             session_key = session_id or f"anon_{usr_id}_{id(query)}"
             interrupt_event = interrupt_reg.register(session_key)
 
+            # === 流式分支 ===
+            if stream:
+                def generate():
+                    try:
+                        for event in call_llm_with_tools_stream(
+                            system_prompt=system_prompt,
+                            user_query=query,
+                            messages_history=messages_history,
+                            tools=ALL_TOOL_SCHEMAS,
+                            max_tool_rounds=5,
+                            tool_executor=_tool_exec,
+                            user_id=usr_id,
+                            interrupt_event=interrupt_event,
+                            sources=sources,
+                        ):
+                            if interrupt_event.is_set():
+                                break
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+                            # 收集完整内容用于后续处理
+                            if event.get("type") == "done":
+                                full_content = event.get("content", "")
+                                tool_count = event.get("tool_calls", 0)
+                                from .context_fence import sanitize_context
+                                safe_content = sanitize_context(full_content)
+                                if tool_count > 0:
+                                    from .auto_extract import auto_extract_async
+                                    auto_extract_async(usr_id, query, safe_content)
+                                # 记录 assistant 消息到会话
+                                if session_id and safe_content:
+                                    try:
+                                        sdb = get_session_db(usr_id)
+                                        sdb.add_message(session_id, "assistant", safe_content)
+                                    except Exception:
+                                        pass
+                    finally:
+                        interrupt_reg.unregister(session_key)
+
+                return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+            # === 非流式分支（原逻辑） ===
             try:
                 llm_result = call_llm_with_tools(
                     system_prompt=system_prompt,
@@ -662,7 +663,7 @@ def agent_context():
 
         return jsonify({
             'success': True,
-            'context': kb_context,
+            'context': kb_context_marked,
             'message': message,
             'sources': sources,
             'session_id': session_id,

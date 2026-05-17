@@ -14,7 +14,7 @@ from server.workspace import _get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT,
     tool_name TEXT,
     timestamp REAL NOT NULL,
-    token_count INTEGER
+    token_count INTEGER,
+    sources TEXT
 );
 
 CREATE TABLE IF NOT EXISTS state_meta (
@@ -173,6 +174,13 @@ class SessionDB:
                 "INSERT INTO schema_version (version) VALUES (?)",
                 (SCHEMA_VERSION,),
             )
+        elif row["version"] < 2:
+            # v1 → v2: add sources column
+            try:
+                cursor.execute("ALTER TABLE messages ADD COLUMN sources TEXT")
+            except sqlite3.OperationalError:
+                pass
+            cursor.execute("UPDATE schema_version SET version = 2")
 
         try:
             cursor.execute("SELECT * FROM messages_fts LIMIT 0")
@@ -218,12 +226,13 @@ class SessionDB:
         content: str = None,
         tool_name: str = None,
         token_count: int = None,
+        sources: str = None,
     ) -> int:
         def _do(conn):
             cursor = conn.execute(
-                """INSERT INTO messages (session_id, role, content, tool_name, timestamp, token_count)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (session_id, role, content, tool_name, time.time(), token_count),
+                """INSERT INTO messages (session_id, role, content, tool_name, timestamp, token_count, sources)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, role, content, tool_name, time.time(), token_count, sources),
             )
             msg_id = cursor.lastrowid
             conn.execute(

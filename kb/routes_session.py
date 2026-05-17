@@ -55,6 +55,8 @@ def register_session_routes(bp: Blueprint):
 
         token_count = data.get('token_count')
 
+        sources = data.get('sources')
+
         if not role or not content:
 
             return jsonify({'success': False, 'error': 'role and content are required'}), 400
@@ -67,7 +69,7 @@ def register_session_routes(bp: Blueprint):
 
             db.create_session(session_id, user_id=user_id)
 
-        msg_id = db.append_message(session_id, role, content, tool_name=tool_name, token_count=token_count)
+        msg_id = db.append_message(session_id, role, content, tool_name=tool_name, token_count=token_count, sources=sources)
 
         if session and not session.get('title') and role == 'user':
 
