@@ -5,7 +5,7 @@ import json
 import sys
 import subprocess
 
-from flask import Blueprint, request, jsonify, Response, g
+from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from server.workspace import _get_workspace_dir, _get_workspace_workdir, _update_workspace_activity
 
@@ -57,14 +57,15 @@ def api_run_tool_with_config():
     if not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'脚本不存在: {script}'})
 
-    current_request_id = g.get('request_id', '')
+    _request_id = g.get('request_id', '')
+    _user_id = g.user_id
 
     def generate():
         try:
             env = os.environ.copy()
-            env['REQUEST_ID'] = current_request_id
+            env['REQUEST_ID'] = _request_id
             env['PYTHONPATH'] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            env['USER_ID'] = g.user_id
+            env['USER_ID'] = _user_id
 
             cmd_args = [sys.executable, "-u", script_path]
 
@@ -105,4 +106,4 @@ def api_run_tool_with_config():
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')

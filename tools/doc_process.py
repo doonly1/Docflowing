@@ -217,7 +217,7 @@ def save_docx(doc: Document, doc_name: str, workdir: Optional[str] = None) -> Op
 
     try:
         doc.save(save_path)
-        logger.info("已另存: %s", save_path)
+        logger.info("已另存: %s", doc_name)
         return save_path
     except Exception as e:
         logger.error("另存失败: %s", e)

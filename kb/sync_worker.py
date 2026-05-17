@@ -13,7 +13,6 @@ from queue import Queue, Empty
 
 from .sync_converters import can_convert, convert_file
 from .sync_state import get_sync_state_manager
-from .routes import _get_kb_root
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +69,7 @@ class SyncWorker:
 
     def _run(self):
         """同步线程主循环"""
+        self._migrate_existing_wiki_files()
         while self._running:
             try:
                 self._sync_all_enabled_filebases()
@@ -264,15 +264,10 @@ class SyncWorker:
             existing = state.files.get(relative_path)
             source_mtime = file_info['mtime']
 
-            # 检查目标 .md 文件是否存在（可能被用户手动删除）
-            target_path = self._get_target_path(user_id, filebase_id, relative_path)
-            target_missing = not os.path.isfile(target_path)
-
             needs_sync = (
                 existing is None or
                 existing.source_mtime < source_mtime or
-                (existing.status == 'failed' and existing.retry_count < 3) or
-                target_missing
+                (existing.status == 'failed' and existing.retry_count < 3)
             )
 
             if needs_sync:
@@ -329,22 +324,19 @@ class SyncWorker:
                 logger.warning(f"Failed to convert: {relative_path}")
                 return
 
-            target_path = self._get_target_path(user_id, filebase_id, relative_path)
+            kb_relative_path = f"imported/{filebase_id}/{relative_path}"
+            if not kb_relative_path.lower().endswith('.md'):
+                kb_relative_path += '.md'
 
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-            with open(target_path, 'w', encoding='utf-8') as f:
-                f.write(md_content)
-
-            target_mtime = os.path.getmtime(target_path)
+            from .routes import update_search_index, _extract_title_from_md
+            title = _extract_title_from_md(md_content) or os.path.splitext(os.path.basename(source_path))[0]
+            update_search_index(user_id, kb_relative_path, title, md_content)
 
             self._state_manager.update_file_state(
                 user_id, filebase_id, relative_path,
                 source_mtime, 'synced',
-                target_mtime=target_mtime
+                target_mtime=time.time()
             )
-
-            self._update_search_index(user_id, target_path)
 
             logger.debug(f"Synced: {relative_path}")
 
@@ -359,17 +351,6 @@ class SyncWorker:
         finally:
             self._semaphore.release()
 
-    def _get_target_path(self, user_id: str, filebase_id: str, relative_path: str) -> str:
-        """获取 KB 中的目标路径"""
-        kb_root = _get_kb_root(user_id)
-        target_dir = os.path.join(kb_root, 'imported', filebase_id)
-        target_file = os.path.join(target_dir, relative_path)
-
-        if not target_file.lower().endswith('.md'):
-            target_file += '.md'
-
-        return target_file
-
     def _cleanup_deleted(self, user_id: str, filebase_id: str, source_dir: str, state):
         """清理已删除的文件"""
         current_files = self._scan_filebase(source_dir)
@@ -381,50 +362,19 @@ class SyncWorker:
 
         for relative_path in deleted_paths:
             try:
-                target_path = self._get_target_path(user_id, filebase_id, relative_path)
+                kb_relative_path = f"imported/{filebase_id}/{relative_path}"
+                if not kb_relative_path.lower().endswith('.md'):
+                    kb_relative_path += '.md'
 
-                if os.path.exists(target_path):
-                    os.remove(target_path)
+                from .routes import remove_from_index
+                remove_from_index(user_id, kb_relative_path)
 
                 self._state_manager.remove_file(user_id, filebase_id, relative_path)
-
-                self._remove_from_search_index(user_id, target_path)
 
                 logger.debug(f"Deleted synced file: {relative_path}")
 
             except Exception as e:
                 logger.error(f"Failed to delete synced file {relative_path}: {e}")
-
-    def _update_search_index(self, user_id: str, file_path: str):
-        """更新 KB 搜索索引"""
-        try:
-            from .routes import update_search_index, _extract_title_from_md
-
-            kb_root = _get_kb_root(user_id)
-            relative_path = os.path.relpath(file_path, kb_root).replace('\\', '/')
-
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            title = _extract_title_from_md(content) or os.path.splitext(os.path.basename(file_path))[0]
-
-            update_search_index(user_id, relative_path, title, content)
-
-        except Exception as e:
-            logger.error(f"Failed to update search index for {file_path}: {e}")
-
-    def _remove_from_search_index(self, user_id: str, file_path: str):
-        """从 KB 搜索索引中移除"""
-        try:
-            from .routes import remove_from_index
-
-            kb_root = _get_kb_root(user_id)
-            relative_path = os.path.relpath(file_path, kb_root).replace('\\', '/')
-
-            remove_from_index(user_id, relative_path)
-
-        except Exception as e:
-            logger.error(f"Failed to remove from search index: {file_path}: {e}")
 
     def get_sync_status(self, user_id: str, filebase_id: str) -> Dict:
         """获取同步状态"""
@@ -455,20 +405,10 @@ class SyncWorker:
             return False
 
     def cleanup_filebase(self, user_id: str, filebase_id: str):
-        """清理文件库的同步数据（.md 文件、同步状态、FTS5 索引）"""
+        """清理文件库的同步数据（同步状态、FTS5 索引）"""
         try:
-            kb_root = _get_kb_root(user_id)
-            imported_dir = os.path.join(kb_root, 'imported', filebase_id)
-
-            # 清理 .md 文件
-            if os.path.exists(imported_dir):
-                import shutil
-                shutil.rmtree(imported_dir)
-
-            # 清理同步状态
             self._state_manager.clear_all_state(user_id, filebase_id)
 
-            # 清理 FTS5 索引
             from kb.database import get_db
             conn = get_db(user_id)
             prefix = f'imported/{filebase_id}/%'
@@ -482,6 +422,41 @@ class SyncWorker:
 
         except Exception as e:
             logger.error(f"Failed to cleanup filebase {filebase_id}: {e}")
+
+    def _migrate_existing_wiki_files(self):
+        """确保现有 imported 文件在 wiki_files 表中有记录（一次性迁移）"""
+        try:
+            enabled_filebases = self._get_enabled_filebases()
+            for fb in enabled_filebases:
+                user_id = fb['user_id']
+                filebase_id = fb['id']
+                state = self._state_manager.get_state(user_id, filebase_id)
+
+                for relative_path, file_state in state.files.items():
+                    if file_state.status != 'synced':
+                        continue
+                    kb_path = f"imported/{filebase_id}/{relative_path}"
+                    if not kb_path.lower().endswith('.md'):
+                        kb_path += '.md'
+
+                    from .database import get_db
+                    conn = get_db(user_id)
+                    row = conn.execute(
+                        "SELECT path FROM wiki_files WHERE usr_id = ? AND path = ?",
+                        (user_id, kb_path)
+                    ).fetchone()
+                    if not row and file_state.source:
+                        ft_row = conn.execute(
+                            "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+                            (user_id, kb_path)
+                        ).fetchone()
+                        if ft_row:
+                            from .routes import update_search_index
+                            update_search_index(user_id, kb_path, file_state.source, ft_row['content'])
+
+            logger.info("Migration of wiki_files table completed")
+        except Exception as e:
+            logger.error(f"Failed to migrate wiki_files: {e}")
 
 
 _sync_worker = None

@@ -27,9 +27,9 @@ var WikiKnowledge = {
                     var m = data.messages[i];
                     var d = new Date(m.timestamp * 1000);
                     var sources;
-                    if (m.sources) {
-                        try { sources = JSON.parse(m.sources); } catch(e) { sources = undefined; }
-                    }
+                if (m.role === 'assistant' && m.sources) {
+                    try { sources = JSON.parse(m.sources); } catch(e) { sources = undefined; }
+                }
                     self.messages.push({
                         role: m.role,
                         content: m.content,
@@ -141,8 +141,8 @@ var WikiKnowledge = {
                     '<div class="kb-header-more-wrapper">' +
                         '<button onclick="WikiKnowledge.toggleMoreMenu(event)" title="更多" class="kb-header-btn">···</button>' +
                         '<div class="kb-header-more-dropdown" id="kb-header-more-dropdown" style="display:none">' +
-                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showMemory();WikiKnowledge.toggleMoreMenu(event)">🧠 长期记忆</div>' +
-                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showSkills();WikiKnowledge.toggleMoreMenu(event)">📚 可用技能</div>' +
+                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showMemory();WikiKnowledge.toggleMoreMenu(event)">记忆</div>' +
+                            '<div class="kb-header-more-item" onclick="WikiKnowledge.showSkills();WikiKnowledge.toggleMoreMenu(event)">技能</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -477,8 +477,8 @@ var WikiKnowledge = {
         });
 
         self._recordMessage('assistant', content || '', sources);
-        self._renderMessages();
         self.isLoading = false;
+        self._renderMessages();
     },
 
     _finalizeStreamError: function(message) {
@@ -494,8 +494,8 @@ var WikiKnowledge = {
             time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         });
 
-        self._renderMessages();
         self.isLoading = false;
+        self._renderMessages();
     },
 
     _handleJsonResponse: function(data, query) {
@@ -529,8 +529,8 @@ var WikiKnowledge = {
         });
 
         self._recordMessage('assistant', answer, data.sources);
-        self._renderMessages();
         self.isLoading = false;
+        self._renderMessages();
     },
 
     stopResponse: function() {
@@ -566,6 +566,81 @@ var WikiKnowledge = {
         return context;
     },
 
+    copyMessage: function(index) {
+        var msg = this.messages[index];
+        if (!msg) return;
+        var text = msg.content;
+        var btn = document.querySelector('button[onclick="WikiKnowledge.copyMessage(' + index + ')"]');
+        var restoreBtn = function() {
+            if (!btn) return;
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+            btn.style.color = '#999';
+            btn.title = '复制';
+        };
+
+        var doCopy = function() {
+            if (btn) {
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#52c41a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+                btn.style.color = '#52c41a';
+                btn.title = '已复制';
+            }
+            setTimeout(restoreBtn, 1500);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(doCopy).catch(function() {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                doCopy();
+            });
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            doCopy();
+        }
+    },
+
+    deleteMessage: function(index) {
+        var msg = this.messages[index];
+        if (!msg) return;
+        if (!confirm('确定要删除这条消息吗？')) return;
+
+        // 如果是 assistant 消息，同时删除前一条 user 消息（保持对话连贯）
+        if (msg.role === 'assistant' && index > 0 && this.messages[index - 1].role === 'user') {
+            this.messages.splice(index - 1, 2);
+        } else if (msg.role === 'user' && index + 1 < this.messages.length && this.messages[index + 1].role === 'assistant') {
+            this.messages.splice(index, 2);
+        } else {
+            this.messages.splice(index, 1);
+        }
+
+        this._renderMessages();
+    },
+
+    retryMessage: function(index) {
+        var msg = this.messages[index];
+        if (!msg || msg.role !== 'user') return;
+
+        // 删除这条消息及之后的所有消息
+        this.messages.splice(index);
+        this._renderMessages();
+
+        // 重新发送
+        this._getAIResponse(msg.content);
+    },
+
     _renderMessages: function() {
         var messagesEl = document.getElementById('kb-messages');
         var emptyEl = document.getElementById('kb-empty-state');
@@ -593,27 +668,42 @@ var WikiKnowledge = {
                             (msg.interrupted ? '<div class="kb-chat-interrupted-badge">⏹ 已中断</div>' : '') +
                         '</div>';
 
-            if (msg.sources && msg.sources.length > 0) {
+            var actionsHtml = '';
+            if (!this.isLoading) {
+                actionsHtml = '<span class="kb-chat-msg-actions">' +
+                    '<button class="kb-chat-msg-btn" title="复制" onclick="WikiKnowledge.copyMessage(' + i + ')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
+                    '<button class="kb-chat-msg-btn" title="删除" onclick="WikiKnowledge.deleteMessage(' + i + ')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
+                if (msg.role === 'user') {
+                    actionsHtml += '<button class="kb-chat-msg-btn" title="重试" onclick="WikiKnowledge.retryMessage(' + i + ')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>';
+                }
+                actionsHtml += '</span>';
+            }
+
+            html += '<div class="kb-chat-message-time">' +
+                        '<span>' + msg.time + '</span>' +
+                        actionsHtml +
+                    '</div>';
+
+            if (msg.sources && msg.role === 'assistant' && msg.sources.length > 0) {
                 var maxVisible = 3;
                 html += '<div class="kb-chat-sources" id="kb-src-' + i + '">' +
-                    '<div class="kb-chat-sources-title">🔗 参考来源</div>';
+                    '<div class="kb-chat-sources-title">参考来源</div>';
                 for (var j = 0; j < msg.sources.length; j++) {
                     var src = msg.sources[j];
                     var srcIdx = this._allSources.length;
                     this._allSources.push(src);
                     html += '<div class="kb-chat-source-item"' + (j >= maxVisible ? ' style="display:none"' : '') + '>' +
-                        '<span class="icon">' + (src._type === 'web' ? '🌐' : '📄') + '</span>' +
+                        '<span class="icon">' + (src._type === 'web' ? '&#x1F310;' : '&#x1F4C4;') + '</span>' +
                         '<a href="#" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + (src.title || src.path) + '</a>' +
                     '</div>';
                 }
                 if (msg.sources.length > maxVisible) {
-                    html += '<div class="kb-chat-source-toggle" onclick="WikiKnowledge.toggleSources(' + i + ')">📖 更多 ' + (msg.sources.length - maxVisible) + ' 条</div>';
+                    html += '<div class="kb-chat-source-toggle" onclick="WikiKnowledge.toggleSources(' + i + ')">&#x1F4D6; 更多 ' + (msg.sources.length - maxVisible) + ' 条</div>';
                 }
                 html += '</div>';
             }
 
-            html += '<div class="kb-chat-message-time">' + msg.time + '</div>' +
-                    '</div>' +
+            html += '</div>' +
                 '</div>';
         }
 
@@ -1118,7 +1208,7 @@ var WikiKnowledge = {
             return resp.json();
         }).then(function(data) {
             if (!data.success) {
-                self.openSidebar('持久化记忆', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败</div>');
+                self.openSidebar('记忆', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败</div>');
                 return;
             }
 
@@ -1128,18 +1218,18 @@ var WikiKnowledge = {
 
             var html = '<div class="kb-memory-usage">' +
                 '<div class="kb-memory-usage-item">' +
-                    '<div class="label">环境笔记 (MEMORY)</div>' +
+                    '<div class="label">持久记忆 (MEMORY)</div>' +
                     '<div class="bar"><div class="bar-fill" style="width: ' + memUsage.pct + '%"></div></div>' +
                     '<div class="value">' + memUsage.current + ' / ' + memUsage.limit + ' 字符</div>' +
                 '</div>' +
                 '<div class="kb-memory-usage-item">' +
-                    '<div class="label">用户画像 (USER)</div>' +
+                    '<div class="label">用户偏好 (USER)</div>' +
                     '<div class="bar"><div class="bar-fill" style="width: ' + userUsage.pct + '%"></div></div>' +
                     '<div class="value">' + userUsage.current + ' / ' + userUsage.limit + ' 字符</div>' +
                 '</div>' +
             '</div>';
 
-            html += '<h5 style="margin: 12px 0 8px; color: #666;">📝 环境笔记</h5>';
+            html += '<h5 style="margin: 12px 0 8px; color: #666;">持久记忆</h5>';
             if (data.memory && data.memory.memory && data.memory.memory.entries.length > 0) {
                 for (var i = 0; i < data.memory.memory.entries.length; i++) {
                     html += '<div class="kb-memory-entry">' +
@@ -1151,7 +1241,7 @@ var WikiKnowledge = {
                 html += '<div style="padding: 12px; color: #999; font-size: 13px;">暂无笔记</div>';
             }
 
-            html += '<h5 style="margin: 16px 0 8px; color: #666;">👤 用户画像</h5>';
+            html += '<h5 style="margin: 16px 0 8px; color: #666;">用户偏好</h5>';
             if (data.memory && data.memory.user && data.memory.user.entries.length > 0) {
                 for (var i = 0; i < data.memory.user.entries.length; i++) {
                     html += '<div class="kb-memory-entry">' +
@@ -1165,16 +1255,16 @@ var WikiKnowledge = {
 
             html += '<div class="kb-sidebar-input-area">' +
                 '<select id="kb-memory-target" style="width: 100%; padding: 8px; border: 1px solid #e8e8e8; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">' +
-                    '<option value="memory">添加到环境笔记</option>' +
-                    '<option value="user">添加到用户画像</option>' +
+                    '<option value="memory">添加到持久记忆</option>' +
+                    '<option value="user">添加到用户偏好</option>' +
                 '</select>' +
                 '<textarea id="kb-memory-input" rows="3" placeholder="输入新的记忆条目..."></textarea>' +
                 '<button onclick="WikiKnowledge.addMemory()">添加记忆</button>' +
             '</div>';
 
-            self.openSidebar('持久化记忆', html);
+            self.openSidebar('记忆', html);
         }).catch(function(e) {
-            self.openSidebar('持久化记忆', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
+            self.openSidebar('记忆', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
         });
     },
 
@@ -1257,7 +1347,7 @@ var WikiKnowledge = {
                 '<button onclick="WikiKnowledge.createSkill()">创建技能</button>' +
             '</div>';
 
-            self.openSidebar('📚 技能库', html);
+            self.openSidebar('技能库', html);
         }).catch(function(e) {
             self.openSidebar('技能库', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
         });

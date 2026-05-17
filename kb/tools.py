@@ -455,32 +455,23 @@ def _extract_relevant_snippets(content: str, keywords: list, max_chars: int = 30
 
 
 def _execute_wiki_read(args: Dict[str, Any], user_id: str) -> str:
-    import os
     path = args.get("path", "")
     if not path:
         return json.dumps({"success": False, "error": "path is required"}, ensure_ascii=False)
 
-    # 构建 wiki 文档的完整路径
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    kb_root = os.path.join(root_dir, 'workspaces', user_id, 'kb')
-    full_path = os.path.normpath(os.path.join(kb_root, path))
-
-    # 路径安全检查：确保最终路径在 kb_root 下
-    if not full_path.startswith(os.path.normpath(kb_root)):
-        return json.dumps({"success": False, "error": "Invalid path"}, ensure_ascii=False)
-
-    if not os.path.isfile(full_path):
+    from .database import get_db
+    conn = get_db(user_id)
+    row = conn.execute(
+        "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+        (user_id, path)
+    ).fetchone()
+    if not row:
         return json.dumps({"success": False, "error": f"Document not found: {path}"}, ensure_ascii=False)
 
-    try:
-        with open(full_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        # 限制返回长度，防止溢出
-        if len(content) > 50000:
-            content = content[:50000] + "\n\n... (truncated at 50000 characters)"
-        return json.dumps({"success": True, "path": path, "content": content}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"success": False, "error": f"Failed to read document: {str(e)}"}, ensure_ascii=False)
+    content = row['content']
+    if len(content) > 50000:
+        content = content[:50000] + "\n\n... (truncated at 50000 characters)"
+    return json.dumps({"success": True, "path": path, "content": content}, ensure_ascii=False)
 
 
 def _execute_wiki_search(args: Dict[str, Any], user_id: str) -> str:

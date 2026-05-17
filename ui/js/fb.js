@@ -231,7 +231,7 @@ var FileBase = {
         h += '<input type="text" id="fb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
         h += '</div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button class="btn" onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -956,6 +956,25 @@ var FileBase = {
         }
     },
 
+    showCreateTxtDialog: function() {
+        this._createTxtFile('新建文本文档.txt');
+    },
+
+    _createTxtFile: async function(name) {
+        var self = this;
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/create', 'POST', {
+            name: name,
+            parent: this.fbLocalCurrentSubdir || ''
+        });
+        if (res.success) {
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
+            self.openMarkdownEditor(res.path);
+        } else {
+            alert(res.message || '创建失败');
+        }
+    },
+
     showContextMenu: function(event) {
         event.preventDefault();
         event.stopPropagation();
@@ -1010,15 +1029,10 @@ var FileBase = {
 
     _buildEmptyContextMenu: function() {
         var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建 Markdown 文件</div>';
-        if (window.authRole === 'admin') {
-            h += '<div class="fb-menu-divider"></div>' +
-                 '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>' +
-                 '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
-        } else {
-            h += '<div class="fb-menu-divider"></div>' +
-                 '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
-        }
+                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建md</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon">📄</span> 新建txt</div>' +
+                '<div class="fb-menu-divider"></div>' +
+                '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
         return h;
     },
 

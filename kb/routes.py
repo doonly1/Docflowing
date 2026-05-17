@@ -63,13 +63,6 @@ def _require_wiki_permission(required_level):
     return decorator
 
 
-def _get_kb_root(usr_id):
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    kb_dir = os.path.join(root_dir, 'workspaces', usr_id, 'kb')
-    os.makedirs(kb_dir, exist_ok=True)
-    return kb_dir
-
-
 def _get_system_skills_dir() -> str:
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(root_dir, 'kb', 'skills', 'system')
@@ -144,28 +137,6 @@ def _build_skills_index(usr_id: str) -> str:
         return ""
 
 
-def sanitize_path(user_path):
-    clean_path = user_path.lstrip('/').replace('\\', '/')
-    parts = clean_path.split('/')
-    safe_parts = []
-    for part in parts:
-        if part == '..' or part == '.' or not part:
-            continue
-        safe_parts.append(part)
-    return os.path.join(*safe_parts)
-
-
-def validate_file_path(usr_id, file_path):
-    kb_root = _get_kb_root(usr_id)
-    if not file_path:
-        return kb_root, kb_root
-    safe = sanitize_path(file_path)
-    full_path = os.path.normpath(os.path.join(kb_root, safe))
-    if not full_path.startswith(os.path.normpath(kb_root)):
-        return None, None
-    return kb_root, full_path
-
-
 def update_search_index(usr_id, file_path, title, content):
     conn = get_db(usr_id)
     conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))
@@ -173,6 +144,24 @@ def update_search_index(usr_id, file_path, title, content):
         "INSERT INTO wiki_fts (usr_id, title, content, path) VALUES (?, ?, ?, ?)",
         (usr_id, title, content, file_path)
     )
+
+    now = time.time()
+    existing = conn.execute(
+        "SELECT path FROM wiki_files WHERE usr_id = ? AND path = ?",
+        (usr_id, file_path)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE wiki_files SET title = ?, updated_at = ? WHERE usr_id = ? AND path = ?",
+            (title, now, usr_id, file_path)
+        )
+    else:
+        conn.execute(
+            "INSERT INTO wiki_files (usr_id, path, title, created_at, updated_at, file_size) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (usr_id, file_path, title, now, now, len(content))
+        )
+
     conn.commit()
 
 
@@ -251,43 +240,49 @@ def update_wiki_settings():
 @_require_wiki_permission('view')
 def list_files():
     usr_id = g.user_id
-    kb_root = _get_kb_root(usr_id)
     subdir = request.args.get('subdir', '').strip()
 
-    if subdir:
-        target_dir = os.path.normpath(os.path.join(kb_root, subdir))
-        if not target_dir.startswith(os.path.normpath(kb_root)):
-            return jsonify({'success': False, 'message': '路径非法'})
-    else:
-        target_dir = kb_root
+    if subdir.startswith('imported/'):
+        return _list_imported_files(usr_id, subdir)
 
-    if not os.path.isdir(target_dir):
-        return jsonify({'success': True, 'files': [], 'folders': [], 'current_path': subdir})
+    if not subdir:
+        return jsonify({
+            'success': True,
+            'files': [],
+            'folders': [{'name': 'imported', 'path': 'imported'}],
+            'current_path': ''
+        })
+
+    return jsonify({'success': True, 'files': [], 'folders': [], 'current_path': subdir})
+
+
+def _list_imported_files(usr_id, subdir):
+    """从 wiki_files 表查 imported 下的文件"""
+    conn = get_db(usr_id)
+    prefix = subdir.rstrip('/') + '/'
+
+    rows = conn.execute(
+        "SELECT path, title, created_at, updated_at "
+        "FROM wiki_files WHERE usr_id = ? AND path LIKE ?",
+        (usr_id, prefix + '%')
+    ).fetchall()
 
     files = []
-    folders = []
-    try:
-        for entry in os.scandir(target_dir):
-            if entry.name.startswith('.'):
-                continue
-            if entry.is_file():
-                files.append({
-                    'name': entry.name,
-                    'path': os.path.relpath(entry.path, kb_root).replace('\\', '/'),
-                    'size': entry.stat().st_size,
-                    'mtime': entry.stat().st_mtime,
-                    'ext': os.path.splitext(entry.name)[1].lower()
-                })
-            elif entry.is_dir():
-                folders.append({
-                    'name': entry.name,
-                    'path': os.path.relpath(entry.path, kb_root).replace('\\', '/')
-                })
-    except PermissionError:
-        return jsonify({'success': False, 'message': '没有权限访问此目录'})
+    folder_names = set()
+    for row in rows:
+        rel = row['path'][len(prefix):]
+        parts = rel.split('/')
+        if len(parts) == 1:
+            files.append({
+                'name': parts[0],
+                'path': row['path'],
+                'mtime': row['updated_at'],
+                'ext': '.md'
+            })
+        else:
+            folder_names.add(parts[0])
 
-    folders.sort(key=lambda x: x['name'].lower())
-    files.sort(key=lambda x: x['name'].lower())
+    folders = [{'name': f, 'path': prefix + f} for f in sorted(folder_names)]
 
     return jsonify({
         'success': True,
@@ -302,139 +297,23 @@ def list_files():
 @_require_wiki_permission('view')
 def get_file_content(file_path):
     usr_id = g.user_id
-    kb_root, full_path = validate_file_path(usr_id, file_path)
-    if full_path is None:
-        return jsonify({'success': False, 'message': '路径非法'}), 400
 
-    if not os.path.isfile(full_path):
-        return jsonify({'success': False, 'message': '文件不存在'}), 404
+    if not file_path.startswith('imported/'):
+        return jsonify({'success': False, 'message': '不支持的路径'}), 400
 
-    ext = os.path.splitext(full_path)[1].lower()
-    if ext not in ('.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv', '.yaml', '.yml', '.py', '.js', '.css'):
-        return jsonify({'success': False, 'message': '不支持的文件类型'}), 400
-
-    try:
-        with open(full_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return jsonify({'success': True, 'content': content, 'file_type': ext})
-    except UnicodeDecodeError:
-        return jsonify({'success': False, 'message': '无法以文本方式读取此文件'}), 400
-
-
-@wiki_bp.route('/files/<path:file_path>', methods=['POST'])
-@login_required
-@_require_wiki_permission('edit')
-def create_or_update_file(file_path):
-    usr_id = g.user_id
-    data = request.get_json()
-    content = data.get('content', '')
-
-    kb_root, full_path = validate_file_path(usr_id, file_path)
-    if full_path is None:
-        return jsonify({'success': False, 'message': '路径非法'}), 400
-
-    if not full_path.lower().endswith('.md'):
-        full_path = full_path + '.md'
-
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-    old_title = ''
-    if os.path.isfile(full_path):
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                old_title = _extract_title_from_md(f.read())
-        except Exception:
-            pass
-
-    with open(full_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-
-    title = _extract_title_from_md(content) or os.path.splitext(os.path.basename(full_path))[0]
-    rel_path = os.path.relpath(full_path, kb_root).replace('\\', '/')
-    update_search_index(usr_id, rel_path, title, content)
-
-    now = time.time()
     conn = get_db(usr_id)
-    conn.execute(
-        "UPDATE wiki_info SET updated_at = ? WHERE usr_id = ?",
-        (now, usr_id)
-    )
-    conn.commit()
-
-    return jsonify({'success': True, 'message': '文件已保存'})
-
-
-@wiki_bp.route('/files/<path:file_path>', methods=['DELETE'])
-@login_required
-@_require_wiki_permission('edit')
-def delete_file(file_path):
-    usr_id = g.user_id
-    kb_root, full_path = validate_file_path(usr_id, file_path)
-    if full_path is None:
-        return jsonify({'success': False, 'message': '路径非法'}), 400
-
-    if not os.path.isfile(full_path):
+    row = conn.execute(
+        "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+        (usr_id, file_path)
+    ).fetchone()
+    if not row:
         return jsonify({'success': False, 'message': '文件不存在'}), 404
 
-    try:
-        os.remove(full_path)
-        rel_path = os.path.relpath(full_path, kb_root).replace('\\', '/')
-        remove_from_index(usr_id, rel_path)
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-    return jsonify({'success': True, 'message': '文件已删除'})
-
-
-# ==================== 文件夹操作 ====================
-
-@wiki_bp.route('/folders', methods=['POST'])
-@login_required
-@_require_wiki_permission('edit')
-def create_folder():
-    usr_id = g.user_id
-    data = request.get_json()
-    name = (data.get('name') or '').strip()
-    parent = (data.get('parent') or '').strip()
-
-    if not name:
-        return jsonify({'success': False, 'message': '文件夹名称不能为空'})
-    if '/' in name or '\\' in name:
-        return jsonify({'success': False, 'message': '文件夹名称不能包含路径分隔符'})
-
-    kb_root, parent_path = validate_file_path(usr_id, parent)
-    if parent_path is None:
-        return jsonify({'success': False, 'message': '路径非法'}), 400
-
-    new_dir = os.path.join(parent_path, name)
-    if os.path.exists(new_dir):
-        return jsonify({'success': False, 'message': '同名文件夹已存在'})
-
-    os.makedirs(new_dir, exist_ok=True)
-    rel_path = os.path.relpath(new_dir, kb_root).replace('\\', '/')
-
-    return jsonify({'success': True, 'path': rel_path})
-
-
-@wiki_bp.route('/folders/<path:folder_path>', methods=['DELETE'])
-@login_required
-@_require_wiki_permission('edit')
-def delete_folder(folder_path):
-    usr_id = g.user_id
-    kb_root, full_path = validate_file_path(usr_id, folder_path)
-    if full_path is None:
-        return jsonify({'success': False, 'message': '路径非法'}), 400
-
-    if not os.path.isdir(full_path):
-        return jsonify({'success': False, 'message': '文件夹不存在'}), 404
-
-    try:
-        import shutil
-        shutil.rmtree(full_path)
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-    return jsonify({'success': True, 'message': '文件夹已删除'})
+    return jsonify({
+        'success': True,
+        'content': row['content'],
+        'file_type': '.md'
+    })
 
 
 # ==================== 搜索 ====================
@@ -532,10 +411,12 @@ def agent_context():
         if is_llm_available(usr_id):
             skills_index = _build_skills_index(usr_id)
 
-            kb_context = f"优先使用wiki_search工具获取用户知识库信息，以下是首次检索结果：\n{kb_context}" if kb_context else "没有结果，可能需要尝试更多关键词。\n"
-            system_prompt = f"""{kb_context}
-长期记忆：{memory_context}
-可用技能：{skills_index}"""
+            kb_context = f"获取信息时优选wiki_search工具，以下是首次search结果：\n{kb_context}" if kb_context else "没有结果，可能需要尝试更多关键词。\n"
+            system_prompt = f"""你是全力满足用户需求的助手（需求不明时可提问）。
+
+{kb_context}
+你的记忆：{memory_context}
+你的技能：{skills_index}"""
 
             from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
             from .llm import call_llm_with_tools, call_llm_with_tools_stream
@@ -580,6 +461,7 @@ def agent_context():
             if stream:
                 def generate():
                     try:
+                        full_content = ""
                         for event in call_llm_with_tools_stream(
                             system_prompt=system_prompt,
                             user_query=query,
@@ -591,9 +473,10 @@ def agent_context():
                             interrupt_event=interrupt_event,
                             sources=sources,
                         ):
-                            if interrupt_event.is_set():
-                                break
                             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+                            if event.get("type") in ("interrupted", "error"):
+                                break
 
                             # 收集完整内容用于后续处理
                             if event.get("type") == "done":

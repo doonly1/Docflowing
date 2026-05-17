@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import json
 
-from flask import Blueprint, request, jsonify, send_file, Response, g
+from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context, g
 from functools import wraps
 
 from server.auth import login_required, admin_required, _get_auth_data_dir
@@ -884,13 +884,18 @@ def create_local_file(filebase_id):
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
 
-    filename = name if name.lower().endswith('.md') else name + '.md'
+    base, ext = os.path.splitext(name)
+    if ext:
+        filename = name
+        default_ext = ext
+    else:
+        filename = name + '.md'
+        default_ext = '.md'
     file_path = os.path.join(target_dir, filename)
 
     counter = 1
-    orig_name = name if not name.lower().endswith('.md') else name[:-3]
     while os.path.exists(file_path) and counter < 100:
-        filename = orig_name + '_' + str(counter) + '.md'
+        filename = base + '_' + str(counter) + default_ext
         file_path = os.path.join(target_dir, filename)
         counter += 1
     if os.path.exists(file_path):
@@ -1284,11 +1289,13 @@ def run_tool_on_fb(filebase_id):
             if os.path.isfile(full) and f.lower().endswith(extensions):
                 files.append(f)
 
+    _user_id = g.user_id
+
     def generate():
         try:
             env = os.environ.copy()
             env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
-            env['USER_ID'] = g.user_id
+            env['USER_ID'] = _user_id
 
             cmd_args = [sys.executable, "-u", script_path]
             for f in files:
@@ -1325,7 +1332,7 @@ def run_tool_on_fb(filebase_id):
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 
 @fb_bp.route('/<fb_id>/local-files/content', methods=['GET'])
