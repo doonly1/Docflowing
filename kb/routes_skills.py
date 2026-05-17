@@ -1,6 +1,4 @@
-import json
 import logging
-import os
 from flask import Blueprint, jsonify, request, g
 
 from server.auth import login_required

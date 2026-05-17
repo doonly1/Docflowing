@@ -42,7 +42,7 @@ def test_state_manager():
     print("测试 2: 状态管理器")
     print("=" * 50)
 
-    from kb.sync_state import get_sync_state_manager, SyncState
+    from kb.sync_state import get_sync_state_manager
 
     manager = get_sync_state_manager()
 

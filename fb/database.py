@@ -67,12 +67,6 @@ def get_db():
     return _local.conn
 
 
-def close_db():
-    if hasattr(_local, 'conn') and _local.conn is not None:
-        _local.conn.close()
-        _local.conn = None
-
-
 def get_visible_fb_ids(user_id, is_admin=False):
     if is_admin:
         db = get_db()

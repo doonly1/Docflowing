@@ -191,7 +191,7 @@ compare:
 - 搜索/记忆/会话限制
 - 技能生命周期与审查间隔
 
-配置加载优先级：环境变量 `USER_CONFIG_PATH` → `./config/config.yaml`（项目模板）
+配置加载：子进程通过环境变量 `USER_ID` 读取 `workspaces/{user_id}/config/user_config.yaml`
 
 ---
 

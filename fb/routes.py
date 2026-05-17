@@ -5,7 +5,6 @@ import time
 import zipfile
 import io
 import shutil
-import tempfile
 import subprocess
 import json
 
@@ -1252,7 +1251,6 @@ def run_tool_on_fb(filebase_id):
     tool = data.get('tool')
     subdir = data.get('subdir', '').strip()
     files = data.get('files')
-    user_config = data.get('userConfig')
 
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
@@ -1287,22 +1285,10 @@ def run_tool_on_fb(filebase_id):
                 files.append(f)
 
     def generate():
-        temp_config_path = None
         try:
             env = os.environ.copy()
             env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
-
-            if user_config:
-                try:
-                    temp_dir = tempfile.mkdtemp()
-                    temp_config_path = os.path.join(temp_dir, 'config.yaml')
-                    with open(temp_config_path, 'w', encoding='utf-8') as f:
-                        import yaml
-                        yaml.dump(user_config, f, allow_unicode=True, default_flow_style=False)
-                    env['USER_CONFIG_PATH'] = temp_config_path
-                except Exception as e:
-                    yield f'data: {json.dumps({"type": "end", "success": False, "error": f"创建临时配置文件失败: {str(e)}"})}\n\n'
-                    return
+            env['USER_ID'] = g.user_id
 
             cmd_args = [sys.executable, "-u", script_path]
             for f in files:
@@ -1328,12 +1314,6 @@ def run_tool_on_fb(filebase_id):
 
             process.stdout.close()
             process.wait()
-
-            if temp_config_path and os.path.exists(os.path.dirname(temp_config_path)):
-                try:
-                    shutil.rmtree(os.path.dirname(temp_config_path))
-                except Exception:
-                    pass
 
             success = process.returncode == 0
             if not success:

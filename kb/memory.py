@@ -307,13 +307,3 @@ def get_memory_store(user_id: str) -> MemoryStore:
             if user_id not in _memory_store_instances:
                 _memory_store_instances[user_id] = MemoryStore(user_id)
     return _memory_store_instances[user_id]
-
-
-def close_memory_store(user_id: str = None):
-    global _memory_store_instances
-    with _memory_store_lock:
-        if user_id:
-            if user_id in _memory_store_instances:
-                del _memory_store_instances[user_id]
-        else:
-            _memory_store_instances.clear()

@@ -438,15 +438,3 @@ def get_session_db(user_id: str) -> SessionDB:
                 _session_db_instances[user_id] = SessionDB(user_id)
     return _session_db_instances[user_id]
 
-
-def close_session_db(user_id: str = None):
-    global _session_db_instances
-    with _session_db_lock:
-        if user_id:
-            if user_id in _session_db_instances:
-                _session_db_instances[user_id].close()
-                del _session_db_instances[user_id]
-        else:
-            for db in _session_db_instances.values():
-                db.close()
-            _session_db_instances.clear()

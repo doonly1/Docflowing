@@ -628,7 +628,6 @@
             resultDiv.innerHTML = '<pre class="output-pre" id="outputLog"></pre>';
             resultDiv.style.display = 'block';
 
-            const userConfig = getUserConfig();
             let response;
 
             if (kbInfo.isKbMode) {
@@ -637,7 +636,6 @@
                     subdir: kbInfo.subdir
                 };
                 if (selectedFiles.length > 0) bodyData.files = selectedFiles;
-                if (userConfig) bodyData.userConfig = userConfig;
 
                 response = await apiFetch('/api/fb/' + kbInfo.kbId + '/run-tool', {
                     method: 'POST',
@@ -649,7 +647,6 @@
                 // 统一远程模式：传递 workdir 参数
                 if (workdir) bodyData.workdir = toActualWorkdir(workdir);
                 if (selectedFiles.length > 0) bodyData.files = selectedFiles;
-                if (userConfig) bodyData.userConfig = userConfig;
 
                 response = await apiFetch('/run_tool_with_config', {
                     method: 'POST',
