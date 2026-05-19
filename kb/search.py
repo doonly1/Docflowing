@@ -21,12 +21,13 @@ def search_wiki(usr_id, query):
     except Exception:
         rows = []
 
-    # LIKE 兜底
+    # LIKE 兜底（加上 LIMIT 避免全表扫描拖垮性能）
     if not rows:
         try:
             rows = conn.execute(
                 "SELECT path, title, '' as title_snippet, '' as content_snippet "
-                "FROM wiki_fts WHERE usr_id = ? AND (title LIKE ? OR content LIKE ?)",
+                "FROM wiki_fts WHERE usr_id = ? AND (title LIKE ? OR content LIKE ?) "
+                "LIMIT 99",
                 (usr_id, f'%{query}%', f'%{query}%')
             ).fetchall()
         except Exception:
