@@ -394,6 +394,7 @@ def agent_context():
         kb_context = '\n\n---\n\n'.join(context_parts)
 
         # 对非LLM返回的匹配内容做关键词高亮标记
+        kb_context_marked = kb_context or ''
         if kb_context and keywords:
             for kw in keywords:
                 if len(kw) < 1:

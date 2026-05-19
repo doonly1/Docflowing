@@ -350,6 +350,21 @@ class SessionDB:
             match.pop("content", None)
         return matches
 
+    def delete_messages(self, session_id: str, message_ids: List[int]) -> int:
+        def _do(conn):
+            placeholders = ",".join("?" * len(message_ids))
+            conn.execute(
+                f"DELETE FROM messages WHERE session_id = ? AND id IN ({placeholders})",
+                [session_id] + message_ids,
+            )
+            deleted = conn.rowcount
+            conn.execute(
+                "UPDATE sessions SET message_count = MAX(0, message_count - ?) WHERE id = ?",
+                (deleted, session_id),
+            )
+            return deleted
+        return self._execute_write(_do)
+
     def delete_session(self, session_id: str) -> bool:
         def _do(conn):
             cursor = conn.execute(

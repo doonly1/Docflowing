@@ -115,6 +115,32 @@ def register_session_routes(bp: Blueprint):
 
         })
 
+    @bp.route('/session/<session_id>/messages', methods=['DELETE'])
+    @login_required
+    def delete_session_messages(session_id):
+
+        user_id = g.user_id
+
+        data = request.get_json() or {}
+
+        message_ids = data.get('message_ids')
+
+        if not message_ids or not isinstance(message_ids, list) or len(message_ids) == 0:
+
+            return jsonify({'success': False, 'error': 'message_ids is required'}), 400
+
+        db = get_session_db(user_id)
+
+        deleted = db.delete_messages(session_id, message_ids)
+
+        return jsonify({
+
+            'success': True,
+
+            'deleted': deleted,
+
+        })
+
     @bp.route('/sessions', methods=['GET'])
     @login_required
     def list_sessions():

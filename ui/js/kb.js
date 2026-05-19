@@ -34,6 +34,7 @@ var WikiKnowledge = {
                         role: m.role,
                         content: m.content,
                         sources: sources,
+                        msg_id: m.id,
                         time: d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
                     });
                 }
@@ -549,6 +550,8 @@ var WikiKnowledge = {
 
     _recordMessage: function(role, content, sources) {
         if (!this.sessionId) return;
+        var self = this;
+        var idx = this.messages.length - 1;
         var body = { role: role, content: content };
         if (sources && sources.length > 0) {
             body.sources = JSON.stringify(sources);
@@ -557,6 +560,12 @@ var WikiKnowledge = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success && data.message_id && self.messages[idx]) {
+                self.messages[idx].msg_id = data.message_id;
+            }
         }).catch(function(e) {
             console.error('记录消息失败:', e);
         });
@@ -617,16 +626,47 @@ var WikiKnowledge = {
         if (!msg) return;
         if (!confirm('确定要删除这条消息吗？')) return;
 
-        // 如果是 assistant 消息，同时删除前一条 user 消息（保持对话连贯）
+        var self = this;
+        var idsToDelete = [];
+        var deleteCount = 0;
+
         if (msg.role === 'assistant' && index > 0 && this.messages[index - 1].role === 'user') {
-            this.messages.splice(index - 1, 2);
+            if (this.messages[index].msg_id) idsToDelete.push(this.messages[index].msg_id);
+            if (this.messages[index - 1].msg_id) idsToDelete.push(this.messages[index - 1].msg_id);
+            deleteCount = 2;
         } else if (msg.role === 'user' && index + 1 < this.messages.length && this.messages[index + 1].role === 'assistant') {
-            this.messages.splice(index, 2);
+            if (this.messages[index].msg_id) idsToDelete.push(this.messages[index].msg_id);
+            if (this.messages[index + 1].msg_id) idsToDelete.push(this.messages[index + 1].msg_id);
+            deleteCount = 2;
         } else {
-            this.messages.splice(index, 1);
+            if (msg.msg_id) idsToDelete.push(msg.msg_id);
+            deleteCount = 1;
         }
 
-        this._renderMessages();
+        var doLocalDelete = function() {
+            if (msg.role === 'assistant' && index > 0 && self.messages[index - 1].role === 'user') {
+                self.messages.splice(index - 1, 2);
+            } else if (msg.role === 'user' && index + 1 < self.messages.length && self.messages[index + 1].role === 'assistant') {
+                self.messages.splice(index, 2);
+            } else {
+                self.messages.splice(index, 1);
+            }
+            self._renderMessages();
+        };
+
+        if (idsToDelete.length > 0 && this.sessionId) {
+            apiFetch('/api/kb/session/' + this.sessionId + '/messages', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message_ids: idsToDelete })
+            }).catch(function(e) {
+                console.error('删除消息失败:', e);
+            }).then(function() {
+                doLocalDelete();
+            });
+        } else {
+            doLocalDelete();
+        }
     },
 
     retryMessage: function(index) {
@@ -903,7 +943,8 @@ var WikiKnowledge = {
             window.open(src.path, '_blank');
             return;
         }
-        var fileName = src.path.split('/').pop();
+        var detectPath = src.fb_path || src.path;
+        var fileName = detectPath.split('/').pop();
         var ext = fileName.split('.').pop().toLowerCase();
 
         if (ext === 'docx') {
@@ -1145,6 +1186,7 @@ var WikiKnowledge = {
                     self.messages.push({
                         role: m.role,
                         content: m.content,
+                        msg_id: m.id,
                         time: d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
                     });
                 }
