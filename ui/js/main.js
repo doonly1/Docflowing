@@ -10,9 +10,14 @@
         window.authToken = localStorage.getItem('docproc_token');
         window.authUsername = localStorage.getItem('docproc_username');
         window.authRole = localStorage.getItem('docproc_role') || 'viewer';
+        window.ownerToken = localStorage.getItem('docproc_owner_token');
 
         function getToken() {
-            return window.authToken;
+            return window.authToken || window.ownerToken;
+        }
+
+        function isOwnerMode() {
+            return !!window.ownerToken;
         }
 
         function setAuth(token, username, role) {
@@ -40,6 +45,35 @@
             updateSidebarUser(null);
         }
 
+        function clearOwnerAuth() {
+            window.ownerToken = null;
+            localStorage.removeItem('docproc_owner_token');
+        }
+
+        async function _refreshOwnerToken() {
+            if (!window.pywebview || !window.pywebview.api) return false;
+            try {
+                var chalResp = await fetch('/api/owner-challenge', { method: 'GET' });
+                var chalData = await chalResp.json();
+                if (!chalData.success || !chalData.challenge) return false;
+                var signature = await window.pywebview.api.sign(chalData.challenge);
+                var authResp = await fetch('/api/owner-auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ challenge: chalData.challenge, signature: signature })
+                });
+                var authData = await authResp.json();
+                if (authData.success && authData.owner_token) {
+                    window.ownerToken = authData.owner_token;
+                    localStorage.setItem('docproc_owner_token', authData.owner_token);
+                    return true;
+                }
+            } catch (e) {
+                console.warn('Owner token refresh failed:', e);
+            }
+            return false;
+        }
+
         function updateSidebarUser(username, role) {
             var el = document.getElementById('sidebar-user-icon');
             var nd = document.getElementById('sidebar-user-name-display');
@@ -58,18 +92,34 @@
         }
 
         function apiHeaders() {
-            return {
+            var h = {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + (window.authToken || '')
             };
+            if (window.ownerToken) {
+                h['X-Owner-Token'] = window.ownerToken;
+            }
+            return h;
         }
 
         async function apiFetch(url, options) {
             options = options || {};
             if (!options.headers) options.headers = {};
             options.headers['Authorization'] = 'Bearer ' + (window.authToken || '');
+            if (window.ownerToken) {
+                options.headers['X-Owner-Token'] = window.ownerToken;
+            }
             var resp = await fetch(url, options);
-            if (resp.status === 401) {
+            if (resp.status === 401 && window.ownerToken) {
+                // Owner token 过期，尝试刷新
+                if (await _refreshOwnerToken()) {
+                    options.headers['X-Owner-Token'] = window.ownerToken;
+                    resp = await fetch(url, options);
+                } else {
+                    clearOwnerAuth();
+                    throw new Error('Owner 认证过期，请重启应用');
+                }
+            } else if (resp.status === 401 && window.authToken) {
                 clearAuth();
                 throw new Error('登录已过期，请重新登录');
             }
@@ -1218,6 +1268,67 @@
         }
 
         document.addEventListener('DOMContentLoaded', async function() {
+            // 检测 pywebview 桌面模式
+            if (window.pywebview && window.pywebview.api) {
+                // 桌面版：通过 bridge 签名获取 Owner Token
+                if (!window.ownerToken) {
+                    var ok = await _refreshOwnerToken();
+                    if (!ok) {
+                        console.warn('Owner 认证失败，降级到浏览器模式');
+                        // 降级：尝试无 Token 访问（仅 localhost）
+                        try {
+                            var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' } });
+                            var meData = await meResp.json();
+                            if (meData.success) {
+                                document.getElementById('authOverlay').style.display = 'none';
+                                updateSidebarUser('本机用户', 'admin');
+                                initApp();
+                                _restoreLastView();
+                                return;
+                            }
+                        } catch(e) {}
+                        // 完全降级到登录页
+                        if (window.authToken) {
+                            try {
+                                var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + window.authToken } });
+                                var meData = await meResp.json();
+                                if (meData.success) {
+                                    window.authRole = meData.role || 'viewer';
+                                    try { localStorage.setItem('docproc_role', window.authRole); } catch(e) {}
+                                }
+                            } catch(e) {}
+                            document.getElementById('authOverlay').style.display = 'none';
+                            updateSidebarUser(window.authUsername, window.authRole);
+                            initApp();
+                            _restoreLastView();
+                        } else {
+                            document.getElementById('authOverlay').style.display = 'flex';
+                        }
+                        return;
+                    }
+                }
+                // Owner Token 就绪
+                document.getElementById('authOverlay').style.display = 'none';
+                updateSidebarUser('本机用户', 'admin');
+                initApp();
+                _restoreLastView();
+                return;
+            }
+
+            // 浏览器模式
+            try {
+                var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' } });
+                var meData = await meResp.json();
+                if (meData.success) {
+                    document.getElementById('authOverlay').style.display = 'none';
+                    updateSidebarUser('本机用户', 'admin');
+                    initApp();
+                    _restoreLastView();
+                    return;
+                }
+            } catch(e) {
+            }
+
             if (window.authToken) {
                 try {
                     var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + window.authToken } });
@@ -1229,63 +1340,62 @@
                 } catch(e) {
                     console.warn('Failed to fetch current user role:', e.message);
                 }
-
                 document.getElementById('authOverlay').style.display = 'none';
                 updateSidebarUser(window.authUsername, window.authRole);
                 initApp();
+                _restoreLastView();
+            } else {
+                document.getElementById('authOverlay').style.display = 'flex';
+            }
+        });
 
-                var savedView = localStorage.getItem('docproc_current_view');
-                if (savedView === 'fb') {
-                    var savedKbId = localStorage.getItem('docproc_current_fb_id');
-                    if (savedKbId) {
-                        if (typeof FileBase !== 'undefined') {
-                            FileBase.currentFbId = savedKbId;
-                            FileBase.fbCurrentPermission = localStorage.getItem('docproc_current_fb_permission') || 'view';
-                            FileBase.fbName = localStorage.getItem('docproc_current_fb_name') || '';
-                            FileBase.fbLocalPath = localStorage.getItem('docproc_current_fb_local_path') || '';
-                            FileBase.fbDisplayPath = localStorage.getItem('docproc_current_fb_display_path') || '';
-                            FileBase.fbCanEdit = FileBase.fbCurrentPermission === 'edit' || FileBase.fbCurrentPermission === 'manage';
-                            FileBase.fbCanManage = FileBase.fbCurrentPermission === 'manage';
-                            // 恢复上次浏览的子目录
-                            var savedSubdir = localStorage.getItem('docproc_current_subdir');
-                            if (savedSubdir) {
-                                FileBase.fbLocalCurrentSubdir = savedSubdir;
-                                // 重建面包屑路径
-                                var parts = savedSubdir.replace(/\\/g, '/').split('/');
-                                FileBase.currentPath = [
-                                    { id: savedKbId, name: FileBase.fbName || '未知文件库', type: 'kb' }
-                                ];
-                                for (var i = 0; i < parts.length; i++) {
-                                    if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
-                                }
+        function _restoreLastView() {
+            var savedView = localStorage.getItem('docproc_current_view');
+            if (savedView === 'fb') {
+                var savedKbId = localStorage.getItem('docproc_current_fb_id');
+                if (savedKbId) {
+                    if (typeof FileBase !== 'undefined') {
+                        FileBase.currentFbId = savedKbId;
+                        FileBase.fbCurrentPermission = localStorage.getItem('docproc_current_fb_permission') || 'view';
+                        FileBase.fbName = localStorage.getItem('docproc_current_fb_name') || '';
+                        FileBase.fbLocalPath = localStorage.getItem('docproc_current_fb_local_path') || '';
+                        FileBase.fbDisplayPath = localStorage.getItem('docproc_current_fb_display_path') || '';
+                        FileBase.fbCanEdit = FileBase.fbCurrentPermission === 'edit' || FileBase.fbCurrentPermission === 'manage';
+                        FileBase.fbCanManage = FileBase.fbCurrentPermission === 'manage';
+                        var savedSubdir = localStorage.getItem('docproc_current_subdir');
+                        if (savedSubdir) {
+                            FileBase.fbLocalCurrentSubdir = savedSubdir;
+                            var parts = savedSubdir.replace(/\\/g, '/').split('/');
+                            FileBase.currentPath = [
+                                { id: savedKbId, name: FileBase.fbName || '未知文件库', type: 'kb' }
+                            ];
+                            for (var i = 0; i < parts.length; i++) {
+                                if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
                             }
                         }
-                        document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
-                        var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');
-                        if (navItem) navItem.classList.add('active');
-                        var homeView = document.getElementById('home-view');
-                        var kbView = document.getElementById('content-view');
-                        if (homeView) homeView.style.display = 'none';
-                        if (kbView) kbView.style.display = '';
-                        if (typeof FileBase !== 'undefined') FileBase.init();
-                    } else {
-                        navigateTo('fb');
                     }
-                } else if (savedView === 'kb') {
                     document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
-                    var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
+                    var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');
                     if (navItem) navItem.classList.add('active');
                     var homeView = document.getElementById('home-view');
                     var kbView = document.getElementById('content-view');
                     if (homeView) homeView.style.display = 'none';
                     if (kbView) kbView.style.display = '';
-                    if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init();
+                    if (typeof FileBase !== 'undefined') FileBase.init();
+                } else {
+                    navigateTo('fb');
                 }
-            } else {
-                document.getElementById('authOverlay').style.display = 'flex';
-                document.getElementById('authUsername').focus();
+            } else if (savedView === 'kb') {
+                document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
+                var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
+                if (navItem) navItem.classList.add('active');
+                var homeView = document.getElementById('home-view');
+                var kbView = document.getElementById('content-view');
+                if (homeView) homeView.style.display = 'none';
+                if (kbView) kbView.style.display = '';
+                if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init();
             }
-        });
+        }
 
 function toggleSidebarMenu(e) {
     if (e) e.stopPropagation();
@@ -1348,12 +1458,12 @@ function navigateTo(view) {
         if (homeView) homeView.style.display = '';
         if (typeof FileBase !== 'undefined') FileBase.currentFbId = null;
     } else if (view === 'fb') {
-        if (!window.authToken) { alert('请先登录'); return; }
+        if (!isOwnerMode() && !window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
         if (typeof FileBase !== 'undefined') { FileBase.currentFbId = null; FileBase.init(); }
     } else if (view === 'kb') {
-        if (!window.authToken) { alert('请先登录'); return; }
+        if (!isOwnerMode() && !window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
         if (typeof WikiKnowledge !== 'undefined') { WikiKnowledge.init(); }

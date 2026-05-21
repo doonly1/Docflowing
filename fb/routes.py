@@ -7,6 +7,7 @@ import io
 import shutil
 import subprocess
 import json
+import requests
 
 from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context, g
 from functools import wraps
@@ -17,6 +18,42 @@ from fb.database import get_db, get_visible_fb_ids, get_user_role
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
+
+
+def _is_remote_fb(filebase_id):
+    """检查文件库是否为远程文件库（共享自其他节点）"""
+    from p2p.models import RemoteFilebaseStore
+    store = RemoteFilebaseStore()
+    info = store.get(filebase_id)
+    return info is not None, info
+
+
+_node_identity = None
+
+
+def _get_node_identity():
+    global _node_identity
+    if _node_identity is None:
+        from p2p.node import NodeIdentity
+        _node_identity = NodeIdentity()
+        _node_identity.load_or_create()
+    return _node_identity
+
+
+def _ensure_local_fb_route(f):
+    """装饰器：对路由函数包装，如果文件库是远程则自动代理"""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        fb_id = kwargs.get('filebase_id') or kwargs.get('fb_id', '')
+        if fb_id:
+            is_remote, remote_info = _is_remote_fb(fb_id)
+            if is_remote and remote_info:
+                g.is_remote_fb = True
+                g.remote_fb_info = remote_info
+            else:
+                g.is_remote_fb = False
+        return f(*args, **kwargs)
+    return wrapper
 
 
 def _check_fb_permission(filebase_id, user_id, required_level):
@@ -60,7 +97,9 @@ def _require_fb_permission(required_level):
 
             filebase_id = kwargs.get('filebase_id')
             if filebase_id and not _check_fb_permission(filebase_id, user_id, required_level):
-                return jsonify({'success': False, 'message': '权限不足'}), 403
+                is_remote, remote_info = _is_remote_fb(filebase_id)
+                if not is_remote:
+                    return jsonify({'success': False, 'message': '权限不足'}), 403
 
             return f(*args, **kwargs)
         return decorated
@@ -322,6 +361,25 @@ def list_fb():
             'permission': permission,
             'filebase_type': row['filebase_type'] or 'local',
             'local_path': local_path
+        })
+
+    # 追加远程文件库（共享自其他节点的文件库）
+    from p2p.models import RemoteFilebaseStore, TrustStore
+    remote_store = RemoteFilebaseStore()
+    trust_store = TrustStore()
+    for fb_id, fb_info in remote_store.get_all().items():
+        owner_node = trust_store.get_node_info(fb_info['owner_node_id'])
+        owner_name = owner_node['display_name'] if owner_node else fb_info['owner_node_id'][:8]
+        kbs.append({
+            'id': fb_id,
+            'name': f'[远程] {owner_name}/{fb_info["name"]}',
+            'owner_id': fb_info['owner_node_id'],
+            'owner_username': owner_name,
+            'display_path': f'远程节点: {fb_info["owner_addr"]}',
+            'created_at': fb_info.get('created_at', 0),
+            'permission': fb_info['permission'],
+            'filebase_type': 'remote',
+            'local_path': ''
         })
 
     return jsonify({'success': True, 'kbs': kbs})
@@ -807,7 +865,26 @@ def _resolve_local_path(db, filebase_id, subdir=''):
 @fb_bp.route('/<fb_id>/local-files', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def upload_local_files(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        subdir = request.args.get('subdir', '').strip()
+        uploaded = []
+        for key in request.files:
+            for f in request.files.getlist(key):
+                if not f.filename:
+                    continue
+                result = p2p_proxy.remote_upload_file(
+                    info['owner_addr'], node, filebase_id,
+                    subdir, f.filename, f.stream, 0
+                )
+                if result:
+                    uploaded.extend(result.get('uploaded', []))
+        return jsonify({'success': True, 'uploaded': uploaded})
+
     db = get_db()
     subdir = request.args.get('subdir', '').strip()
     local_path, target_dir = _resolve_local_path(db, filebase_id, subdir)
@@ -838,7 +915,16 @@ def upload_local_files(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/dir', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def create_local_dir(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_create_dir(info['owner_addr'], node, filebase_id, data.get('name', ''), data.get('parent', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -870,7 +956,16 @@ def create_local_dir(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/create', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def create_local_file(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_create_file(info['owner_addr'], node, filebase_id, data.get('name', ''), data.get('parent', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -910,11 +1005,26 @@ def create_local_file(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/content', methods=['PUT'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def save_local_file_content(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_save_file(
+            info['owner_addr'], node, filebase_id,
+            (data.get('path') or '').strip(),
+            data.get('content', ''),
+            data.get('client_mtime', 0)
+        )
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     data = request.get_json() or {}
     path = (data.get('path') or '').strip()
     content = data.get('content', '')
+    client_mtime = data.get('client_mtime', 0)
 
     if not path:
         return jsonify({'success': False, 'message': '未指定文件路径'})
@@ -922,6 +1032,17 @@ def save_local_file_content(filebase_id):
     local_path, target = _resolve_local_path(db, filebase_id, path)
     if local_path is None:
         return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    # mtime 乐观锁：检查文件是否被外部修改
+    if os.path.isfile(target) and client_mtime:
+        current_mtime = os.stat(target).st_mtime
+        if current_mtime != client_mtime:
+            return jsonify({
+                'success': False,
+                'conflict': True,
+                'message': '文件已被他人修改，是否覆盖？',
+                'server_mtime': current_mtime
+            }), 409
 
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, 'w', encoding='utf-8') as f:
@@ -933,7 +1054,16 @@ def save_local_file_content(filebase_id):
 @fb_bp.route('/<fb_id>/local-files', methods=['GET'])
 @login_required
 @_require_fb_permission('view')
+@_ensure_local_fb_route
 def list_local_files(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        subdir = request.args.get('subdir', '')
+        result = p2p_proxy.remote_list_files(info['owner_addr'], node, filebase_id, subdir)
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1082,7 +1212,17 @@ def _scan_categories_recursive(target_path, base_path):
 @fb_bp.route('/<fb_id>/local-files/download', methods=['GET'])
 @login_required
 @_require_fb_permission('view')
+@_ensure_local_fb_route
 def download_local_file(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        resp = p2p_proxy.remote_download_file(info['owner_addr'], node, filebase_id, request.args.get('path', ''))
+        if resp:
+            return Response(resp.iter_content(chunk_size=8192), content_type=resp.headers.get('Content-Type', 'application/octet-stream'))
+        return jsonify({'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1251,7 +1391,18 @@ TOOL_EXTENSIONS = {
 @fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def run_tool_on_fb(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        resp = p2p_proxy.remote_run_tool(info['owner_addr'], node, filebase_id, data.get('tool'), data.get('files', []), data.get('subdir', ''))
+        if resp:
+            return Response(resp.iter_content(chunk_size=4096), mimetype='text/event-stream', content_type='text/event-stream')
+        return jsonify({'success': False, 'message': '远程节点不可用'})
+
     data = request.get_json()
     tool = data.get('tool')
     subdir = data.get('subdir', '').strip()
@@ -1338,7 +1489,15 @@ def run_tool_on_fb(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/content', methods=['GET'])
 @login_required
 @_require_fb_permission('view')
+@_ensure_local_fb_route
 def get_local_file_content(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        result = p2p_proxy.remote_get_file_content(info['owner_addr'], node, filebase_id, request.args.get('path', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1398,7 +1557,15 @@ SUPPORTED_PREVIEW_EXTS = {'.docx', '.pptx', '.ppt', '.xlsx', '.xls'}
 @fb_bp.route('/<fb_id>/local-files/preview', methods=['GET'])
 @login_required
 @_require_fb_permission('view')
+@_ensure_local_fb_route
 def file_preview(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        result = p2p_proxy.remote_get_file_content(info['owner_addr'], node, filebase_id, request.args.get('path', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1470,7 +1637,19 @@ def batch_download_local(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/replace', methods=['PUT'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def replace_local_file(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        path = request.args.get('path', '').strip()
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'message': '请选择文件'})
+        upload_file = request.files['file']
+        result = p2p_proxy.remote_replace_file(info['owner_addr'], node, filebase_id, path, upload_file.filename, upload_file.stream)
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1511,7 +1690,16 @@ def replace_local_file(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/move', methods=['PUT'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def move_local_items(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_move_items(info['owner_addr'], node, filebase_id, data.get('sources', []), data.get('dest', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1564,7 +1752,15 @@ def move_local_items(filebase_id):
 @fb_bp.route('/<fb_id>/local-files', methods=['DELETE'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def delete_local_items(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        result = p2p_proxy.remote_delete_items(info['owner_addr'], node, filebase_id, (request.get_json() or {}).get('paths', []))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1603,7 +1799,16 @@ def delete_local_items(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/rename', methods=['PUT'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def rename_local_item(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_rename_item(info['owner_addr'], node, filebase_id, data.get('path', ''), data.get('new_name', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1645,7 +1850,16 @@ def rename_local_item(filebase_id):
 @fb_bp.route('/<fb_id>/local-files/copy', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
+@_ensure_local_fb_route
 def copy_local_items(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_copy_items(info['owner_addr'], node, filebase_id, data.get('sources', []), data.get('dest', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:

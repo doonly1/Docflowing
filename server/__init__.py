@@ -18,8 +18,17 @@ from server.workspace import workspace_bp, MAX_SESSION_SIZE
 from server.settings import settings_bp
 from server.runner import runner_bp
 
+from p2p.node import NodeIdentity
+from p2p.discovery import NodeDiscovery
+
 setup_logging()
 logger = get_logger(__name__)
+
+_p2p_discovery: NodeDiscovery | None = None
+
+
+def get_p2p_discovery() -> NodeDiscovery | None:
+    return _p2p_discovery
 
 
 def create_app():
@@ -81,6 +90,10 @@ def create_app():
     app.register_blueprint(fb_bp)
     app.register_blueprint(wiki_bp)
 
+    # P2P 蓝图
+    from p2p.api import p2p_bp
+    app.register_blueprint(p2p_bp)
+
     # 确保管理员用户存在（无妨多次调用）
     ensure_admin_user()
 
@@ -92,6 +105,25 @@ def create_app():
         logger.info("FB Sync worker started")
     except Exception as e:
         logger.warning(f"Failed to start FB sync worker: {e}")
+
+    # 初始化 P2P 子系统
+    try:
+        global _p2p_discovery
+        node_identity = NodeIdentity()
+        node_identity.load_or_create()
+        app.config['P2P_NODE_ID'] = node_identity.node_id
+        app.config['P2P_NODE_NAME'] = node_identity.display_name
+
+        _p2p_discovery = NodeDiscovery(
+            node_id=node_identity.node_id,
+            display_name=node_identity.display_name,
+            port=node_identity.port,
+            public_key_b64=node_identity.get_public_key_b64()
+        )
+        _p2p_discovery.start()
+        logger.info("P2P subsystem initialized: %s (%s)", node_identity.display_name, node_identity.node_id[:8])
+    except Exception as e:
+        logger.warning("Failed to initialize P2P subsystem: %s", e)
 
     logger.info("App created successfully")
 

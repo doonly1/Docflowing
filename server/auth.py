@@ -11,6 +11,7 @@ import hashlib
 import secrets
 import time
 import shutil
+import threading
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, g
@@ -19,6 +20,15 @@ from logging_config import get_logger
 logger = get_logger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
+
+# Owner 认证令牌存储（内存中）
+_owner_tokens: dict = {}
+_owner_token_lock = threading.Lock()
+_owner_token_ttl = 3600  # 1 小时自动过期
+
+_challenges: dict = {}
+_challenge_lock = threading.Lock()
+_challenge_ttl = 90  # challenge 90 秒有效
 
 SECRET_KEY = os.environ.get('DOCPROC_SECRET', secrets.token_hex(32))
 
@@ -124,15 +134,37 @@ def login_required(f):
         if not token:
             token = request.args.get('token') or request.args.get('client_id')
 
-        if not token:
-            return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
+        if token:
+            user_id = _get_user_id_from_token(token)
+            if user_id:
+                g.user_id = user_id
+                return f(*args, **kwargs)
 
-        user_id = _get_user_id_from_token(token)
-        if not user_id:
-            return jsonify({'success': False, 'message': '登录已过期，请重新登录'}), 401
+        # 检查 Owner Token（pywebview 桌面版签名认证）
+        owner_token = request.headers.get('X-Owner-Token', '')
+        if owner_token:
+            with _owner_token_lock:
+                expiry = _owner_tokens.get(owner_token, 0)
+                if expiry > time.time():
+                    from p2p.node import NodeIdentity
+                    node = NodeIdentity()
+                    node.load_or_create()
+                    g.user_id = f'p2p_{node.node_id}'
+                    return f(*args, **kwargs)
 
-        g.user_id = user_id
-        return f(*args, **kwargs)
+        # P2P 节点模式（仅限本机请求，浏览器/pywebview 兜底）
+        remote_ip = request.remote_addr or ''
+        if remote_ip in ('127.0.0.1', '::1', 'localhost'):
+            try:
+                from p2p.node import NodeIdentity
+                node = NodeIdentity()
+                node.load_or_create()
+                g.user_id = f'p2p_{node.node_id}'
+                return f(*args, **kwargs)
+            except Exception:
+                pass
+
+        return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
     return decorated
 
 
@@ -286,6 +318,76 @@ def api_logout():
         _save_json(_get_tokens_path(), tokens)
 
     return jsonify({'success': True, 'message': '已退出登录'})
+
+# ==================== Owner 认证（pywebview 桌面版） ====================
+
+@auth_bp.route('/api/owner-challenge', methods=['GET'])
+def api_owner_challenge():
+    """生成一个签名挑战（带过期时间）"""
+    nonce = secrets.token_hex(16)
+    ts = int(time.time())
+    challenge = f'{nonce}:{ts}'
+    with _challenge_lock:
+        _challenges[nonce] = ts
+    return jsonify({'success': True, 'challenge': challenge})
+
+
+@auth_bp.route('/api/owner-auth', methods=['POST'])
+def api_owner_auth():
+    """验证签名挑战，发放 Owner Token"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': '请求数据不能为空'})
+
+    challenge = (data.get('challenge') or '').strip()
+    signature = (data.get('signature') or '').strip()
+
+    if not challenge or not signature:
+        return jsonify({'success': False, 'message': '缺少 challenge 或 signature'}), 400
+
+    parts = challenge.split(':')
+    if len(parts) != 2:
+        return jsonify({'success': False, 'message': 'challenge 格式无效'}), 400
+
+    nonce = parts[0]
+    try:
+        ts = int(parts[1])
+    except ValueError:
+        return jsonify({'success': False, 'message': 'challenge 格式无效'}), 400
+
+    # 检查 nonce 是否存在（防重放）
+    with _challenge_lock:
+        stored_ts = _challenges.pop(nonce, None)
+    if stored_ts is None:
+        return jsonify({'success': False, 'message': 'challenge 已过期或已使用'}), 400
+    if time.time() - stored_ts > _challenge_ttl:
+        return jsonify({'success': False, 'message': 'challenge 已过期'}), 400
+
+    # 用节点自身公钥验签
+    try:
+        from p2p.node import NodeIdentity, verify_signature
+        node = NodeIdentity()
+        node.load_or_create()
+        pub_key = node.get_public_key_b64()
+    except Exception:
+        return jsonify({'success': False, 'message': '节点身份加载失败'}), 500
+
+    if not verify_signature(pub_key, challenge.encode('utf-8'), signature):
+        return jsonify({'success': False, 'message': '签名验证失败'}), 403
+
+    # 签发 Owner Token
+    owner_token = secrets.token_hex(32)
+    expiry = time.time() + _owner_token_ttl
+    with _owner_token_lock:
+        _owner_tokens[owner_token] = expiry
+
+    return jsonify({
+        'success': True,
+        'owner_token': owner_token,
+        'expires_in': _owner_token_ttl,
+        'node_id': node.node_id,
+        'display_name': node.display_name
+    })
 
 # ==================== 用户管理 API（Admin） ====================
 
