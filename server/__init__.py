@@ -1,7 +1,8 @@
-"""DocProc 后端服务 —— create_app 工厂入口"""
+"""DocFlow 后端服务 —— create_app 工厂入口"""
 
 import os
 import sys
+import threading
 import traceback
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,7 +14,7 @@ from flask_cors import CORS
 
 from logging_config import setup_logging, get_logger
 from server.middleware import setup_middleware
-from server.auth import auth_bp, ensure_admin_user
+from server.auth import auth_bp
 from server.workspace import workspace_bp, MAX_SESSION_SIZE
 from server.settings import settings_bp
 from server.runner import runner_bp
@@ -24,7 +25,12 @@ from p2p.discovery import NodeDiscovery
 setup_logging()
 logger = get_logger(__name__)
 
+_node_identity: NodeIdentity | None = None
 _p2p_discovery: NodeDiscovery | None = None
+
+
+def get_node_identity() -> NodeIdentity | None:
+    return _node_identity
 
 
 def get_p2p_discovery() -> NodeDiscovery | None:
@@ -94,9 +100,6 @@ def create_app():
     from p2p.api import p2p_bp
     app.register_blueprint(p2p_bp)
 
-    # 确保管理员用户存在（无妨多次调用）
-    ensure_admin_user()
-
     # 启动 FB 同步后台线程
     try:
         from kb.sync_worker import get_sync_worker
@@ -106,24 +109,36 @@ def create_app():
     except Exception as e:
         logger.warning(f"Failed to start FB sync worker: {e}")
 
-    # 初始化 P2P 子系统
+    # 预加载节点身份（轻量，不阻塞）
+    global _node_identity, _p2p_discovery
     try:
-        global _p2p_discovery
-        node_identity = NodeIdentity()
-        node_identity.load_or_create()
-        app.config['P2P_NODE_ID'] = node_identity.node_id
-        app.config['P2P_NODE_NAME'] = node_identity.display_name
-
-        _p2p_discovery = NodeDiscovery(
-            node_id=node_identity.node_id,
-            display_name=node_identity.display_name,
-            port=node_identity.port,
-            public_key_b64=node_identity.get_public_key_b64()
-        )
-        _p2p_discovery.start()
-        logger.info("P2P subsystem initialized: %s (%s)", node_identity.display_name, node_identity.node_id[:8])
+        _node_identity = NodeIdentity()
+        _node_identity.load_or_create()
+        app.config['P2P_NODE_ID'] = _node_identity.node_id
+        app.config['P2P_NODE_NAME'] = _node_identity.display_name
+        logger.info("Node identity loaded: %s (%s)", _node_identity.display_name, _node_identity.node_id[:8])
     except Exception as e:
-        logger.warning("Failed to initialize P2P subsystem: %s", e)
+        logger.warning("Failed to load node identity: %s", e)
+
+    # 后台启动 P2P 发现（mDNS 注册不阻塞主线程）
+    def _start_p2p():
+        try:
+            global _p2p_discovery
+            if not _node_identity:
+                return
+            _p2p_discovery = NodeDiscovery(
+                node_id=_node_identity.node_id,
+                display_name=_node_identity.display_name,
+                port=_node_identity.port,
+                public_key_b64=_node_identity.get_public_key_b64()
+            )
+            _p2p_discovery.start()
+            logger.info("P2P discovery started")
+        except Exception as e:
+            logger.warning("Failed to start P2P discovery: %s", e)
+
+    t = threading.Thread(target=_start_p2p, daemon=True, name="P2PInit")
+    t.start()
 
     logger.info("App created successfully")
 

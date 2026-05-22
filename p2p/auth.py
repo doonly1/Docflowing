@@ -1,3 +1,5 @@
+import hashlib
+
 from functools import wraps
 from flask import request, jsonify, g
 
@@ -25,9 +27,16 @@ def p2p_auth_required(f):
         if not pub_key:
             return jsonify({'success': False, 'message': '未信任的节点'}), 403
 
-        sign_data = f'{request.method}:{request.path}:'.encode() + request.get_data()
+        # 签名覆盖 method:path:body_hash，防止请求体被篡改
+        body = request.get_data()
+        body_hash = hashlib.sha256(body).hexdigest() if body else ''
+        sign_data = f'{request.method}:{request.path}:{body_hash}'.encode()
+
         if not verify_signature(pub_key, sign_data, sig_b64):
-            return jsonify({'success': False, 'message': '签名验证失败'}), 403
+            # 向后兼容：旧版签名不包含 body_hash
+            old_sign_data = f'{request.method}:{request.path}'.encode()
+            if not verify_signature(pub_key, old_sign_data, sig_b64):
+                return jsonify({'success': False, 'message': '签名验证失败'}), 403
 
         g.remote_node_id = node_id
         return f(*args, **kwargs)

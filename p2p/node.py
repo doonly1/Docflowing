@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 def _get_config_dir():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(root, 'config')
+    return os.path.join(root, 'workspaces', 'config')
 
 
 def _get_config_path():

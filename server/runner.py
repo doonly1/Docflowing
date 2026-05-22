@@ -7,19 +7,10 @@ import subprocess
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
-from server.workspace import _get_workspace_dir, _get_workspace_workdir, _update_workspace_activity
+from server.workspace import _get_workspace_dir
+from tools.tool_defs import TOOL_SCRIPTS
 
 runner_bp = Blueprint('runner', __name__)
-
-# 工具脚本映射
-TOOL_SCRIPTS = {
-    'to_docx': os.path.join('tools', 'to_docx.py'),
-    'to_index': os.path.join('tools', 'to_index.py'),
-    'to_compare': os.path.join('tools', 'to_compare.py'),
-    'to_pdf': os.path.join('tools', 'to_pdf.py'),
-    'to_pageNum': os.path.join('tools', 'to_pageNum.py'),
-    'to_redhead': os.path.join('tools', 'to_redhead.py')
-}
 
 
 @runner_bp.route('/run_tool_with_config', methods=['POST'])
@@ -28,25 +19,16 @@ def api_run_tool_with_config():
     data = request.get_json()
 
     tool = data.get('tool')
-    workdir = data.get('workdir')
+    directory = data.get('directory')
     files = data.get('files')
-    token = data.get('token') or data.get('client_id')
 
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
 
-    if workdir and not os.path.isabs(workdir):
-        ws_root = _get_workspace_dir(g.user_id)
-        workdir = os.path.normpath(os.path.join(ws_root, workdir))
-
-    if not workdir and (token or g.user_id):
-        _update_workspace_activity(g.user_id)
-        workdir = _get_workspace_workdir(g.user_id)
-
-    if not workdir:
-        return jsonify({'success': False, 'message': '未指定工作目录'})
-    if not os.path.isdir(workdir):
-        return jsonify({'success': False, 'message': f'目录不存在: {workdir}'})
+    if not directory:
+        return jsonify({'success': False, 'message': '未指定目录'})
+    if not os.path.isdir(directory):
+        return jsonify({'success': False, 'message': f'目录不存在: {directory}'})
 
     if tool not in TOOL_SCRIPTS:
         return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
@@ -71,10 +53,10 @@ def api_run_tool_with_config():
 
             if files:
                 for f in files:
-                    full_path = os.path.join(workdir, f) if not os.path.isabs(f) else f
+                    full_path = os.path.join(directory, f) if not os.path.isabs(f) else f
                     cmd_args.append(full_path)
             else:
-                cmd_args.append(workdir)
+                cmd_args.append(directory)
 
             process = subprocess.Popen(
                 cmd_args,
@@ -82,7 +64,7 @@ def api_run_tool_with_config():
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                cwd=workdir,
+                cwd=directory,
                 env=env
             )
 

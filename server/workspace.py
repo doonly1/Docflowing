@@ -6,7 +6,8 @@ import shutil
 import tempfile
 
 from flask import Blueprint, request, jsonify, Response, g
-from server.auth import login_required, update_user_activity
+from server.auth import login_required
+from tools.tool_defs import get_tool_extensions
 
 workspace_bp = Blueprint('workspace', __name__)
 
@@ -18,36 +19,18 @@ MAX_FILES_PER_UPLOAD = 900                # 单次最多上传 900 个文件
 
 # ==================== Workspace 路径 / 活动 ====================
 
-def _get_workspace_dir(user_id):
+def _get_workspace_dir(user_id=None):
     ws_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'workspaces', user_id)
+                          'workspaces')
     return ws_dir
-
-def _get_workspace_workdir(user_id):
-    workdir = os.path.join(_get_workspace_dir(user_id), 'workdir')
-    os.makedirs(workdir, exist_ok=True)
-    return workdir
 
 def _get_workspace_resources_dir(user_id):
     res_dir = os.path.join(_get_workspace_dir(user_id), 'resources', 'stamps')
     os.makedirs(res_dir, exist_ok=True)
     return res_dir
 
-def _update_workspace_activity(user_id):
-    """记录用户最后访问时间"""
-    update_user_activity(user_id)
-
-def _get_tool_extensions(tool):
-    """获取工具支持的文件扩展名"""
-    ext_map = {
-        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
-        'to_compare': ('.docx', '.doc'),
-        'to_pdf': ('.docx', '.doc'),
-        'to_pageNum': ('.docx', '.doc'),
-        'to_redhead': ('.docx',)
-    }
-    return ext_map.get(tool, ('.docx',))
+# 工具扩展名由 tools/tool_defs.get_tool_extensions() 统一管理
+# 旧的 _get_tool_extensions 函数已移至 tools/tool_defs.py
 
 # ==================== 文件列表 ====================
 
@@ -55,27 +38,21 @@ def _get_tool_extensions(tool):
 @login_required
 def api_list_files():
     data = request.get_json()
-    workdir = data.get('workdir')
+    directory = data.get('directory')
     tool = data.get('tool', 'to_docx')
-    token = data.get('token') or data.get('client_id')
     show_all = data.get('show_all', False)
 
-    if workdir and not os.path.isabs(workdir):
-        ws_root = _get_workspace_dir(g.user_id)
-        workdir = os.path.join(ws_root, workdir)
-        workdir = os.path.normpath(workdir)
+    if not directory or not os.path.isdir(directory):
+        return jsonify({'success': False, 'message': '目录不存在或无效'})
 
-    if not workdir or not os.path.isdir(workdir):
-        return jsonify({'success': False, 'message': '目录不存在'})
-
-    extensions = _get_tool_extensions(tool)
+    extensions = get_tool_extensions(tool)
 
     try:
         files = []
-        for f in os.listdir(workdir):
+        for f in os.listdir(directory):
             if f.startswith('~$'):
                 continue
-            file_path = os.path.join(workdir, f)
+            file_path = os.path.join(directory, f)
             if os.path.isfile(file_path):
                 if show_all or f.lower().endswith(extensions):
                     files.append({
@@ -92,16 +69,16 @@ def api_list_files():
 def api_list_dir():
     """列出目录内容的API"""
     data = request.get_json()
-    workdir = data.get('workdir')
+    directory = data.get('directory')
 
-    if not workdir or not os.path.isdir(workdir):
-        return jsonify({'success': False, 'message': '目录不存在'})
+    if not directory or not os.path.isdir(directory):
+        return jsonify({'success': False, 'message': '目录不存在或无效'})
 
     try:
         files = []
-        for f in os.listdir(workdir):
+        for f in os.listdir(directory):
             if not f.startswith('~$'):
-                file_path = os.path.join(workdir, f)
+                file_path = os.path.join(directory, f)
                 files.append({
                     'name': f,
                     'is_dir': os.path.isdir(file_path)
@@ -115,34 +92,22 @@ def api_list_dir():
 @workspace_bp.route('/upload_files', methods=['POST', 'OPTIONS'])
 @login_required
 def api_upload_files():
-    _update_workspace_activity(g.user_id)
-    workdir = _get_workspace_workdir(g.user_id)
+    # multipart/form-data 时 request.get_json() 为 None，需从 form 中获取
+    data = request.get_json() or {}
+    tool = request.form.get('tool') or data.get('tool', 'to_docx')
+    extensions = get_tool_extensions(tool)
 
-    tool = request.form.get('tool', 'to_docx')
-    extensions = _get_tool_extensions(tool)
+    directory = request.form.get('directory') or data.get('directory')
+    if not directory:
+        return jsonify({'success': False, 'message': '请指定上传目录'}), 400
+    
+    os.makedirs(directory, exist_ok=True)
 
     saved_files = []
-    uploaded_files = request.files.getlist('files')
+    uploaded_files = request.files.getlist('files') if request.files else []
 
     if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
         return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
-
-    workspace_used = 0
-    if os.path.exists(workdir):
-        for f in os.listdir(workdir):
-            fpath = os.path.join(workdir, f)
-            if os.path.isfile(fpath):
-                workspace_used += os.path.getsize(fpath)
-
-    # 提取文件夹名称（从第一个文件的相对路径中获取）
-    folder_name = None
-    for file in uploaded_files:
-        if file.filename and '/' in file.filename:
-            folder_name = file.filename.split('/')[0]
-            break
-
-    save_root = os.path.join(workdir, folder_name) if folder_name else workdir
-    os.makedirs(save_root, exist_ok=True)
 
     for file in uploaded_files:
         if not file.filename:
@@ -159,37 +124,32 @@ def api_upload_files():
             return jsonify({'success': False, 'message':
                 f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制'})
 
-        if workspace_used + file_size > MAX_SESSION_SIZE:
-            return jsonify({'success': False, 'message':
-                f'工作区总空间超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'})
-
         filename = os.path.basename(file.filename)
-        save_path = os.path.join(save_root, filename)
+        save_path = os.path.join(directory, filename)
         with open(save_path, 'wb') as f:
             f.write(file_content)
-        workspace_used += file_size
         saved_files.append(filename)
 
     return jsonify({
         'success': True,
         'files': saved_files,
-        'file_count': len(saved_files)
+        'file_count': len(saved_files),
+        'directory': directory
     })
 
 @workspace_bp.route('/check_results', methods=['POST'])
 @login_required
 def api_check_results():
     data = request.get_json()
-    _update_workspace_activity(g.user_id)
-    workdir = _get_workspace_workdir(g.user_id)
+    directory = data.get('directory')
 
-    if not os.path.exists(workdir):
+    if not directory or not os.path.isdir(directory):
         return jsonify({'success': True, 'files': [], 'count': 0})
 
     try:
         result_files = []
-        for f in os.listdir(workdir):
-            file_path = os.path.join(workdir, f)
+        for f in os.listdir(directory):
+            file_path = os.path.join(directory, f)
             if os.path.isfile(file_path) and not f.startswith('~$'):
                 result_files.append({
                     'name': f,
@@ -211,25 +171,22 @@ def api_download_results():
 
     data = request.get_json()
     folder_name = data.get('folder_name', 'results')
-    workdir_param = data.get('workdir')
+    directory = data.get('directory')
 
-    if workdir_param and not os.path.isabs(workdir_param):
-        ws_root = _get_workspace_dir(g.user_id)
-        workdir = os.path.normpath(os.path.join(ws_root, workdir_param))
-    else:
-        _update_workspace_activity(g.user_id)
-        workdir = _get_workspace_workdir(g.user_id)
-
-    if not os.path.exists(workdir) or not os.listdir(workdir):
-        return jsonify({'success': False, 'message': '无文件可供下载'})
+    if not directory or not os.path.isdir(directory):
+        return jsonify({'success': False, 'message': '目录不存在'})
 
     try:
+        files_in_dir = [f for f in os.listdir(directory) 
+                       if os.path.isfile(os.path.join(directory, f)) and not f.startswith('~$')]
+        if not files_in_dir:
+            return jsonify({'success': False, 'message': '目录中无文件可供下载'})
+
         memory_file = io.BytesIO()
         with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for f in os.listdir(workdir):
-                file_path = os.path.join(workdir, f)
-                if os.path.isfile(file_path) and not f.startswith('~$'):
-                    zf.write(file_path, f)
+            for f in files_in_dir:
+                file_path = os.path.join(directory, f)
+                zf.write(file_path, f)
 
         memory_file.seek(0)
         download_name = f"{folder_name}_处理结果.zip"
@@ -247,20 +204,14 @@ def api_download_results():
 @login_required
 def api_clear_workspace():
     data = request.get_json() or {}
-    workdir_param = data.get('workdir')
+    directory = data.get('directory')
 
-    if workdir_param and not os.path.isabs(workdir_param):
-        ws_root = _get_workspace_dir(g.user_id)
-        workdir = os.path.normpath(os.path.join(ws_root, workdir_param))
-    else:
-        workdir = _get_workspace_workdir(g.user_id)
-
-    if not os.path.exists(workdir):
-        return jsonify({'success': True, 'message': '目录为空'})
+    if not directory or not os.path.isdir(directory):
+        return jsonify({'success': True, 'message': '目录不存在或无效'})
 
     try:
-        for f in os.listdir(workdir):
-            fpath = os.path.join(workdir, f)
+        for f in os.listdir(directory):
+            fpath = os.path.join(directory, f)
             try:
                 if os.path.isfile(fpath):
                     os.remove(fpath)
@@ -280,12 +231,13 @@ def api_build_index_from_metadata():
     data = request.get_json()
     metadata_list = data.get('metadata', [])
     folder_name = data.get('folder_name', 'unknown')
+    output_dir = data.get('directory')
 
     if not metadata_list:
         return jsonify({'success': False, 'message': '没有文件元信息'})
 
-    _update_workspace_activity(g.user_id)
-    output_dir = _get_workspace_workdir(g.user_id)
+    if not output_dir:
+        return jsonify({'success': False, 'message': '请指定输出目录'})
 
     try:
         output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)

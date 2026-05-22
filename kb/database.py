@@ -58,7 +58,7 @@ _local = threading.local()
 
 def _get_user_kb_dir(user_id: str) -> str:
     base = _get_workspace_dir(user_id)
-    kb_dir = os.path.join(base, 'kb')
+    kb_dir = os.path.join(base, 'data', 'kb')
     os.makedirs(kb_dir, exist_ok=True)
     return kb_dir
 
@@ -108,6 +108,8 @@ def init_db(conn):
 
 
 def get_db(user_id=None):
+    if not user_id:
+        raise ValueError("user_id is required to open database")
     if not hasattr(_local, 'conn') or _local.conn is None:
         db_path = get_db_path(user_id)
         os.makedirs(os.path.dirname(db_path), exist_ok=True)

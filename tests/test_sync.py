@@ -7,7 +7,11 @@ FB 同步功能测试脚本
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 配置路径（与 server/__init__.py 保持一致）
+_tests_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(_tests_dir)
+sys.path.insert(0, os.path.join(project_root, 'tools'))
+sys.path.insert(0, project_root)
 
 
 def test_converters():
@@ -114,9 +118,9 @@ def test_database_migration():
     print(f"  filebases 表字段: {columns}")
 
     if 'is_synced_to_kb' in columns:
-        print("  ✓ is_synced_to_kb 字段已存在")
+        print("  [OK] is_synced_to_kb 字段已存在")
     else:
-        print("  ✗ is_synced_to_kb 字段不存在")
+        print("  [MISSING] is_synced_to_kb 字段不存在")
 
     print()
 
@@ -124,7 +128,7 @@ def test_database_migration():
 def main():
     """主测试函数"""
     print()
-    print("🚀 FB 同步功能测试")
+    print("[FB Sync] FB 同步功能测试")
     print()
 
     try:
@@ -134,23 +138,20 @@ def main():
         test_database_migration()
 
         print("=" * 50)
-        print("✅ 所有测试通过！")
+        print("[PASS] 所有测试通过！")
         print("=" * 50)
         print()
         print("同步功能已成功实现！")
-        print()
-        print("使用说明：")
-        print("1. 在文件库卡片上右键点击")
-        print("2. 选择 '同步到 KB' 启用同步")
-        print("3. 选择 '立即同步' 手动触发同步")
-        print("4. 同步状态会显示在卡片底部")
+        print("  转换后端: markitdown（docx/pdf/xlsx/pptx/md/txt）")
+        print("  存储方式: FTS5 搜索索引（不落盘 .md 文件）")
+        print("  状态管理: SQLite filebase_sync_states 表")
         print()
 
         return 0
 
     except Exception as e:
         print("=" * 50)
-        print("❌ 测试失败")
+        print("[FAIL] 测试失败")
         print("=" * 50)
         print(f"错误: {e}")
         import traceback

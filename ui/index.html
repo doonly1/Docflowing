@@ -58,50 +58,6 @@
             background: #f5f5f5;
         }
 
-        .sidebar-avatar {
-            width: 26px;
-            height: 26px;
-            border-radius: 50%;
-            background: #e94560;
-            color: #fff;
-            font-size: 13px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
-        }
-
-        .sidebar-username {
-            font-size: 10px;
-            color: #999;
-            max-width: 52px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            line-height: 1;
-        }
-
-        .sidebar-user-popup {
-            position: fixed;
-            left: 64px;
-            top: 12px;
-            background: #fff;
-            border-radius: 8px;
-            padding: 4px 0;
-            z-index: 260;
-            min-width: 130px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-            border: 1px solid #e8e8e8;
-        }
-
-        .sidebar-user-name {
-            padding: 8px 14px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #333;
-        }
-
         .sidebar-section {
             padding: 8px 0 0 0;
         }
@@ -605,94 +561,6 @@
             line-height: 1.3;
         }
 
-        .auth-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #f0f2f5 0%, #e4e8ed 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 3000;
-        }
-
-        .auth-card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 30px;
-            width: 90%;
-            max-width: 380px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.1);
-            border: 1px solid rgba(0,0,0,0.06);
-        }
-
-        .auth-card h2 {
-            text-align: center;
-            color: #1a1a2e;
-            font-size: 1.3rem;
-            margin-bottom: 20px;
-        }
-
-        .auth-card .form-group {
-            margin-bottom: 14px;
-        }
-
-        .auth-card label {
-            display: block;
-            font-size: 13px;
-            color: #555;
-            margin-bottom: 6px;
-            font-weight: 500;
-        }
-
-        .auth-card input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        .auth-card input:focus {
-            outline: none;
-            border-color: #e94560;
-        }
-
-        .auth-card .btn {
-            margin-top: 8px;
-        }
-
-        .auth-switch {
-            text-align: center;
-            margin-top: 14px;
-            font-size: 13px;
-            color: #666;
-        }
-
-        .auth-switch a {
-            color: #e94560;
-            cursor: pointer;
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        .auth-switch a:hover {
-            text-decoration: underline;
-        }
-
-        .auth-error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            margin-bottom: 12px;
-            display: none;
-        }
-
         .user-info {
             font-size: 13px;
             color: #5a6a7a;
@@ -803,80 +671,36 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
 </head>
 <body>
-    <!-- 登录/注册遮罩 -->
-    <div class="auth-overlay" id="authOverlay">
-        <div class="auth-card">
-            <h2 id="authTitle">登录</h2>
-            <div class="auth-error" id="authError"></div>
-            <div class="form-group">
-                <label for="authUsername">用户名</label>
-                <input type="text" id="authUsername" placeholder="请输入用户名" autocomplete="username">
-            </div>
-            <div class="form-group">
-                <label for="authPassword">密码</label>
-                <input type="password" id="authPassword" placeholder="请输入密码" autocomplete="current-password">
-            </div>
-            <button class="btn" id="authSubmitBtn" onclick="handleAuth()">登录</button>
-            <div class="auth-switch">
-                <span id="authSwitchText">没有账号？</span>
-                <a id="authSwitchLink" onclick="toggleAuthMode()">立即注册</a>
-            </div>
-        </div>
-    </div>
-
     <!-- 关于弹窗 overlay -->
     <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
 
-    <!-- 修改密码弹窗 -->
-    <div id="changePwdOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;">
-        <div class="kb-modal" style="max-width: 420px;">
-            <div class="kb-modal-header">
-                <span class="kb-modal-title">🔑 修改密码</span>
-                <span class="kb-modal-close" onclick="hideChangePassword()">&times;</span>
-            </div>
-            <div class="kb-modal-body" style="padding-top: 16px;">
-                <div class="kb-form-group" style="margin-bottom: 14px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">原密码</label>
-                    <input type="password" id="changePwd-old" style="width:100%;" placeholder="请输入原密码">
-                </div>
-                <div class="kb-form-group" style="margin-bottom: 14px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">新密码</label>
-                    <input type="password" id="changePwd-new" style="width:100%;" placeholder="至少 6 个字符">
-                </div>
-                <div class="kb-form-group">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;color:#555;">确认密码</label>
-                    <input type="password" id="changePwd-confirm" style="width:100%;" placeholder="再次输入新密码">
-                </div>
-                <div id="changePwd-error" style="margin-top:12px;color:#e94560;font-size:13px;display:none;"></div>
-            </div>
-            <div class="kb-modal-footer">
-                <button class="kb-btn kb-btn-secondary" onclick="hideChangePassword()">取消</button>
-                <button class="kb-btn kb-btn-primary" onclick="doChangePassword()">修改</button>
-            </div>
-        </div>
-    </div>
-
     <nav class="sidebar">
-        <div class="sidebar-brand" id="sidebar-user-icon" title="用户菜单" onclick="toggleUserMenu(event)">👤</div>
-        <div class="sidebar-user-popup" id="sidebar-user-popup" style="display:none">
-            <div class="sidebar-user-name" id="sidebar-user-name-display">未登录</div>
-            <div class="sidebar-popup-divider"></div>
-            <div class="sidebar-nav-item sidebar-popup-item" id="sidebar-user-manage" style="display:none" onclick="toggleUserManage()">👥 用户管理</div>
-            <div class="sidebar-nav-item sidebar-popup-item" onclick="showChangePassword();toggleUserMenu()">🔑 修改密码</div>
-            <div class="sidebar-nav-item sidebar-popup-item" onclick="handleLogout();toggleUserMenu()">🚪 退出</div>
-        </div>
         <div class="sidebar-section">
-            <div class="sidebar-nav-item active" data-view="home" data-label="主页" onclick="navigateTo('home')">🏠</div>
-            <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="navigateTo('fb')">📚</div>
-            <div class="sidebar-nav-item" data-view="kb" data-label="AI助手" onclick="navigateTo('kb')">✨</div>
+            <div class="sidebar-nav-item active" data-view="home" data-label="主页" onclick="navigateTo('home')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </div>
+            <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="navigateTo('fb')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div class="sidebar-nav-item" data-view="kb" data-label="AI助手" onclick="navigateTo('kb')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
+            </div>
         </div>
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom" id="sidebar-more-btn" onclick="toggleSidebarMenu(event)">
-            <div class="sidebar-nav-item" data-label="更多">☰</div>
+            <div class="sidebar-nav-item" data-label="更多">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </div>
         </div>
         <div class="sidebar-popup" id="sidebar-popup" style="display:none">
-            <div class="sidebar-nav-item sidebar-popup-item" data-view="config" data-label="配置" onclick="navigateTo('config');toggleSidebarMenu()">⚙ 配置</div>
-            <div class="sidebar-nav-item sidebar-popup-item" data-view="about" data-label="关于" onclick="navigateTo('about');toggleSidebarMenu()">ℹ 关于</div>
+            <div class="sidebar-nav-item sidebar-popup-item" data-view="config" data-label="配置" onclick="navigateTo('config');toggleSidebarMenu()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                配置
+            </div>
+            <div class="sidebar-nav-item sidebar-popup-item" data-view="about" data-label="关于" onclick="navigateTo('about');toggleSidebarMenu()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                关于
+            </div>
         </div>
     </nav>
 
@@ -888,32 +712,32 @@
             <h2>选择功能</h2>
             <div class="tools-grid">
                 <div class="tool-item" onclick="selectTool('to_docx')">
-                    <div class="icon">📄</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2b5797" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></div>
                     <div class="name">批量提取</div>
                     <div class="desc">PDF/TXT → DOCX</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_index')">
-                    <div class="icon">📑</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#217346" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg></div>
                     <div class="name">构建索引</div>
                     <div class="desc">目录 → Excel索引表</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_compare')">
-                    <div class="icon">📊</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d24726" stroke-width="1.5"><rect x="2" y="4" width="9" height="16" rx="1"/><rect x="13" y="4" width="9" height="16" rx="1"/><line x1="7" y1="9" x2="7" y2="16"/><line x1="18" y1="8" x2="18" y2="14"/></svg></div>
                     <div class="name">文档比较</div>
                     <div class="desc">对比"原稿"和"终稿"</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_pdf')">
-                    <div class="icon">📑</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b30b00" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="7" font-weight="bold" fill="#b30b00">PDF</text></svg></div>
                     <div class="name">批量转化</div>
                     <div class="desc">DOCX → PDF</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_pageNum')">
-                    <div class="icon">📃</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#563d7c" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="8" font-weight="bold" fill="#563d7c">#</text></svg></div>
                     <div class="name">添加页码</div>
                     <div class="desc">批量添加页码</div>
                 </div>
                 <div class="tool-item" onclick="selectTool('to_redhead')">
-                    <div class="icon">🔴</div>
+                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e94560" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/><circle cx="12" cy="12" r="4" fill="#e94560" fill-opacity="0.2"/></svg></div>
                     <div class="name">文件套红</div>
                     <div class="desc">生成红头文件</div>
                 </div>
@@ -926,9 +750,9 @@
             <!-- 目录选择 / 上传区域 -->
             <div class="form-group" id="folderSelectGroup">
                 <div style="display: flex; gap: 8px;">
-                    <input type="text" id="workdir" placeholder="选择文件夹" readonly style="flex:1;">
-                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">从本地选择</button>
-                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">从文件库选择</button>
+                    <input type="text" id="workdir" placeholder="选择本机目录或从文件库选择" readonly style="flex:1;">
+                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">本机选择</button>
+                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">文件库</button>
                 </div>
             </div>
 
@@ -936,7 +760,7 @@
             <div id="remoteUploadGroup" style="display: none;">
                 <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleRemoteUpload(event)">
                 <div id="uploadProgress" style="display: none; margin-top: 8px; padding: 8px; background: #e8f4fd; border-radius: 4px; font-size: 12px;">
-                    <span>正在上传文件...</span>
+                    <span>正在处理...</span>
                 </div>
             </div>
 
@@ -1153,11 +977,10 @@
     </style>
     
     <script src="js/main.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="js/fb.js"></script>
-    <script src="js/kb.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+
 
     <!-- KB选择器弹窗 -->
     <div class="modal-overlay" id="kbSelectorModal">

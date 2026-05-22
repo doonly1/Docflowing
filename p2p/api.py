@@ -10,6 +10,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, se
 from .auth import p2p_auth_required
 from .models import TrustStore, RemoteFilebaseStore
 from logging_config import get_logger
+from tools.tool_defs import TOOL_SCRIPTS, TOOL_EXTENSIONS
 
 logger = get_logger(__name__)
 
@@ -224,7 +225,8 @@ def p2p_upload(fb_id):
         for f in request.files.getlist(key):
             if not f.filename:
                 continue
-            file_path = os.path.join(target_dir, f.filename)
+            safe_name = os.path.basename(f.filename)
+            file_path = os.path.join(target_dir, safe_name)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             f.save(file_path)
             stat = os.stat(file_path)
@@ -566,24 +568,7 @@ def p2p_run_tool(fb_id):
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
 
-    tool_scripts = {
-        'to_docx': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_docx.py'),
-        'to_index': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_index.py'),
-        'to_compare': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_compare.py'),
-        'to_pdf': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pdf.py'),
-        'to_pageNum': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pageNum.py'),
-        'to_redhead': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_redhead.py')
-    }
-    tool_extensions = {
-        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
-        'to_compare': ('.docx', '.doc'),
-        'to_pdf': ('.docx', '.doc'),
-        'to_pageNum': ('.docx', '.doc'),
-        'to_redhead': ('.docx',)
-    }
-
-    script_path = tool_scripts.get(tool)
+    script_path = TOOL_SCRIPTS.get(tool)
     if not script_path or not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'工具脚本不存在: {tool}'})
 
@@ -594,7 +579,7 @@ def p2p_run_tool(fb_id):
         return jsonify({'success': False, 'message': f'目录不存在: {subdir or "根目录"}'})
 
     if not files:
-        extensions = tool_extensions.get(tool, ('.docx',))
+        extensions = TOOL_EXTENSIONS.get(tool, ('.docx',))
         files = [f for f in os.listdir(target_path)
                  if os.path.isfile(os.path.join(target_path, f)) and f.lower().endswith(extensions)]
 

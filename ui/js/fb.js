@@ -6,6 +6,7 @@ var FileBase = {
 
     currentFbId: null,
     fbCurrentPermission: null,
+    fbIsRemote: false,  // 是否为远程文件库（其他节点共享的）
     selectedDocs: {},
     currentSort: { field: 'mtime', asc: false },
     currentPath: [],
@@ -22,7 +23,7 @@ var FileBase = {
     api: function(url, method, body) {
         var o = {
             method: method || 'GET',
-            headers: { 'Authorization': 'Bearer ' + (window.authToken || ''), 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' }
         };
         if (body && method !== 'GET') o.body = JSON.stringify(body);
         return fetch(url, o).then(function(r) { return r.json(); }).catch(function() { return { success: false, message: '请求失败' }; });
@@ -30,14 +31,12 @@ var FileBase = {
 
     refreshAuthRole: async function() {
         try {
-            var resp = await fetch('/api/user/me', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
-            });
+            var resp = await fetch('/api/user/me');
             var data = await resp.json();
             if (data.success && data.role) {
                 window.authRole = data.role;
                 window.authUserId = data.user_id;
-                try { localStorage.setItem('docproc_role', data.role); } catch(e) {}
+                try { localStorage.setItem('docflow_role', data.role); } catch(e) {}
             }
         } catch (e) {
             console.warn('refreshAuthRole failed, will use cached role:', window.authRole);
@@ -45,10 +44,7 @@ var FileBase = {
     },
 
     refreshUserCache: async function() {
-        try {
-            var res = await this.api('/api/users/list', 'GET');
-            if (res.success) this._lsSet('fb_user_list', JSON.stringify(res.users));
-        } catch (e) {}
+        // 本机模式，无需用户缓存
     },
 
     getUserRole: function() {
@@ -58,7 +54,8 @@ var FileBase = {
     init: async function() {
         this.selectedDocs = {};
         this.currentSort = { field: 'mtime', asc: false };
-        await this.refreshAuthRole();
+        // 如果 main.js 已加载用户角色，跳过重复请求
+        if (!window.authRole) await this.refreshAuthRole();
         await this.refreshUserCache();
         if (this.currentFbId) {
             await this.renderDetail();
@@ -100,12 +97,12 @@ var FileBase = {
             this.currentFbId = null;
             this.fbLocalPath = '';
             this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
-            this._lsDel('docproc_current_fb_id');
-            this._lsDel('docproc_current_fb_name');
-            this._lsDel('docproc_current_fb_local_path');
-            this._lsDel('docproc_current_fb_display_path');
-            this._lsDel('docproc_current_fb_permission');
-            this._lsDel('docproc_current_subdir');
+            this._lsDel('docflow_current_fb_id');
+            this._lsDel('docflow_current_fb_name');
+            this._lsDel('docflow_current_fb_local_path');
+            this._lsDel('docflow_current_fb_display_path');
+            this._lsDel('docflow_current_fb_permission');
+            this._lsDel('docflow_current_subdir');
             this.fbExpandedTreePaths = {};
             var role = this.getUserRole();
 
@@ -124,9 +121,7 @@ var FileBase = {
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
             h += '<button onclick="FileBase.search()">🔍 搜索</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
-            if (window.authRole === 'admin') h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
-            h += '<button onclick="FileBase.openKbFilebase()" id="fb-kb-btn" style="display:none" title="知识库文件">✨ KB</button>';
             h += '<button onclick="FileBase.showTrash()">🗑️ 回收站</button>';
             h += '</div>';
             h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"></div>';
@@ -155,25 +150,9 @@ var FileBase = {
                 return;
             }
 
-            // 从列表中分离出 "kb" 文件库
-            var kbItem = null;
-            var displayKbs = [];
-            for (var i = 0; i < kbs.length; i++) {
-                if (kbs[i].name === 'kb') {
-                    kbItem = kbs[i];
-                } else {
-                    displayKbs.push(kbs[i]);
-                }
-            }
-            if (kbItem) {
-                this._kbFilebase = kbItem;
-                var kbBtn = document.getElementById('fb-kb-btn');
-                if (kbBtn) kbBtn.style.display = '';
-            }
-
             var html = '<div class="fb-grid">';
-            for (var i = 0; i < displayKbs.length; i++) {
-                var kb = displayKbs[i];
+            for (var i = 0; i < kbs.length; i++) {
+                var kb = kbs[i];
                 html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
@@ -184,8 +163,8 @@ var FileBase = {
             grid.innerHTML = html;
 
             // 加载所有文件库的同步状态
-            for (var i = 0; i < displayKbs.length; i++) {
-                this._loadSyncStatus(displayKbs[i].id);
+            for (var i = 0; i < kbs.length; i++) {
+                this._loadSyncStatus(kbs[i].id);
             }
         } catch (e) {
             console.error('renderKbList error:', e);
@@ -219,56 +198,71 @@ var FileBase = {
     },
 
     showCreateRootFolder: function() {
-        this._createRootFolder('新建文件夹');
+        this._showLocalPathDialog();
     },
 
-    showCreateNetworkRootFolder: function() {
+    _showLocalPathDialog: function() {
         var self = this;
-        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:420px">';
-        h += '<h3>🌐 新建网络文件库</h3>';
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:500px">';
+        h += '<h3>📁 添加本机目录到文件库</h3>';
         h += '<div style="margin-bottom:12px">';
-        h += '<label style="display:block;font-size:13px;color:#555;margin-bottom:4px">网络路径</label>';
-        h += '<input type="text" id="fb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
+        h += '<label style="display:block;font-size:13px;color:#555;margin-bottom:4px">目录路径</label>';
+        h += '<input type="text" id="fb-local-path" placeholder="输入本机目录路径，如 D:\\Documents" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
+        h += '<div style="margin-top:8px">';
+        h += '<button type="button" onclick="FileBase._selectLocalPath()" style="padding:5px 12px;background:#f0f0f0;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px">📂 浏览...</button>';
+        h += '<input type="file" id="fb-path-browse" webkitdirectory directory style="display:none" onchange="FileBase._handlePathBrowse(this)">';
+        h += '</div>';
+        h += '<div style="font-size:11px;color:#888;margin-top:6px">请输入本机已有的目录路径，该目录将被添加到文件库中</div>';
         h += '</div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button onclick="FileBase._doCreateLocalRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">添加</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
-        setTimeout(function() { document.getElementById('fb-net-path').focus(); }, 100);
+        setTimeout(function() { document.getElementById('fb-local-path').focus(); }, 100);
     },
 
-    _doCreateNetworkRootFolder: async function() {
-        var networkPath = (document.getElementById('fb-net-path').value || '').trim();
-        if (!networkPath) { alert('请输入网络路径'); return; }
-        var parts = networkPath.replace(/\\/g, '/').split('/').filter(function(p) { return p && p !== ''; });
-        var name = parts.length > 0 ? parts[parts.length - 1] : '网络文件库';
+    _selectLocalPath: function() {
+        document.getElementById('fb-path-browse').click();
+    },
+
+    _handlePathBrowse: function(input) {
+        if (input.files && input.files.length > 0) {
+            var file = input.files[0];
+            var path = file.path || '';
+            if (path) {
+                var lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+                if (lastSep > 0) {
+                    path = path.substring(0, lastSep);
+                }
+            }
+            if (!path && file.webkitRelativePath) {
+                path = file.webkitRelativePath.split('/')[0];
+            }
+            if (path) {
+                document.getElementById('fb-local-path').value = path;
+            }
+        }
+    },
+
+    _doCreateLocalRootFolder: async function() {
+        var localPath = (document.getElementById('fb-local-path').value || '').trim();
+        if (!localPath) { alert('请输入目录路径'); return; }
         this.closeModal();
-        await this._createNetworkRootFolder(name, networkPath);
+        await this._createLocalRootFolder(localPath);
     },
 
-    _createNetworkRootFolder: async function(name, networkPath) {
+    _createLocalRootFolder: async function(localPath) {
         var self = this;
         var res = await this.api('/api/fb/create-folder', 'POST', {
-            name: name,
-            filebase_type: 'net',
-            network_path: networkPath
+            filebase_type: 'local',
+            local_path: localPath
         });
         if (res.success) {
             await self.renderKbList();
         } else {
-            alert(res.message || '创建失败');
-        }
-    },
-
-    _createRootFolder: async function(name) {
-        var self = this;
-        var res = await this.api('/api/fb/create-folder', 'POST', { name: name });
-        if (res.success) {
-            await self.renderKbList();
-        } else {
-            alert(res.message || '创建失败');
+            alert(res.message || '添加失败');
         }
     },
 
@@ -427,6 +421,8 @@ var FileBase = {
         this.fbCurrentPermission = permission;
         this.fbCanEdit = permission === 'edit' || permission === 'manage';
         this.fbCanManage = permission === 'manage';
+        // 无本地路径 = 远程文件库（其他节点共享的）
+        this.fbIsRemote = !localPath;
         this.selectedDocs = {};
         this.fbName = name || '';
         this.fbLocalPath = localPath || '';
@@ -438,12 +434,12 @@ var FileBase = {
         this.fbTreeLoaded = false;
         this.fbExpandedTreePaths = {};
 
-        this._lsSet('docproc_current_fb_id', kbId);
-        this._lsSet('docproc_current_fb_permission', permission);
-        this._lsSet('docproc_current_fb_name', name || '');
-        this._lsSet('docproc_current_fb_local_path', localPath || '');
-        this._lsSet('docproc_current_fb_display_path', displayPath || '');
-        this._lsDel('docproc_current_subdir');
+        this._lsSet('docflow_current_fb_id', kbId);
+        this._lsSet('docflow_current_fb_permission', permission);
+        this._lsSet('docflow_current_fb_name', name || '');
+        this._lsSet('docflow_current_fb_local_path', localPath || '');
+        this._lsSet('docflow_current_fb_display_path', displayPath || '');
+        this._lsDel('docflow_current_subdir');
 
         await this.renderDetail();
     },
@@ -526,7 +522,7 @@ var FileBase = {
             if (this.currentPath[i].type === 'category') parts.push(this.currentPath[i].id);
         }
         this.fbLocalCurrentSubdir = parts.join('/');
-        this._lsSet('docproc_current_subdir', this.fbLocalCurrentSubdir);
+        this._lsSet('docflow_current_subdir', this.fbLocalCurrentSubdir);
         await this.renderDetail();
     },
 
@@ -623,7 +619,7 @@ var FileBase = {
         this.fbLocalCurrentSubdir = '';
         this.currentSort = { field: 'mtime', asc: false };
         this.selectedDocs = {};
-        this._lsDel('docproc_current_subdir');
+        this._lsDel('docflow_current_subdir');
         this.renderDetail();
     },
 
@@ -638,7 +634,7 @@ var FileBase = {
                 this.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
             }
         }
-        this._lsSet('docproc_current_subdir', this.fbLocalCurrentSubdir);
+        this._lsSet('docflow_current_subdir', this.fbLocalCurrentSubdir);
         this.renderDetail();
     },
 
@@ -685,7 +681,7 @@ var FileBase = {
             var catEscPathAttr = cat.path.replace(/'/g, "\\'");
             h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '">';
             h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
-            h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
+            h += '<td class="col-icon"><img src="/icons/folder.png" width="16" height="16" style="vertical-align:middle;border-radius:2px;"></td>';
             h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
             h += '<td class="col-type">文件夹</td>';
@@ -706,13 +702,12 @@ var FileBase = {
             h += '<tr class="fb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '">';
             h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + escPathAttr + '" data-type="file" onclick="event.stopPropagation()"></td>';
             h += '<td class="col-icon"><span class="fb-file-icon">' + icon + '</span></td>';
-            h += '<td class="col-name"><div class="fb-file-name" ondblclick="FileBase.dblClickFile(event)" onclick="event.stopPropagation()">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
+            h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.handleFileClick(\'' + escPathAttr + '\')">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
             h += '<td class="col-date"><span class="fb-file-date">' + date + '</span></td>';
             h += '<td class="col-type">' + ext + '</td>';
             h += '<td class="col-size"><span class="fb-file-size">' + size + '</span></td>';
             h += '<td class="col-actions"><span class="fb-file-actions">';
             h += '<a href="#" onclick="FileBase.triggerReplace(\'' + escPathAttr + '\');return false">替换</a>';
-            h += '<a href="#" onclick="FileBase.openFile(\'' + escPath + '\');return false">打开</a>';
             h += '</span></td></tr>';
         }
         h += '</tbody></table>';
@@ -743,7 +738,7 @@ var FileBase = {
             return;
         }
         if (items.length === 1 && items[0].type === 'file') {
-            window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path) + '&token=' + encodeURIComponent(authToken), '_blank');
+            window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path), '_blank');
         } else {
             var paths = [];
             for (var i = 0; i < items.length; i++) {
@@ -753,7 +748,7 @@ var FileBase = {
                 alert('请至少选择一个文件或文件夹');
                 return;
             }
-            var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download?token=' + encodeURIComponent(authToken);
+            var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download';
             try {
                 var resp = await fetch(url, {
                     method: 'POST',
@@ -812,7 +807,7 @@ var FileBase = {
         var formData = new FormData();
         formData.append('file', fileInput.files[0]);
 
-        var url = '/api/fb/' + this.currentFbId + '/local-files/replace?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentFbId + '/local-files/replace?path=' + encodeURIComponent(relPath);
         var resp = await fetch(url, { method: 'PUT', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -879,7 +874,7 @@ var FileBase = {
         }
 
         var subdir = this.fbLocalCurrentSubdir || '';
-        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -904,7 +899,7 @@ var FileBase = {
         }
 
         var subdir = this.fbLocalCurrentSubdir || '';
-        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir);
         var resp = await fetch(url, { method: 'POST', body: formData });
         var res = await resp.json();
         fileInput.value = '';
@@ -1104,7 +1099,7 @@ var FileBase = {
 
     contextDownloadOne: function(path) {
         this.hideContextMenu();
-        window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(authToken), '_blank');
+        window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(path), '_blank');
     },
 
     contextDeleteOne: async function(path) {
@@ -1192,6 +1187,10 @@ var FileBase = {
         }
     },
 
+    handleFileClick: function(path) {
+        this.openFile(path);
+    },
+
     dblClickFile: function(event) {
         var row = event.target.closest('.fb-file-row');
         if (!row) return;
@@ -1201,17 +1200,36 @@ var FileBase = {
 
     openFile: function(relPath) {
         var ext = relPath.split('.').pop().toLowerCase();
-        if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
-            this.openMarkdownEditor(relPath);
-        } else if (['docx', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext)) {
-            this.openFilePreview(relPath);
-        } else if (ext === 'pdf') {
-            this.openPdfPreview(relPath);
-        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-            this.openImagePreview(relPath);
-        } else {
-            window.open('/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken), '_blank');
+        
+        // 远程文件库 → 使用Web预览
+        if (this.fbIsRemote) {
+            if (ext === 'md' || ext === 'txt' || ext === 'markdown') {
+                this.openMarkdownEditor(relPath);
+            } else if (['docx', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext)) {
+                this.openFilePreview(relPath);
+            } else if (ext === 'pdf') {
+                this.openPdfPreview(relPath);
+            } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+                this.openImagePreview(relPath);
+            } else {
+                this.openFilePreview(relPath);
+            }
+            return;
         }
+        
+        // 本地文件库 → 调用本地软件打开
+        var fileName = relPath.split('/').pop();
+        var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);
+        fetch(url, { method: 'GET' })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    alert(data.message || '打开失败');
+                }
+            })
+            .catch(function(e) {
+                alert('打开失败: ' + e.message);
+            });
     },
     
     openFilePreview: async function(relPath) {
@@ -1261,7 +1279,7 @@ var FileBase = {
     
     openPdfPreview: function(relPath) {
         var fileName = relPath.split('/').pop();
-        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
@@ -1280,7 +1298,7 @@ var FileBase = {
     
     openImagePreview: function(relPath) {
         var fileName = relPath.split('/').pop();
-        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath) + '&token=' + encodeURIComponent(authToken);
+        var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
@@ -1494,7 +1512,7 @@ var FileBase = {
         }
         for (var k = 0; k < allUsers.length; k++) {
             var u = allUsers[k];
-            if (u.username === authUsername) continue;
+            if (u.username === window.authUsername) continue;
             var curPerm = memberMap[u.username] ? memberMap[u.username].permission : '';
             var checked = curPerm ? ' checked' : '';
             h += '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer">';
@@ -1626,7 +1644,7 @@ var FileBase = {
                 if (!r.rel_path && !r.filebase_type) continue;
                 var dirPath = r.rel_path ? r.rel_path.replace(/\\/g, '/').replace(/\/[^\/]+$/, '') : '';
                 var clickAction = 'FileBase._openFromSearch(\'' + r.fb_id + '\',\'' + escapeHtmlText(r.fb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
-                var downloadUrl = '/api/fb/' + r.fb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id) + '&token=' + encodeURIComponent(authToken);
+                var downloadUrl = '/api/fb/' + r.fb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id);
                 h += '<tr>';
                 h += '<td>' + escapeHtmlText(r.fb_name) + '</td>';
                 h += '<td><span class="fb-file-name" onclick="' + clickAction + '">' + escapeHtmlText(r.filename) + '</span></td>';
@@ -1646,6 +1664,7 @@ var FileBase = {
         this.fbCurrentPermission = 'view';
         this.fbCanEdit = false;
         this.fbCanManage = false;
+        this.fbIsRemote = true;  // 搜索结果打开的文件库视为远程
         this.selectedDocs = {};
         this.fbName = kbName;
         this.fbLocalPath = '';
@@ -1659,19 +1678,13 @@ var FileBase = {
         }
         this.currentSort = { field: 'mtime', asc: false };
 
-        this._lsSet('docproc_current_fb_id', kbId);
-        this._lsSet('docproc_current_fb_permission', 'view');
-        this._lsSet('docproc_current_fb_name', kbName);
-        this._lsSet('docproc_current_fb_local_path', '');
-        this._lsSet('docproc_current_fb_display_path', '');
+        this._lsSet('docflow_current_fb_id', kbId);
+        this._lsSet('docflow_current_fb_permission', 'view');
+        this._lsSet('docflow_current_fb_name', kbName);
+        this._lsSet('docflow_current_fb_local_path', '');
+        this._lsSet('docflow_current_fb_display_path', '');
 
         await this.renderDetail();
-    },
-
-    openKbFilebase: function() {
-        if (!this._kbFilebase) return;
-        var kb = this._kbFilebase;
-        this.openKb(kb.id, kb.permission, kb.name, kb.local_path || '', kb.display_path || '');
     },
 
     showTrash: async function() {
@@ -1719,7 +1732,7 @@ var FileBase = {
 
     deleteTrashItem: async function(name) {
         if (!confirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！')) return;
-        var url = '/api/fb/trash-item?name=' + encodeURIComponent(name) + '&token=' + encodeURIComponent(authToken);
+        var url = '/api/fb/trash-item?name=' + encodeURIComponent(name);
         await fetch(url, { method: 'DELETE' });
         await this.showTrash();
     },
@@ -1731,18 +1744,21 @@ var FileBase = {
     },
 
     getFileIcon: function(ext) {
-        var e = (ext || '').toLowerCase();
-        var cls = 'fb-file-icon-file fb-icon-other', label = '?';
-        if (e === '.doc' || e === '.docx') { cls = 'fb-file-icon-file fb-icon-doc'; label = 'W'; }
-        else if (e === '.xls' || e === '.xlsx') { cls = 'fb-file-icon-file fb-icon-xls'; label = 'X'; }
-        else if (e === '.ppt' || e === '.pptx') { cls = 'fb-file-icon-file fb-icon-ppt'; label = 'P'; }
-        else if (e === '.pdf') { cls = 'fb-file-icon-file fb-icon-pdf'; label = 'P'; }
-        else if (e === '.md') { cls = 'fb-file-icon-file fb-icon-md'; label = 'M'; }
-        else if (e === '.txt') { cls = 'fb-file-icon-file fb-icon-txt'; label = 'T'; }
-        else if (e === '.html' || e === '.htm') { cls = 'fb-file-icon-file fb-icon-html'; label = 'H'; }
-        else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-img'; label = 'I'; }
-        else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-zip'; label = 'Z'; }
-        return '<span class="' + cls + '" style="overflow:hidden;">' + label + '</span>';
+        var e = (ext || '').toLowerCase().replace('.', '');
+        var colors = {
+            doc: '#2b5797', docx: '#2b5797', xls: '#217346', xlsx: '#217346',
+            ppt: '#d24726', pptx: '#d24726', pdf: '#b30b00', txt: '#666',
+            md: '#083fa1', html: '#e44d26', htm: '#e44d26',
+            jpg: '#888', jpeg: '#888', png: '#888', gif: '#888',
+            bmp: '#888', svg: '#ffb13b', webp: '#888', ico: '#888',
+            zip: '#f0ad4e', rar: '#f0ad4e', '7z': '#f0ad4e', tar: '#f0ad4e', gz: '#f0ad4e',
+            py: '#3572a5', js: '#f7df1e', css: '#563d7c', json: '#555', xml: '#555',
+            mp3: '#e91e63', mp4: '#9c27b0', avi: '#9c27b0', mov: '#9c27b0', wav: '#e91e63',
+        };
+        var label = (e || '?').substring(0, 2).toUpperCase();
+        var color = colors[e] || '#999';
+        var textColor = (color === '#f7df1e' || color === '#ffb13b' || color === '#f0ad4e') ? '#333' : '#fff';
+        return '<svg width="16" height="16" viewBox="0 0 32 32" style="vertical-align:middle;border-radius:3px"><rect width="32" height="32" rx="4" fill="' + color + '"/><text x="16" y="22" text-anchor="middle" font-size="14" font-family="Arial,sans-serif" font-weight="700" fill="' + textColor + '">' + label + '</text></svg>';
     },
 
     formatSize: function(bytes) {

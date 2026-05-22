@@ -23,7 +23,7 @@ _lock = threading.Lock()
 
 def _get_user_kb_dir(user_id: str) -> str:
     base = _get_workspace_dir(user_id)
-    kb_dir = os.path.join(base, 'kb')
+    kb_dir = os.path.join(base, 'data', 'kb')
     os.makedirs(kb_dir, exist_ok=True)
     return kb_dir
 

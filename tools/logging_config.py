@@ -46,7 +46,7 @@ def setup_logging(level=None):
     handler.addFilter(RequestIDFilter())
 
     formatter = logging.Formatter(
-        '[%(asctime)s] [%(levelname)-7s] %(message)s',
+        '[%(asctime)s] [%(levelname)-7s] [%(request_id)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     handler.setFormatter(formatter)

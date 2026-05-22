@@ -12,8 +12,9 @@ import requests
 from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context, g
 from functools import wraps
 
-from server.auth import login_required, admin_required, _get_auth_data_dir
+from server.auth import login_required
 from fb.database import get_db, get_visible_fb_ids, get_user_role
+from tools.tool_defs import TOOL_SCRIPTS, TOOL_EXTENSIONS
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -108,9 +109,9 @@ def _require_fb_permission(required_level):
 
 # ==================== 文件库 CRUD ====================
 
-def _get_user_workspace(user_id):
+def _get_user_workspace(user_id=None):
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ws = os.path.join(root_dir, 'workspaces', user_id)
+    ws = os.path.join(root_dir, 'workspaces')
     os.makedirs(ws, exist_ok=True)
     return ws
 
@@ -122,37 +123,16 @@ def create_folder():
     data = request.get_json()
     filebase_type = (data.get('filebase_type') or 'local').strip()
     name = (data.get('name') or '').strip()
-    if not name:
-        return jsonify({'success': False, 'message': '文件夹名称不能为空'})
-    if len(name) > 64:
-        return jsonify({'success': False, 'message': '文件夹名称不能超过64个字符'})
-    if '/' in name or '\\' in name:
-        return jsonify({'success': False, 'message': '文件夹名称不能包含路径分隔符'})
-
-    # 网络文件库需要管理员权限
-    if filebase_type == 'net':
-        users_path = os.path.join(_get_auth_data_dir(), 'users.json')
-        users = {}
-        if os.path.exists(users_path):
-            try:
-                with open(users_path, 'r', encoding='utf-8') as f:
-                    users = json.load(f)
-            except Exception:
-                pass
-        user_info = users.get(user_id, {})
-        role = user_info.get('role', 'viewer')
-        if role != 'admin':
-            return jsonify({'success': False, 'message': '需要管理员权限才能创建网络文件库'}), 403
-
-    db = get_db()
-    filebase_id = str(uuid.uuid4())
-    now = time.time()
+    local_path = (data.get('local_path') or '').strip()
 
     if filebase_type == 'net':
-        network_path = (data.get('network_path') or '').strip()
+        network_path = local_path
         if not network_path:
             return jsonify({'success': False, 'message': '网络路径不能为空'})
 
+        db = get_db()
+        filebase_id = str(uuid.uuid4())
+        now = time.time()
         db.execute(
             "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'net', ?, ?)",
             (filebase_id, name, user_id, network_path, now)
@@ -169,22 +149,30 @@ def create_folder():
                    'local_path': network_path}
         })
 
-    ws = _get_user_workspace(user_id)
-    local_path = os.path.join(ws, name)
-    counter = 1
-    orig_name = name
-    while os.path.exists(local_path) and counter < 100:
-        name = orig_name + '_' + str(counter)
-        local_path = os.path.join(ws, name)
-        counter += 1
-    if os.path.exists(local_path):
-        return jsonify({'success': False, 'message': '无法生成唯一的文件夹名称'})
+    if not local_path:
+        return jsonify({'success': False, 'message': '请输入本机目录路径'})
 
-    os.makedirs(local_path, exist_ok=True)
+    if not os.path.isdir(local_path):
+        return jsonify({'success': False, 'message': '目录不存在或无效'})
+
+    folder_name = os.path.basename(local_path.rstrip('/\\'))
+    if not folder_name:
+        return jsonify({'success': False, 'message': '无效的目录路径'})
+
+    db = get_db()
+    filebase_id = str(uuid.uuid4())
+    now = time.time()
+
+    existing = db.execute(
+        "SELECT id FROM filebases WHERE owner_id = ? AND local_path = ?",
+        (user_id, local_path)
+    ).fetchone()
+    if existing:
+        return jsonify({'success': False, 'message': '该目录已在文件库中'})
 
     db.execute(
         "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
-        (filebase_id, name, user_id, local_path, now)
+        (filebase_id, folder_name, user_id, local_path, now)
     )
     db.execute(
         "INSERT INTO filebase_permissions (filebase_id, user_id, permission_level) VALUES (?, ?, ?)",
@@ -194,7 +182,7 @@ def create_folder():
 
     return jsonify({
         'success': True,
-        'fb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local',
+        'fb': {'id': filebase_id, 'name': folder_name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local',
                'local_path': local_path}
     })
 
@@ -262,16 +250,6 @@ def list_fb():
     db = get_db()
     ws = _get_user_workspace(user_id)
 
-    import json
-    users = {}
-    try:
-        users_path = os.path.join(_get_auth_data_dir(), 'users.json')
-        if os.path.exists(users_path):
-            with open(users_path, 'r', encoding='utf-8') as f:
-                users = json.load(f)
-    except Exception:
-        pass
-
     db_kbs = {}
     rows = db.execute("SELECT * FROM filebases").fetchall()
     for row in rows:
@@ -286,7 +264,7 @@ def list_fb():
     fs_paths = set()
 
     for entry_name in sorted(os.listdir(ws)):
-        if entry_name.startswith('.') or entry_name == '已删除':
+        if entry_name.startswith('.') or entry_name == 'trash':
             continue
         entry_path = os.path.join(ws, entry_name)
         if os.path.isdir(entry_path):
@@ -334,8 +312,7 @@ def list_fb():
             perm_row['permission_level'] if perm_row else 'view'
         )
 
-        owner_info = users.get(row['owner_id'], {})
-        owner_username = owner_info.get('username', row['owner_id'])
+        owner_username = row['owner_id'][:8]  # 单用户桌面版，owner_id 即节点 ID，取前缀作显示名
 
         local_path = row['local_path']
         display_path = local_path
@@ -447,7 +424,7 @@ def delete_fb(filebase_id):
     local_path = row['local_path']
     filebase_type = row['filebase_type'] or 'local'
     ws = _get_user_workspace(row['owner_id'])
-    trash_dir = os.path.join(ws, '已删除')
+    trash_dir = os.path.join(ws, 'trash')
 
     # 网络文件库：只删除数据库记录
     if filebase_type == 'net':
@@ -455,7 +432,7 @@ def delete_fb(filebase_id):
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
         _cleanup_synced_data(row['owner_id'], filebase_id)
-        return jsonify({'success': True, 'message': '网络文件库已删除'})
+        return jsonify({'success': True, 'message': '网络文件库已移至回收站'})
 
     if local_path.startswith(trash_dir):
         if os.path.isdir(local_path):
@@ -478,7 +455,7 @@ def delete_fb(filebase_id):
     db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
     db.commit()
     _cleanup_synced_data(row['owner_id'], filebase_id)
-    return jsonify({'success': True, 'message': '文件库已移至已删除目录'})
+    return jsonify({'success': True, 'message': '文件库已移至trash目录'})
 
 
 @fb_bp.route('/trash', methods=['DELETE'])
@@ -486,12 +463,28 @@ def delete_fb(filebase_id):
 def clear_trash():
     user_id = g.user_id
     ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, '已删除')
+    trash_dir = os.path.join(ws, 'trash')
     if not os.path.isdir(trash_dir):
         return jsonify({'success': True, 'deleted': 0})
 
+    # 先清理 trash 目录下对应的数据库记录，避免残留 DB 记录
+    db = get_db()
+    trash_entries = list(os.listdir(trash_dir))
+    for entry in trash_entries:
+        entry_path = os.path.join(trash_dir, entry)
+        try:
+            db.execute(
+                "DELETE FROM filebase_permissions WHERE filebase_id IN "
+                "(SELECT id FROM filebases WHERE local_path = ?)",
+                (entry_path,)
+            )
+            db.execute("DELETE FROM filebases WHERE local_path = ?", (entry_path,))
+        except Exception:
+            pass
+    db.commit()
+
     count = 0
-    for entry in os.listdir(trash_dir):
+    for entry in trash_entries:
         entry_path = os.path.join(trash_dir, entry)
         try:
             if os.path.isdir(entry_path):
@@ -511,7 +504,7 @@ def clear_trash():
 def list_trash():
     user_id = g.user_id
     ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, '已删除')
+    trash_dir = os.path.join(ws, 'trash')
     if not os.path.isdir(trash_dir):
         return jsonify({'success': True, 'items': []})
 
@@ -541,7 +534,7 @@ def restore_from_trash():
         return jsonify({'success': False, 'message': '未指定项目'})
 
     ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, '已删除')
+    trash_dir = os.path.join(ws, 'trash')
     src = os.path.join(trash_dir, item_name)
     if not os.path.isdir(src):
         return jsonify({'success': False, 'message': '项目不存在'})
@@ -585,7 +578,7 @@ def delete_trash_item():
         return jsonify({'success': False, 'message': '未指定项目'})
 
     ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, '已删除')
+    trash_dir = os.path.join(ws, 'trash')
     target = os.path.join(trash_dir, name)
     if not os.path.exists(target):
         return jsonify({'success': False, 'message': '项目不存在'})
@@ -615,7 +608,7 @@ def transfer_fb(filebase_id):
     if not new_owner_id:
         return jsonify({'success': False, 'message': '请指定新所有者'})
     if keep_role not in ('view', 'edit', 'manage'):
-        keep_role = 'editor'
+        keep_role = 'edit'
 
     db = get_db()
     kb_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
@@ -642,23 +635,15 @@ def transfer_fb(filebase_id):
 @login_required
 @_require_fb_permission('view')
 def list_members(filebase_id):
-    import json
-    users_path = os.path.join(_get_auth_data_dir(), 'users.json')
-    users = {}
-    if os.path.exists(users_path):
-        with open(users_path, 'r', encoding='utf-8') as f:
-            users = json.load(f)
-
     db = get_db()
     kb_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
 
     members = []
     owner_id = kb_row['owner_id'] if kb_row else None
     if owner_id:
-        owner_info = users.get(owner_id, {})
         members.append({
             'user_id': owner_id,
-            'username': owner_info.get('username', ''),
+            'username': 'admin',
             'permission': 'manage',
             'is_owner': True
         })
@@ -669,10 +654,9 @@ def list_members(filebase_id):
     ).fetchall()
 
     for row in perm_rows:
-        user_info = users.get(row['user_id'], {})
         members.append({
             'user_id': row['user_id'],
-            'username': user_info.get('username', ''),
+            'username': row['user_id'][:8],
             'permission': row['permission_level'],
             'is_owner': False
         })
@@ -684,13 +668,6 @@ def list_members(filebase_id):
 @login_required
 @_require_fb_permission('manage')
 def add_member(filebase_id):
-    import json
-    users_path = os.path.join(_get_auth_data_dir(), 'users.json')
-    users = {}
-    if os.path.exists(users_path):
-        with open(users_path, 'r', encoding='utf-8') as f:
-            users = json.load(f)
-
     data = request.get_json()
     target_username = (data.get('username') or '').strip()
     permission = (data.get('permission') or 'view').strip()
@@ -698,13 +675,10 @@ def add_member(filebase_id):
     if permission not in ('view', 'edit', 'manage'):
         return jsonify({'success': False, 'message': '无效的权限级别'})
 
-    target_user_id = None
-    for uid, uinfo in users.items():
-        if uinfo.get('username') == target_username:
-            target_user_id = uid
-            break
-
-    if not target_user_id:
+    # 单用户桌面版，唯一用户为本机节点
+    from server.auth import _get_node_id
+    target_user_id = _get_node_id()
+    if target_username != 'admin':
         return jsonify({'success': False, 'message': '用户不存在'})
 
     db = get_db()
@@ -899,7 +873,8 @@ def upload_local_files(filebase_id):
         for f in request.files.getlist(key):
             if not f.filename:
                 continue
-            file_path = os.path.join(target_dir, f.filename)
+            safe_name = os.path.basename(f.filename)
+            file_path = os.path.join(target_dir, safe_name)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             f.save(file_path)
             stat = os.stat(file_path)
@@ -1084,15 +1059,7 @@ def list_local_files(filebase_id):
     if not os.path.isdir(target_path):
         return jsonify({'success': False, 'message': '目录不存在'})
 
-    tool_extensions = {
-        'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-        'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
-        'to_compare': ('.docx', '.doc'),
-        'to_pdf': ('.docx', '.doc'),
-        'to_pageNum': ('.docx', '.doc'),
-        'to_redhead': ('.docx',)
-    }
-    extensions = tool_extensions.get(tool) if tool else None
+    extensions = TOOL_EXTENSIONS.get(tool) if tool else None
 
     files = []
     categories = []
@@ -1369,23 +1336,6 @@ def get_sync_status(filebase_id):
         })
 
 
-TOOL_SCRIPTS = {
-    'to_docx': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_docx.py'),
-    'to_index': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_index.py'),
-    'to_compare': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_compare.py'),
-    'to_pdf': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pdf.py'),
-    'to_pageNum': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_pageNum.py'),
-    'to_redhead': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'to_redhead.py')
-}
-
-TOOL_EXTENSIONS = {
-    'to_docx': ('.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'),
-    'to_index': ('.docx', '.doc', '.pdf', '.xlsx'),
-    'to_compare': ('.docx', '.doc'),
-    'to_pdf': ('.docx', '.doc'),
-    'to_pageNum': ('.docx', '.doc'),
-    'to_redhead': ('.docx',)
-}
 
 
 @fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
@@ -1940,6 +1890,44 @@ def open_local_file(filebase_id):
     as_attachment = ext not in previewable_exts
 
     return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path))
+
+
+@fb_bp.route('/<fb_id>/local-files/open-with-app', methods=['GET'])
+@login_required
+@_require_fb_permission('view')
+def open_with_app(filebase_id):
+    """用系统默认软件打开文件（仅限本地文件库）"""
+    import platform
+    import subprocess
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定文件路径'})
+
+    file_path = os.path.normpath(os.path.join(local_path, rel_path))
+    if not file_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '路径非法'})
+
+    if not os.path.isfile(file_path):
+        return jsonify({'success': False, 'message': '文件不存在'})
+
+    try:
+        system = platform.system()
+        if system == 'Windows':
+            os.startfile(file_path)
+        elif system == 'Darwin':  # macOS
+            subprocess.run(['open', file_path], check=True)
+        else:  # Linux
+            subprocess.run(['xdg-open', file_path], check=True)
+        return jsonify({'success': True, 'message': '已用本地软件打开'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'打开失败: {str(e)}'}), 500
 
 
 @fb_bp.route('/<fb_id>/convert-doc', methods=['POST'])

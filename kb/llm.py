@@ -149,7 +149,6 @@ def call_llm_stream(
                     continue
     except Exception as e:
         logger.error("LLM 流式调用失败: %s", e)
-        yield None
 
 
 _TITLE_PROMPT = (

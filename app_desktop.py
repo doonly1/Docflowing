@@ -1,15 +1,18 @@
-"""DocProc 桌面版入口 — pywebview 壳
+"""DocFlow 桌面版入口 — pywebview 壳
 
 启动 Flask 后台线程 + 原生桌面窗口
 支持：系统托盘、开机自启、Owner 签名认证
+
+认证方式：Python 启动时预先生成 Owner Token，通过 evaluate_js 注入前端
+无需 JS bridge 参与初始登录，消除 bridge 注入时机问题
 """
 import os
 import sys
 import time
-import socket
 import threading
+import urllib.request
 
-from logging_config import get_logger
+from tools.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -22,7 +25,7 @@ def _get_startup_dir():
 
 
 def _get_startup_vbs_path():
-    return os.path.join(_get_startup_dir(), 'docproc-desktop.vbs')
+    return os.path.join(_get_startup_dir(), 'docflow-desktop.vbs')
 
 
 def install_startup():
@@ -61,43 +64,14 @@ def remove_startup():
 
 def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
     """等待 Flask 服务就绪"""
-    import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            urllib.request.urlopen(url, timeout=1)
+            urllib.request.urlopen(url, timeout=0.5)
             return True
         except Exception:
-            time.sleep(0.3)
+            time.sleep(0.1)
     return False
-
-
-# ==================== JS Bridge ====================
-
-class DesktopBridge:
-    """pywebview JS bridge — 暴露给前端调用的 Python 方法"""
-
-    def sign(self, data: str) -> str:
-        from p2p.node import NodeIdentity
-        node = NodeIdentity()
-        node.load_or_create()
-        sig = node.sign(data.encode('utf-8'))
-        return sig
-
-    def get_node_id(self) -> str:
-        from p2p.node import NodeIdentity
-        node = NodeIdentity()
-        node.load_or_create()
-        return node.node_id
-
-    def get_display_name(self) -> str:
-        from p2p.node import NodeIdentity
-        node = NodeIdentity()
-        node.load_or_create()
-        return node.display_name
-
-    def get_app_port(self) -> int:
-        return int(os.environ.get('PORT', 5000))
 
 
 # ==================== 主入口 ====================
@@ -125,19 +99,32 @@ def main():
 
     import webview
 
-    bridge = DesktopBridge()
+    # 计算屏幕居中位置
+    win_w, win_h = 1100, 700
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        win_x = (screen_w - win_w) // 2
+        win_y = (screen_h - win_h) // 2
+    except Exception:
+        win_x = win_y = None
 
-    window = webview.create_window(
-        title='文枢 — 文档处理工具集',
-        url=server_url,
-        js_api=bridge,
-        width=1280,
-        height=800,
-        min_size=(900, 600),
-        resizable=True,
-        easy_drag=False,
-    )
+    kwargs = {
+        'title': '文枢',
+        'url': server_url,
+        'width': win_w,
+        'height': win_h,
+        'min_size': (800, 500),
+        'resizable': True,
+        'easy_drag': False,
+    }
+    if win_x is not None:
+        kwargs['x'] = win_x
+        kwargs['y'] = win_y
 
+    webview.create_window(**kwargs)
     webview.start(debug=False, http_server=False)
 
 

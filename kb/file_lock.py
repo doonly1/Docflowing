@@ -87,7 +87,7 @@ _lock_registry_lock = threading.Lock()
 
 def get_lock(name: str, timeout: float = 5.0) -> CrossPlatformFileLock:
     import tempfile
-    lock_dir = os.path.join(tempfile.gettempdir(), "docproc_locks")
+    lock_dir = os.path.join(tempfile.gettempdir(), "docflow_locks")
     os.makedirs(lock_dir, exist_ok=True)
     lock_path = os.path.join(lock_dir, f"{name}.lock")
     return CrossPlatformFileLock(lock_path, timeout=timeout)

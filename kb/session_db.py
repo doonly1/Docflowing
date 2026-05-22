@@ -83,7 +83,7 @@ END;
 
 def _get_user_kb_dir(user_id: str) -> str:
     base = _get_workspace_dir(user_id)
-    kb_dir = os.path.join(base, 'kb')
+    kb_dir = os.path.join(base, 'data', 'kb')
     os.makedirs(kb_dir, exist_ok=True)
     return kb_dir
 
@@ -97,7 +97,7 @@ class SessionDB:
     def __init__(self, user_id: str, db_path: Path = None):
         self.user_id = user_id
         kb_dir = _get_user_kb_dir(user_id)
-        data_dir = os.path.join(kb_dir, 'data')
+        data_dir = kb_dir
         os.makedirs(data_dir, exist_ok=True)
         self.db_path = Path(db_path) if db_path else Path(data_dir) / 'state.db'
         self._lock = threading.Lock()

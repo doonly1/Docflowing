@@ -1,14 +1,13 @@
-"""知识库配置加载器（用户级 + 模板级）
+"""知识库配置加载器
 
 优先级：
- 1. workspaces/{user_id}/config/kb_config.yaml（用户持久化配置）
- 2. ./config/kb_config.yaml（项目模板，只读默认配置）
+ 1. workspaces/config/kb_config.yaml（用户持久化配置）
+ 2. 代码内置默认值
 
-支持加密存储 API Key（Fernet 对称加密），密钥保存在 workspaces/{user_id}/config/_llm_key。"""
+支持加密存储 API Key（Fernet 对称加密），密钥保存在 workspaces/config/_llm_key。"""
 
 import os
 import yaml
-import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -18,24 +17,63 @@ try:
 except ImportError:
     HAS_FERNET = False
 
-from server.workspace import _get_workspace_dir
-
-_TEMPLATE_PATH = Path(__file__).parent.parent / 'config' / 'kb_config.yaml'
-
-# 缓存使用 user_id 作为键
+# 缓存
 _cache: Dict[str, Any] = {}
 _cache_mtime: Dict[str, float] = {}
+
+# ==================== 默认配置 ====================
+
+_DEFAULT_KB_CONFIG = {
+    'knowledge_base': {
+        'default_name': 'Knowledge Base',
+        'default_icon': '\U0001f4da',
+        'default_permissions': 'user',
+        'search': {
+            'max_chars': 4000,
+            'max_sources': 5,
+        },
+        'memory': {
+            'enabled': True,
+            'memory_limit': 2200,
+            'user_limit': 1375,
+        },
+        'session_store': {
+            'enabled': True,
+            'retention_days': 90,
+            'search_limit': 20,
+        },
+        'skills': {
+            'enabled': True,
+            'stale_days': 30,
+            'archive_days': 90,
+        },
+        'curator': {
+            'enabled': True,
+            'interval_hours': 168,
+            'min_idle_hours': 2,
+        },
+    },
+    'llm': {
+        'enabled': False,
+        'api_key': '',
+        'base_url': '',
+        'model': '',
+        'temperature': 0.7,
+        'max_tokens': 4096,
+    },
+}
 
 # ==================== API Key 加密/解密 ====================
 
 _ENCRYPTION_KEY_FILE = '_llm_key'
 
 
-def _get_user_config_dir(user_id: str) -> str:
-    """获取用户配置目录：workspaces/{user_id}/config/"""
-    config_dir = os.path.join(_get_workspace_dir(user_id), 'config')
-    os.makedirs(config_dir, exist_ok=True)
-    return config_dir
+def _get_user_config_dir(user_id: str = None) -> str:
+    """获取配置目录：workspaces/config/"""
+    project_root = Path(__file__).parent.parent
+    config_dir = project_root / 'workspaces' / 'config'
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return str(config_dir)
 
 
 def _get_or_create_encryption_key(user_id: str = None) -> bytes:
@@ -52,33 +90,6 @@ def _get_or_create_encryption_key(user_id: str = None) -> bytes:
     with open(key_path, 'wb') as f:
         f.write(key)
     return key
-
-
-def _migrate_old_kb_config(user_id: str = None):
-    """从旧路径 ~/.config/DocProc/ 迁移配置到新路径"""
-    if user_id is None:
-        return
-
-    # 迁移用户 KB 配置
-    old_user_dir = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', 'users')
-    old_kb_path = os.path.join(old_user_dir, f'{user_id}_kb.yaml')
-    new_kb_path = os.path.join(_get_user_config_dir(user_id), 'kb_config.yaml')
-
-    if os.path.exists(old_kb_path) and not os.path.exists(new_kb_path):
-        try:
-            shutil.copy2(old_kb_path, new_kb_path)
-        except Exception:
-            pass
-
-    # 迁移加密密钥
-    old_key_path = os.path.join(os.path.expanduser('~'), '.config', 'DocProc', _ENCRYPTION_KEY_FILE)
-    new_key_path = os.path.join(_get_user_config_dir(user_id), _ENCRYPTION_KEY_FILE)
-
-    if os.path.exists(old_key_path) and not os.path.exists(new_key_path):
-        try:
-            shutil.copy2(old_key_path, new_key_path)
-        except Exception:
-            pass
 
 
 def _encrypt_api_key(api_key: str, user_id: str = None) -> str:
@@ -120,9 +131,7 @@ def _get_user_kb_config_path(user_id: str = None) -> str:
 
 
 def _load_raw(user_id: str = None) -> Dict[str, Any]:
-    """加载配置（带迁移）"""
-    _migrate_old_kb_config(user_id)
-
+    """加载配置：优先用户文件，回退默认值"""
     user_path = _get_user_kb_config_path(user_id)
     if os.path.exists(user_path):
         try:
@@ -133,36 +142,22 @@ def _load_raw(user_id: str = None) -> Dict[str, Any]:
         except Exception:
             pass
 
-    if _TEMPLATE_PATH.exists():
-        try:
-            with open(_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-                if data:
-                    return data
-        except Exception:
-            pass
-
-    return {}
+    return dict(_DEFAULT_KB_CONFIG)
 
 
 def get_kb_config(user_id: str = None) -> Dict[str, Any]:
     if user_id is None:
-        return {}
+        return dict(_DEFAULT_KB_CONFIG)
     cache_key = user_id
-    paths_to_check = [_get_user_kb_config_path(user_id), str(_TEMPLATE_PATH)]
-    max_mtime = 0
-    for p in paths_to_check:
-        try:
-            m = os.path.getmtime(p)
-            if m > max_mtime:
-                max_mtime = m
-        except OSError:
-            pass
+    try:
+        m = os.path.getmtime(_get_user_kb_config_path(user_id))
+    except OSError:
+        m = 0
     if cache_key in _cache_mtime:
-        if max_mtime == _cache_mtime.get(cache_key, 0) and cache_key in _cache:
+        if m == _cache_mtime.get(cache_key, 0) and cache_key in _cache:
             return _cache[cache_key]
     _cache[cache_key] = _load_raw(user_id)
-    _cache_mtime[cache_key] = max_mtime
+    _cache_mtime[cache_key] = m
     return _cache[cache_key]
 
 

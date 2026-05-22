@@ -6,197 +6,42 @@
             console.error('[UNHANDLED REJECTION]', e.reason);
         });
 
-        // ==================== Token 管理 ====================
-        window.authToken = localStorage.getItem('docproc_token');
-        window.authUsername = localStorage.getItem('docproc_username');
-        window.authRole = localStorage.getItem('docproc_role') || 'viewer';
-        window.ownerToken = localStorage.getItem('docproc_owner_token');
-
-        function getToken() {
-            return window.authToken || window.ownerToken;
-        }
-
-        function isOwnerMode() {
-            return !!window.ownerToken;
-        }
-
-        function setAuth(token, username, role) {
-            window.authToken = token;
-            window.authUsername = username;
-            window.authRole = role || 'viewer';
-            localStorage.setItem('docproc_token', token);
-            localStorage.setItem('docproc_username', username);
-            localStorage.setItem('docproc_role', window.authRole);
-            document.getElementById('authOverlay').style.display = 'none';
-            updateSidebarUser(username, role);
-            initApp();
-        }
-
-        function clearAuth() {
-            window.authToken = null;
-            window.authUsername = null;
-            window.authRole = 'viewer';
-            localStorage.removeItem('docproc_token');
-            localStorage.removeItem('docproc_username');
-            localStorage.removeItem('docproc_role');
-            localStorage.removeItem('docproc_client_id');
-            localStorage.removeItem('workdir');
-            document.getElementById('authOverlay').style.display = 'flex';
-            updateSidebarUser(null);
-        }
-
-        function clearOwnerAuth() {
-            window.ownerToken = null;
-            localStorage.removeItem('docproc_owner_token');
-        }
-
-        async function _refreshOwnerToken() {
-            if (!window.pywebview || !window.pywebview.api) return false;
-            try {
-                var chalResp = await fetch('/api/owner-challenge', { method: 'GET' });
-                var chalData = await chalResp.json();
-                if (!chalData.success || !chalData.challenge) return false;
-                var signature = await window.pywebview.api.sign(chalData.challenge);
-                var authResp = await fetch('/api/owner-auth', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ challenge: chalData.challenge, signature: signature })
-                });
-                var authData = await authResp.json();
-                if (authData.success && authData.owner_token) {
-                    window.ownerToken = authData.owner_token;
-                    localStorage.setItem('docproc_owner_token', authData.owner_token);
-                    return true;
-                }
-            } catch (e) {
-                console.warn('Owner token refresh failed:', e);
-            }
-            return false;
-        }
+        // ==================== 用户信息 ====================
 
         function updateSidebarUser(username, role) {
             var el = document.getElementById('sidebar-user-icon');
             var nd = document.getElementById('sidebar-user-name-display');
-            var um = document.getElementById('sidebar-user-manage');
             if (!el) return;
             if (username) {
                 var initial = username.charAt(0).toUpperCase();
                 el.innerHTML = '<div class="sidebar-avatar">' + initial + '</div><div class="sidebar-username">' + username + '</div>';
                 if (nd) nd.textContent = username;
-                if (um) um.style.display = (role === 'admin') ? '' : 'none';
             } else {
                 el.innerHTML = '<div class="sidebar-avatar">👤</div><div class="sidebar-username">未登录</div>';
                 if (nd) nd.textContent = '未登录';
-                if (um) um.style.display = 'none';
             }
         }
 
-        function apiHeaders() {
-            var h = {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + (window.authToken || '')
-            };
-            if (window.ownerToken) {
-                h['X-Owner-Token'] = window.ownerToken;
-            }
-            return h;
+        // ==================== 按需加载脚本 ====================
+        var _loadedScripts = {};
+
+        function _loadScript(url, callback) {
+            if (_loadedScripts[url]) { if (callback) callback(); return; }
+            var s = document.createElement('script');
+            s.src = url;
+            s.onload = function() { _loadedScripts[url] = true; if (callback) callback(); };
+            s.onerror = function() { console.error('Failed to load', url); };
+            document.head.appendChild(s);
         }
+
+        function apiHeaders() {
 
         async function apiFetch(url, options) {
             options = options || {};
             if (!options.headers) options.headers = {};
-            options.headers['Authorization'] = 'Bearer ' + (window.authToken || '');
-            if (window.ownerToken) {
-                options.headers['X-Owner-Token'] = window.ownerToken;
-            }
-            var resp = await fetch(url, options);
-            if (resp.status === 401 && window.ownerToken) {
-                // Owner token 过期，尝试刷新
-                if (await _refreshOwnerToken()) {
-                    options.headers['X-Owner-Token'] = window.ownerToken;
-                    resp = await fetch(url, options);
-                } else {
-                    clearOwnerAuth();
-                    throw new Error('Owner 认证过期，请重启应用');
-                }
-            } else if (resp.status === 401 && window.authToken) {
-                clearAuth();
-                throw new Error('登录已过期，请重新登录');
-            }
-            return resp;
+            if (!options.headers['Content-Type']) options.headers['Content-Type'] = 'application/json';
+            return await fetch(url, options);
         }
-
-        // ==================== 认证处理 ====================
-        let authMode = 'login';
-
-        window.handleAuth = async function() {
-            const username = document.getElementById('authUsername').value.trim();
-            const password = document.getElementById('authPassword').value.trim();
-            const errorDiv = document.getElementById('authError');
-            const btn = document.getElementById('authSubmitBtn');
-
-            if (!username || !password) {
-                errorDiv.textContent = '请填写用户名和密码';
-                errorDiv.style.display = 'block';
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = authMode === 'register' ? '注册中...' : '登录中...';
-            errorDiv.style.display = 'none';
-
-            try {
-                const url = authMode === 'register' ? '/api/register' : '/api/login';
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username, password})
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    setAuth(data.token, data.username, data.role);
-                    document.getElementById('authPassword').value = '';
-                } else {
-                    errorDiv.textContent = data.message || '操作失败';
-                    errorDiv.style.display = 'block';
-                }
-            } catch (e) {
-                errorDiv.textContent = '网络错误: ' + e.message;
-                errorDiv.style.display = 'block';
-            }
-
-            btn.disabled = false;
-            btn.textContent = authMode === 'register' ? '注册' : '登录';
-        };
-
-        window.toggleAuthMode = function() {
-            authMode = authMode === 'login' ? 'register' : 'login';
-            document.getElementById('authTitle').textContent = authMode === 'register' ? '注册' : '登录';
-            document.getElementById('authSubmitBtn').textContent = authMode === 'register' ? '注册' : '登录';
-            document.getElementById('authSwitchText').textContent = authMode === 'register' ? '已有账号？' : '没有账号？';
-            document.getElementById('authSwitchLink').textContent = authMode === 'register' ? '立即登录' : '立即注册';
-            document.getElementById('authError').style.display = 'none';
-        };
-
-        window.handleLogout = async function() {
-            if (!confirm('确定要退出登录吗？')) return;
-
-            try {
-                await apiFetch('/api/logout', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({})
-                });
-            } catch (e) {}
-
-            clearAuth();
-            document.getElementById('authOverlay').style.display = 'flex';
-        };
-
-        document.getElementById('authPassword').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') handleAuth();
-        });
 
         // ==================== 远程模式（统一模式） ====================
         function updateModeUI() {
@@ -276,7 +121,7 @@
             }
         };
 
-        let currentTool = '';
+        let currentTool = 'to_compare';
 
         function selectTool(tool) {
             try {
@@ -298,8 +143,14 @@
                 document.getElementById('toolPanel').style.display = 'block';
                 document.getElementById('result').style.display = 'none';
 
-                const workdir = document.getElementById('workdir').value.trim();
-                if (workdir) loadFileList(workdir, tool);
+                var selDir = getSelectedDirectory();
+                if (selDir) {
+                    if (selDir.type === 'kb') {
+                        loadFileList(null, tool);
+                    } else {
+                        loadFileList(selDir, tool);
+                    }
+                }
             } catch (e) {
                 console.error('selectTool error:', e);
             }
@@ -312,8 +163,21 @@
             return { kbId: kbId, subdir: subdir, isKbMode: !!kbId };
         }
 
+        function getSelectedDirectory() {
+            var kbInfo = getKbInfoFromWorkdir();
+            if (kbInfo.isKbMode) {
+                return { type: 'kb', kbId: kbInfo.kbId, subdir: kbInfo.subdir };
+            }
+            var workdirInput = document.getElementById('workdir');
+            var path = workdirInput ? workdirInput.value.trim() : '';
+            if (path) {
+                return { type: 'local', path: path };
+            }
+            return null;
+        }
+
         // ==================== 文件列表面板（统一双列） ====================
-        async function loadFileList(workdir, tool) {
+        async function loadFileList(directory, tool) {
             if (!tool) return;
             const panel = document.getElementById('filePanel');
             const label = document.getElementById('fileLabel');
@@ -325,12 +189,12 @@
             label.textContent = isIndex ? '📂目录文件：' : isCompare ? '👇原稿 / 终稿：' : '📂目录文件：';
 
             let filesData;
-            const kbInfo = getKbInfoFromWorkdir();
+            const selDir = directory || getSelectedDirectory();
 
-            if (kbInfo.isKbMode) {
-                let url = '/api/fb/' + kbInfo.kbId + '/local-files';
+            if (selDir && selDir.type === 'kb') {
+                let url = '/api/fb/' + selDir.kbId + '/local-files';
                 let params = [];
-                if (kbInfo.subdir) params.push('subdir=' + encodeURIComponent(kbInfo.subdir));
+                if (selDir.subdir) params.push('subdir=' + encodeURIComponent(selDir.subdir));
                 if (tool) params.push('tool=' + encodeURIComponent(tool));
                 if (params.length > 0) url += '?' + params.join('&');
 
@@ -345,8 +209,8 @@
                 }
 
                 filesData = { success: true, files: kbData.files };
-            } else {
-                const body = { workdir: toActualWorkdir(workdir), tool };
+            } else if (selDir && selDir.type === 'local') {
+                const body = { directory: selDir.path, tool: tool };
 
                 const filesRes = await apiFetch('/list_files', {
                     method: 'POST',
@@ -354,6 +218,11 @@
                     body: JSON.stringify(body)
                 });
                 filesData = await filesRes.json();
+            } else {
+                leftList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">请先选择目录</div>';
+                rightList.innerHTML = '';
+                panel.style.display = 'block';
+                return;
             }
 
             if (!filesData.success || !filesData.files || filesData.files.length === 0) {
@@ -412,22 +281,22 @@
                         .map(t => t.dataset.filename);
         }
 
-        // 显示路径转后端路径：{username}/workdir/xxx → workdir/xxx
-        // 后端 base 是 workspaces/{uid}，传 workdir/xxx 或 xxx
-        function toActualWorkdir(displayPath) {
-            var path = displayPath || '';
-            if (window.authUsername && path.startsWith(window.authUsername + '/')) {
-                path = path.substring(window.authUsername.length + 1);
-            }
-            return path;
-        }
-
-        // 清理工作区文件
+        // 清理目录文件
         window.clearWorkspace = async function() {
-            if (!confirm('确定要清理所有文件吗？清理后不可恢复。')) return;
+            var selDir = getSelectedDirectory();
+            if (!selDir) {
+                alert('请先选择目录');
+                return;
+            }
+            if (!confirm('确定要清理目录中的文件吗？此操作不可恢复。')) return;
             try {
-                const workdir = document.getElementById('workdir').value.trim();
-                const body = workdir ? { workdir: toActualWorkdir(workdir) } : {};
+                var body = {};
+                if (selDir.type === 'local') {
+                    body.directory = selDir.path;
+                } else {
+                    alert('文件库模式请直接在文件库中删除文件');
+                    return;
+                }
                 const res = await apiFetch('/clear_workspace', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -435,7 +304,6 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    // 刷新文件列表
                     await loadFileList(null, currentTool);
                 } else {
                     alert('清理失败: ' + (data.message || ''));
@@ -445,23 +313,54 @@
             }
         };
 
-        // 下载结果文件
-        window.openWorkdir = async function() {
-            downloadResults(); // 统一为下载功能
+        window.openWorkdir = function() {
+            var selDir = getSelectedDirectory();
+            if (!selDir) {
+                alert('请先选择目录');
+                return;
+            }
+            if (selDir.type === 'kb') {
+                alert('文件库文件请在文件库中查看');
+            } else {
+                window.open('file:///' + selDir.path.replace(/\\/g, '/'), '_blank');
+            }
         };
 
-        // ==================== 选择文件夹 / 上传 ====================
-        window.selectFolder = async function() {
-            // 统一为远程模式：触发浏览器文件夹选择
+        // ==================== 选择本机目录 ====================
+        window.selectFolder = function() {
             document.getElementById('folderInput').click();
         };
 
-        // 远程模式：上传文件夹中的所有文件（或构建索引时仅上传元数据）
+        // 远程模式：处理本机目录选择
         async function handleRemoteUpload(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
+            // 从 webkitRelativePath 获取目录路径
+            let directory = '';
+            if (files[0] && files[0].webkitRelativePath) {
+                const parts = files[0].webkitRelativePath.split('/');
+                if (parts.length > 0) {
+                    // 获取实际目录路径（文件选择器会限制在选定目录内）
+                    const fullPath = files[0].path || '';
+                    if (fullPath) {
+                        // 从完整路径中提取目录
+                        const lastSep = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
+                        if (lastSep > 0) {
+                            directory = fullPath.substring(0, lastSep);
+                        }
+                    }
+                }
+            }
+
+            if (!directory) {
+                alert('无法获取目录路径，请确认已选择整个文件夹');
+                return;
+            }
+
+            // 更新 workdir 输入框
             const workdirInput = document.getElementById('workdir');
+            workdirInput.value = directory;
             workdirInput.removeAttribute('data-fb-id');
             workdirInput.removeAttribute('data-fb-subdir');
 
@@ -469,13 +368,12 @@
             progress.style.display = 'block';
             progress.innerHTML = '正在处理...';
 
-            // 构建索引模式：只上传元数据，不上传文件内容
             if (currentTool === 'to_index') {
-                await handleIndexMetadataOnly(files, progress);
+                await handleIndexMetadataOnly(files, progress, directory);
                 return;
             }
 
-            progress.innerHTML = '正在上传 <span id="uploadCount">0</span> 个文件...';
+            progress.innerHTML = '正在处理文件...';
 
             const extensions = {
                 'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
@@ -492,7 +390,6 @@
                 const relativePath = file.webkitRelativePath || file.name;
                 const pathParts = relativePath.split('/');
 
-                // 只保留选定目录下的直接文件，跳过子目录中的文件
                 if (pathParts.length > 2) {
                     continue;
                 }
@@ -511,67 +408,50 @@
             }
 
             formData.append('tool', currentTool);
-            formData.append('token', window.authToken);
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 60000);
 
             try {
+                const bodyData = { directory: selDir.path };
                 const response = await fetch('/upload_files', {
                     method: 'POST',
-                    headers: {'Authorization': 'Bearer ' + (window.authToken || '')},
-                    body: formData,
-                    signal: controller.signal
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(bodyData)
                 });
-                clearTimeout(timeoutId);
-
-                if (!response.ok) {
-                    throw new Error('服务器返回状态码: ' + response.status);
-                }
                 const data = await response.json();
                 if (data.success) {
-                    progress.innerHTML = `<span style="color: #28a745;">✓ 上传完成 ${data.file_count} 个文件</span>`;
-                    // 更新 workdir 显示（完整路径：workspaces/{user_id}/workdir/test）
-                    const workdirInput = document.getElementById('workdir');
-                    const folderName = (event.target.files[0]?.webkitRelativePath || '').split('/')[0] || 'uploads';
-                    // 远程模式下，文件路径是 workspaces/{user_id}/workdir/{folderName}
-                    // 但输入框应显示相对路径：workdir/{folderName}
-                    workdirInput.value = window.authUsername + '/workdir/' + folderName;
-                    await loadFileList(null, currentTool);
+                    progress.innerHTML = `<span style="color: #28a745;">✓ 目录已就绪: ${selDir.path}</span>`;
+                    await loadFileList(selDir, currentTool);
                     setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
-                    throw new Error(data.message || '上传失败');
+                    throw new Error(data.message || '操作失败');
                 }
             } catch (error) {
                 clearTimeout(timeoutId);
                 let msg = error.message;
                 if (error.name === 'AbortError') {
-                    msg = '上传超时（60秒），文件太多或太大，请分批上传';
+                    msg = '操作超时';
                 }
-                progress.innerHTML = `<span style="color: #dc3545;">✗ 上传失败: ${msg}</span>`;
+                progress.innerHTML = `<span style="color: #dc3545;">✗ 操作失败: ${msg}</span>`;
                 console.error('Upload error:', error);
             }
         }
 
-        // 构建索引专用：只上传元数据，不上传文件内容
-        async function handleIndexMetadataOnly(files, progress) {
+        async function handleIndexMetadataOnly(files, progress, directory) {
             progress.innerHTML = '正在提取文件信息...';
 
-            // 提取文件夹名称（从第一个文件的 webkitRelativePath 获取）
             let folderName = 'unknown';
             const metadataList = [];
             
             for (const file of files) {
-                // 获取相对路径（如 "folderName/sub/file.docx"）
                 const relativePath = file.webkitRelativePath || file.name;
                 const pathParts = relativePath.split('/');
                 
-                // 第一层为文件夹名
                 if (pathParts.length > 1 && folderName === 'unknown') {
                     folderName = pathParts[0];
                 }
 
-                // 提取元数据（不读取文件内容）
                 metadataList.push({
                     name: pathParts[pathParts.length - 1],
                     path: relativePath,
@@ -594,17 +474,14 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         metadata: metadataList,
-                        folder_name: folderName
+                        folder_name: folderName,
+                        directory: directory
                     })
                 });
 
                 const data = await response.json();
                 if (data.success) {
                     progress.innerHTML = `<span style="color: #28a745;">✓ 索引完成，共 ${data.file_count} 个文件</span>`;
-                    // 更新 workdir 显示
-                    const workdirInput = document.getElementById('workdir');
-                    workdirInput.value = folderName;
-                    // 刷新文件列表以显示生成的索引文件
                     await loadFileList(null, currentTool);
                     setTimeout(() => { progress.style.display = 'none'; }, 3000);
                 } else {
@@ -618,14 +495,18 @@
 
         // 下载结果（打包 ZIP）
         window.downloadResults = async function() {
-            var folderName = document.getElementById('workdir').value.trim() || 'results';
+            var selDir = getSelectedDirectory();
+            if (!selDir) {
+                alert('请先选择目录');
+                return;
+            }
+            if (selDir.type === 'kb') {
+                alert('请在文件库中下载文件');
+                return;
+            }
             try {
-                var body = { folder_name: folderName };
-                // 如果 workdir 是子目录，传入后端
-                var actualWorkdir = toActualWorkdir(folderName);
-                if (actualWorkdir.startsWith('workdir/')) {
-                    body.workdir = actualWorkdir;
-                }
+                var folderName = selDir.path.split(/[/\\]/).pop() || 'results';
+                var body = { folder_name: folderName, directory: selDir.path };
                 var response = await apiFetch('/download_results', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -648,13 +529,12 @@
 
         // ==================== 执行工具 ====================
         async function runTool() {
-            const workdir = document.getElementById('workdir').value.trim();
+            const selDir = getSelectedDirectory();
             const resultDiv = document.getElementById('result');
-            const kbInfo = getKbInfoFromWorkdir();
 
-            if (!kbInfo.isKbMode && !workdir) {
+            if (!selDir) {
                 resultDiv.className = 'error';
-                resultDiv.textContent = '请选择工作目录';
+                resultDiv.textContent = '请先选择目录';
                 resultDiv.style.display = 'block';
                 return;
             }
@@ -680,22 +560,20 @@
 
             let response;
 
-            if (kbInfo.isKbMode) {
+            if (selDir.type === 'kb') {
                 const bodyData = {
                     tool: currentTool,
-                    subdir: kbInfo.subdir
+                    subdir: selDir.subdir
                 };
                 if (selectedFiles.length > 0) bodyData.files = selectedFiles;
 
-                response = await apiFetch('/api/fb/' + kbInfo.kbId + '/run-tool', {
+                response = await apiFetch('/api/fb/' + selDir.kbId + '/run-tool', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(bodyData)
                 });
             } else {
-                const bodyData = { tool: currentTool };
-                // 统一远程模式：传递 workdir 参数
-                if (workdir) bodyData.workdir = toActualWorkdir(workdir);
+                const bodyData = { tool: currentTool, directory: selDir.path };
                 if (selectedFiles.length > 0) bodyData.files = selectedFiles;
 
                 response = await apiFetch('/run_tool_with_config', {
@@ -739,7 +617,7 @@
                         }
                     }
                 }
-                if (workdir) loadFileList(workdir, currentTool);
+                loadFileList(null, currentTool);
             } catch (error) {
                 resultDiv.className = 'error';
                 resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(error.message) + '</pre>';
@@ -760,58 +638,6 @@
         // ==================== 配置管理 ====================
         let userConfig = null;
         let isUsingUserConfig = false;
-
-        async function initConfig() {
-            document.getElementById('useUserConfig').checked = true;
-
-            const savedConfig = localStorage.getItem('userConfig');
-            if (savedConfig) {
-                try {
-                    const parsed = JSON.parse(savedConfig);
-                    if (parsed && (Object.keys(parsed).length > 0)) {
-                        userConfig = parsed;
-                        isUsingUserConfig = true;
-                    } else {
-                        userConfig = null;
-                    }
-                } catch (e) {
-                    userConfig = null;
-                }
-            }
-
-            try {
-                const response = await apiFetch('/get_config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({})
-                });
-                const data = await response.json();
-                if (data.success && data.config) {
-                    userConfig = data.config;
-                    if (userConfig.last_workdir) delete userConfig.last_workdir;
-                    isUsingUserConfig = true;
-                    localStorage.setItem('userConfig', JSON.stringify(userConfig));
-
-                    if (data.config.last_workdir) {
-                        document.getElementById('workdir').value = data.config.last_workdir;
-                        localStorage.setItem('workdir', data.config.last_workdir);
-                        if (currentTool) loadFileList(data.config.last_workdir, currentTool);
-                    }
-                }
-            } catch (e) {
-                console.log('从后端加载配置失败:', e);
-                if (!userConfig) {
-                    userConfig = {
-                        compare: {
-                            sentence_similarity_threshold: 0.40,
-                            para_similarity_threshold: 0.40,
-                            short_para_char_threshold: 50
-                        }
-                    };
-                    isUsingUserConfig = true;
-                }
-            }
-        }
 
         // 打开配置弹窗
         window.openConfig = async function() {
@@ -895,7 +721,6 @@
                 const data = await response.json();
                 if (data.success) {
                     userConfig = data.config;
-                    if (userConfig.last_workdir) delete userConfig.last_workdir;
                     loadCompanyConfigForm(userConfig);
                     if (userConfig.compare) {
                         document.getElementById('sentenceThreshold').value = userConfig.compare.sentence_similarity_threshold || 0.40;
@@ -915,7 +740,6 @@
 
             const configWithoutMeta = {...config};
             delete configWithoutMeta.compare;
-            delete configWithoutMeta.last_workdir;
 
             let formHtml = '';
 
@@ -1104,8 +928,6 @@
                     for (const subKey in obj[key]) {
                         yaml += `  ${subKey}: ${obj[key][subKey]}\n`;
                     }
-                } else if (key === 'last_workdir') {
-                    continue;
                 } else {
                     const companyInfo = obj[key];
                     if (!companyInfo || typeof companyInfo !== 'object') {
@@ -1205,14 +1027,6 @@
             return null;
         };
 
-        // ==================== 用户管理 ====================
-        window.toggleUserManage = function() {
-            if (typeof FileBase !== 'undefined' && FileBase.showUserManage) {
-                FileBase.showUserManage();
-            }
-            toggleUserMenu();
-        };
-
         // ==================== 关于弹窗 ====================
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
@@ -1221,14 +1035,14 @@
                 <div style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;">
                     <div style="text-align:center;margin-bottom:12px;">
                         <h2 style="margin:6px 0 2px;font-size:18px;color:#1a1a2e;">文枢</h2>
-                        <div style="font-size:11px;color:#999;">DocProc · 文档处理工具集</div>
+                        <div style="font-size:11px;color:#999;">DocFlow · 文档工作流工具集</div>
                     </div>
                     <div style="color:#444;font-size:12px;line-height:2;">
                         <div>批量提取 · 文件索引 · 文档比较</div>
                         <div>批量转化 · 添加页码 · 文件套红</div>
                     </div>
                     <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:12px;color:#666;line-height:2;">
-                        <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/DocProc" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1/DocProc</a></div>
+                        <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/DocFlow" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1/DocFlow</a></div>
                     </div>
                     <div style="text-align:center;margin-top:14px;">
                         <button onclick="closeAbout()" style="padding:5px 24px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
@@ -1257,112 +1071,88 @@
 
         async function initApp() {
             updateModeUI();
-            selectTool('to_compare');
 
-            const savedPath = localStorage.getItem('workdir');
-            if (savedPath) {
-                document.getElementById('workdir').value = savedPath;
+            // 加载本地缓存配置
+            var savedConfig = localStorage.getItem('userConfig');
+            if (savedConfig) {
+                try {
+                    var parsed = JSON.parse(savedConfig);
+                    if (parsed && Object.keys(parsed).length > 0) {
+                        userConfig = parsed;
+                        isUsingUserConfig = true;
+                    }
+                } catch(e) {}
             }
 
-            await initConfig();
+            // 并行加载用户信息和配置
+            var [meResp, configResp] = await Promise.all([
+                fetch('/api/user/me').then(function(r) { return r.json(); }).catch(function() { return { success: false }; }),
+                fetch('/get_config', {
+                    method: 'POST',
+                    headers: apiHeaders(),
+                    body: JSON.stringify({})
+                }).then(function(r) { return r.json(); }).catch(function() { return { success: false }; })
+            ]);
+
+            if (meResp.success) {
+                updateSidebarUser(meResp.username, meResp.role || 'admin');
+                window.authUsername = meResp.username;
+                window.authRole = meResp.role || 'admin';
+            } else {
+                updateSidebarUser('本机用户', 'admin');
+            }
+
+            if (configResp.success && configResp.config) {
+                userConfig = configResp.config;
+                isUsingUserConfig = true;
+                localStorage.setItem('userConfig', JSON.stringify(configResp.config));
+            } else if (!userConfig) {
+                userConfig = {
+                    compare: {
+                        sentence_similarity_threshold: 0.40,
+                        para_similarity_threshold: 0.40,
+                        short_para_char_threshold: 50
+                    }
+                };
+                isUsingUserConfig = true;
+            }
+
+            if (currentTool) {
+                document.querySelectorAll('.tool-item').forEach(function(item) { item.classList.remove('active'); });
+                var toolEl = document.querySelector('.tool-item[onclick*="' + currentTool + '"]');
+                if (toolEl) toolEl.classList.add('active');
+                var toolInfo = tools[currentTool];
+                if (toolInfo) {
+                    document.getElementById('toolTitle').textContent = toolInfo.name;
+                    document.getElementById('toolIntro').textContent = toolInfo.intro;
+                    var featureHtml = '<ul class="feature-list">';
+                    toolInfo.features.forEach(function(f) { featureHtml += '<li>' + f + '</li>'; });
+                    featureHtml += '</ul>';
+                    document.getElementById('toolIntro').innerHTML += featureHtml;
+                    document.getElementById('toolPanel').style.display = 'block';
+                }
+            }
         }
 
         document.addEventListener('DOMContentLoaded', async function() {
-            // 检测 pywebview 桌面模式
-            if (window.pywebview && window.pywebview.api) {
-                // 桌面版：通过 bridge 签名获取 Owner Token
-                if (!window.ownerToken) {
-                    var ok = await _refreshOwnerToken();
-                    if (!ok) {
-                        console.warn('Owner 认证失败，降级到浏览器模式');
-                        // 降级：尝试无 Token 访问（仅 localhost）
-                        try {
-                            var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' } });
-                            var meData = await meResp.json();
-                            if (meData.success) {
-                                document.getElementById('authOverlay').style.display = 'none';
-                                updateSidebarUser('本机用户', 'admin');
-                                initApp();
-                                _restoreLastView();
-                                return;
-                            }
-                        } catch(e) {}
-                        // 完全降级到登录页
-                        if (window.authToken) {
-                            try {
-                                var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + window.authToken } });
-                                var meData = await meResp.json();
-                                if (meData.success) {
-                                    window.authRole = meData.role || 'viewer';
-                                    try { localStorage.setItem('docproc_role', window.authRole); } catch(e) {}
-                                }
-                            } catch(e) {}
-                            document.getElementById('authOverlay').style.display = 'none';
-                            updateSidebarUser(window.authUsername, window.authRole);
-                            initApp();
-                            _restoreLastView();
-                        } else {
-                            document.getElementById('authOverlay').style.display = 'flex';
-                        }
-                        return;
-                    }
-                }
-                // Owner Token 就绪
-                document.getElementById('authOverlay').style.display = 'none';
-                updateSidebarUser('本机用户', 'admin');
-                initApp();
-                _restoreLastView();
-                return;
-            }
-
-            // 浏览器模式
-            try {
-                var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' } });
-                var meData = await meResp.json();
-                if (meData.success) {
-                    document.getElementById('authOverlay').style.display = 'none';
-                    updateSidebarUser('本机用户', 'admin');
-                    initApp();
-                    _restoreLastView();
-                    return;
-                }
-            } catch(e) {
-            }
-
-            if (window.authToken) {
-                try {
-                    var meResp = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + window.authToken } });
-                    var meData = await meResp.json();
-                    if (meData.success) {
-                        window.authRole = meData.role || 'viewer';
-                        try { localStorage.setItem('docproc_role', window.authRole); } catch(e) {}
-                    }
-                } catch(e) {
-                    console.warn('Failed to fetch current user role:', e.message);
-                }
-                document.getElementById('authOverlay').style.display = 'none';
-                updateSidebarUser(window.authUsername, window.authRole);
-                initApp();
-                _restoreLastView();
-            } else {
-                document.getElementById('authOverlay').style.display = 'flex';
-            }
+            await initApp();
+            _restoreLastView();
         });
 
         function _restoreLastView() {
-            var savedView = localStorage.getItem('docproc_current_view');
+            var savedView = localStorage.getItem('docflow_current_view');
             if (savedView === 'fb') {
-                var savedKbId = localStorage.getItem('docproc_current_fb_id');
-                if (savedKbId) {
-                    if (typeof FileBase !== 'undefined') {
+                _loadScript('js/fb.js', function() {
+                    var savedKbId = localStorage.getItem('docflow_current_fb_id');
+                    if (savedKbId && typeof FileBase !== 'undefined') {
                         FileBase.currentFbId = savedKbId;
-                        FileBase.fbCurrentPermission = localStorage.getItem('docproc_current_fb_permission') || 'view';
-                        FileBase.fbName = localStorage.getItem('docproc_current_fb_name') || '';
-                        FileBase.fbLocalPath = localStorage.getItem('docproc_current_fb_local_path') || '';
-                        FileBase.fbDisplayPath = localStorage.getItem('docproc_current_fb_display_path') || '';
+                        FileBase.fbCurrentPermission = localStorage.getItem('docflow_current_fb_permission') || 'view';
+                        FileBase.fbName = localStorage.getItem('docflow_current_fb_name') || '';
+                        FileBase.fbLocalPath = localStorage.getItem('docflow_current_fb_local_path') || '';
+                        FileBase.fbDisplayPath = localStorage.getItem('docflow_current_fb_display_path') || '';
                         FileBase.fbCanEdit = FileBase.fbCurrentPermission === 'edit' || FileBase.fbCurrentPermission === 'manage';
                         FileBase.fbCanManage = FileBase.fbCurrentPermission === 'manage';
-                        var savedSubdir = localStorage.getItem('docproc_current_subdir');
+                        var savedSubdir = localStorage.getItem('docflow_current_subdir');
                         if (savedSubdir) {
                             FileBase.fbLocalCurrentSubdir = savedSubdir;
                             var parts = savedSubdir.replace(/\\/g, '/').split('/');
@@ -1382,9 +1172,7 @@
                     if (homeView) homeView.style.display = 'none';
                     if (kbView) kbView.style.display = '';
                     if (typeof FileBase !== 'undefined') FileBase.init();
-                } else {
-                    navigateTo('fb');
-                }
+                });
             } else if (savedView === 'kb') {
                 document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
                 var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
@@ -1437,7 +1225,7 @@ document.addEventListener('click', function(e) {
 });
 
 function navigateTo(view) {
-    localStorage.setItem('docproc_current_view', view);
+    localStorage.setItem('docflow_current_view', view);
 
     document.querySelectorAll('.sidebar-nav-item').forEach(function(el) {
         el.classList.remove('active');
@@ -1449,25 +1237,27 @@ function navigateTo(view) {
     var homeView = document.getElementById('home-view');
 
     if (view === 'home') {
-        localStorage.removeItem('docproc_current_fb_id');
-        localStorage.removeItem('docproc_current_fb_name');
-        localStorage.removeItem('docproc_current_fb_local_path');
-        localStorage.removeItem('docproc_current_fb_display_path');
-        localStorage.removeItem('docproc_current_fb_permission');
+        localStorage.removeItem('docflow_current_fb_id');
+        localStorage.removeItem('docflow_current_fb_name');
+        localStorage.removeItem('docflow_current_fb_local_path');
+        localStorage.removeItem('docflow_current_fb_display_path');
+        localStorage.removeItem('docflow_current_fb_permission');
         if (kbView) kbView.style.display = 'none';
         if (homeView) homeView.style.display = '';
         if (typeof FileBase !== 'undefined') FileBase.currentFbId = null;
     } else if (view === 'fb') {
-        if (!isOwnerMode() && !window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
-        if (typeof FileBase !== 'undefined') { FileBase.currentFbId = null; FileBase.init(); }
+        _loadScript('js/fb.js', function() {
+            if (typeof FileBase !== 'undefined') { FileBase.currentFbId = null; FileBase.init(); }
+        });
     } else if (view === 'kb') {
-        if (!isOwnerMode() && !window.authToken) { alert('请先登录'); return; }
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
-        if (typeof WikiKnowledge !== 'undefined') { WikiKnowledge.init(); }
-        else { alert('知识库模块未加载'); }
+        _loadScript('js/kb.js', function() {
+            if (typeof WikiKnowledge !== 'undefined') { WikiKnowledge.init(); }
+            else { setTimeout(function() { if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init(); }, 500); }
+        });
     } else if (view === 'config') {
         if (typeof openConfig !== 'undefined') openConfig();
     } else if (view === 'about') {
@@ -1758,68 +1548,4 @@ window.confirmKbSelection = function() {
     if (currentTool && workdirInput) loadFileList(workdirInput.value, currentTool);
 };
 
-// ==================== 修改密码 ====================
-
-window.showChangePassword = function() {
-    var overlay = document.getElementById('changePwdOverlay');
-    overlay.style.display = 'flex';
-    setTimeout(function() { overlay.style.opacity = '1'; }, 10);
-    document.getElementById('changePwd-old').value = '';
-    document.getElementById('changePwd-new').value = '';
-    document.getElementById('changePwd-confirm').value = '';
-    document.getElementById('changePwd-error').style.display = 'none';
-    document.getElementById('changePwd-old').focus();
-};
-
-window.hideChangePassword = function() {
-    var overlay = document.getElementById('changePwdOverlay');
-    overlay.style.opacity = '0';
-    setTimeout(function() { overlay.style.display = 'none'; }, 250);
-};
-
-window.doChangePassword = async function() {
-    var oldPwd = document.getElementById('changePwd-old').value.trim();
-    var newPwd = document.getElementById('changePwd-new').value.trim();
-    var confirmPwd = document.getElementById('changePwd-confirm').value.trim();
-    var errorDiv = document.getElementById('changePwd-error');
-
-    errorDiv.style.display = 'none';
-
-    if (!oldPwd) {
-        errorDiv.textContent = '请输入原密码';
-        errorDiv.style.display = 'block';
-        return;
-    }
-    if (!newPwd || newPwd.length < 6) {
-        errorDiv.textContent = '新密码至少 6 个字符';
-        errorDiv.style.display = 'block';
-        return;
-    }
-    if (newPwd !== confirmPwd) {
-        errorDiv.textContent = '两次输入的密码不一致';
-        errorDiv.style.display = 'block';
-        return;
-    }
-
-    try {
-        var resp = await apiFetch('/api/user/change-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                old_password: oldPwd,
-                new_password: newPwd
-            })
-        });
-        var data = await resp.json();
-        if (data.success) {
-            hideChangePassword();
-            alert('密码修改成功！');
-        } else {
-            errorDiv.textContent = data.message || '修改失败';
-            errorDiv.style.display = 'block';
-        }
-    } catch (e) {
-        errorDiv.textContent = '请求失败: ' + e.message;
-        errorDiv.style.display = 'block';
-    }
-};
+// ==================== 文件库选择器 ====================

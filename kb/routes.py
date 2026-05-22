@@ -6,7 +6,7 @@ import json
 from flask import Blueprint, request, jsonify, g, Response, stream_with_context
 from functools import wraps
 
-from server.auth import login_required, admin_required
+from server.auth import login_required
 from kb.database import get_db
 from kb.search import search_wiki
 from kb.llm import is_llm_available, call_llm
@@ -23,11 +23,8 @@ def _check_wiki_permission(usr_id, target_usr_id, required_level):
     """检查用户对目标用户知识库的权限"""
     if not usr_id:
         return False
-    # 检查是否为管理员：从 g 或数据库获取当前用户角色
-    from server.auth import _load_json, _get_users_path
-    users = _load_json(_get_users_path())
-    user_info = users.get(usr_id, {})
-    if user_info.get('role', 'viewer') == 'admin':
+    # 单用户桌面版，当前用户即为 admin
+    if usr_id == 'admin':
         return True
     if usr_id == target_usr_id:
         return True
@@ -79,7 +76,8 @@ def _list_system_skills() -> list:
             skill_md = os.path.join(skill_dir, 'SKILL.md')
             if os.path.exists(skill_md):
                 try:
-                    content = open(skill_md, 'r', encoding='utf-8').read()
+                    with open(skill_md, 'r', encoding='utf-8') as fh:
+                        content = fh.read()
                     fm = _parse_frontmatter(content)
                     skills.append({
                         "name": name,

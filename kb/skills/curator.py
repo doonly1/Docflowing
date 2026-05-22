@@ -125,7 +125,7 @@ def _save_curator_state(user_id: str, state: Dict[str, Any]):
 def _reports_dir(user_id: str) -> Path:
     from server.workspace import _get_workspace_dir
     base = _get_workspace_dir(user_id)
-    d = Path(base) / "kb" / "data" / "curator_reports"
+    d = Path(base) / "data" / "kb" / "data" / "curator_reports"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
