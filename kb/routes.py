@@ -296,9 +296,6 @@ def _list_imported_files(usr_id, subdir):
 def get_file_content(file_path):
     usr_id = g.user_id
 
-    if not file_path.startswith('imported/'):
-        return jsonify({'success': False, 'message': '不支持的路径'}), 400
-
     conn = get_db(usr_id)
     row = conn.execute(
         "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
@@ -307,10 +304,12 @@ def get_file_content(file_path):
     if not row:
         return jsonify({'success': False, 'message': '文件不存在'}), 404
 
+    # 从路径推断文件类型
+    ext = os.path.splitext(file_path)[1].lower()
     return jsonify({
         'success': True,
         'content': row['content'],
-        'file_type': '.md'
+        'file_type': ext or '.md'
     })
 
 
@@ -386,10 +385,14 @@ def agent_context():
                 continue
 
             doc_content = _extract_relevant_snippets(row['content'], keywords, doc_budget)
-            context_parts.append(f"## {r['title']}\n\n{doc_content}")
+            context_parts.append(f"## {r['title']}\n{doc_content}")
             total_chars += len(doc_content)
 
-        kb_context = '\n\n---\n\n'.join(context_parts)
+        kb_context = '\n\n'.join(context_parts)
+
+        # 移除 markdown 加粗/斜体标记，避免与标题混淆
+        kb_context = re.sub(r'\*\*([^*]+)\*\*', r'\1', kb_context)
+        kb_context = re.sub(r'\*([^*]+)\*', r'\1', kb_context)
 
         # 对非LLM返回的匹配内容做关键词高亮标记
         kb_context_marked = kb_context or ''

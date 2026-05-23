@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="max-age=86400">
     <title>文枢</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e94560'/><text x='16' y='23' font-size='20' font-family='serif' font-weight='bold' fill='white' text-anchor='middle'>文</text></svg>" type="image/svg+xml">
     <style>
@@ -28,6 +29,9 @@
         .sidebar {
             width: 56px;
             min-width: 56px;
+            height: 100vh;
+            position: sticky;
+            top: 0;
             background: #fff;
             display: flex;
             flex-direction: column;
@@ -665,10 +669,119 @@
             color: #999;
             padding: 4px 0;
         }
+
+        /* ──────── Toast 轻提示 ──────── */
+        .custom-toast {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #fff;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            white-space: nowrap;
+            max-width: 80vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+        .custom-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        .custom-toast-info    { background: #4a90d9; }
+        .custom-toast-success  { background: #28a745; }
+        .custom-toast-error    { background: #dc3545; }
+        .custom-toast-warning  { background: #f0ad4e; color: #333; }
+
+        /* ──────── 自定义对话框 ──────── */
+        .custom-dialog-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.35);
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .custom-dialog-overlay.show {
+            opacity: 1;
+        }
+        .custom-dialog {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 24px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+            border: 1px solid rgba(0,0,0,0.08);
+            transform: scale(0.95);
+            transition: transform 0.2s ease;
+        }
+        .custom-dialog-overlay.show .custom-dialog {
+            transform: scale(1);
+        }
+        .custom-dialog-message {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 16px;
+            line-height: 1.6;
+            word-break: break-word;
+        }
+        .custom-dialog-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+        .custom-dialog-input:focus {
+            border-color: #e94560;
+        }
+        .custom-dialog-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .custom-dialog-btn {
+            padding: 6px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+        .custom-dialog-btn-cancel {
+            background: #e2e3e5;
+            color: #555;
+        }
+        .custom-dialog-btn-cancel:hover {
+            background: #d0d1d3;
+        }
+        .custom-dialog-btn-confirm {
+            background: linear-gradient(135deg, #e94560, #c41e3a);
+            color: #fff;
+        }
+        .custom-dialog-btn-confirm:hover {
+            box-shadow: 0 2px 10px rgba(233,69,96,0.35);
+        }
     </style>
-    <link rel="stylesheet" href="js/fb.css?v=2">
-    <link rel="stylesheet" href="js/kb.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
+    <link rel="preload" href="js/main.js" as="script">
+    <link rel="stylesheet" href="js/fb.css?v=2" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="js/kb.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="js/fb.css?v=2"><link rel="stylesheet" href="js/kb.css"></noscript>
 </head>
 <body>
     <!-- 关于弹窗 overlay -->
@@ -689,12 +802,16 @@
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom" id="sidebar-more-btn" onclick="toggleSidebarMenu(event)">
             <div class="sidebar-nav-item" data-label="更多">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </div>
         </div>
         <div class="sidebar-popup" id="sidebar-popup" style="display:none">
-            <div class="sidebar-nav-item sidebar-popup-item" data-view="config" data-label="配置" onclick="navigateTo('config');toggleSidebarMenu()">
+            <div class="sidebar-nav-item sidebar-popup-item" data-view="settings" data-label="设置" onclick="openAppSettings();toggleSidebarMenu()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                设置
+            </div>
+            <div class="sidebar-nav-item sidebar-popup-item" data-view="config" data-label="配置" onclick="navigateTo('config');toggleSidebarMenu()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg>
                 配置
             </div>
             <div class="sidebar-nav-item sidebar-popup-item" data-view="about" data-label="关于" onclick="navigateTo('about');toggleSidebarMenu()">
@@ -756,14 +873,6 @@
                 </div>
             </div>
 
-            <!-- 文件上传区域 -->
-            <div id="remoteUploadGroup" style="display: none;">
-                <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" onchange="handleRemoteUpload(event)">
-                <div id="uploadProgress" style="display: none; margin-top: 8px; padding: 8px; background: #e8f4fd; border-radius: 4px; font-size: 12px;">
-                    <span>正在处理...</span>
-                </div>
-            </div>
-
 
 
             <!-- 文件选择列表（统一双列面板） -->
@@ -779,10 +888,14 @@
 
             <!-- 按钮区域 -->
             <div style="display: flex; gap: 8px; align-items: center;">
-                <button class="btn" id="clearBtn" onclick="clearWorkspace()" style="width: auto; padding: 10px 16px; white-space: nowrap;">🗑️ 清理</button>
+                <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📂 查看</button>
                 <button class="btn" id="openDirBtn" onclick="openWorkdir()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📁 打开</button>
-                <button class="btn" id="downloadBtn" onclick="downloadResults()" style="width: auto; padding: 10px 16px; white-space: nowrap; display: none;">📥 下载</button>
                 <button class="btn" onclick="runTool()" style="flex: 1;">执行</button>
+            </div>
+
+            <!-- 文件列表展示（紧凑） -->
+            <div id="fileListPanel" style="display: none; margin-top: 8px;">
+                <div id="fileList" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
             </div>
 
             <p class="intro" id="toolIntro" style="margin-top: 10px;"></p>
@@ -798,20 +911,10 @@
     <div class="modal-overlay" id="configModal">
         <div class="modal">
             <div class="modal-header">
-                <h2>配置文件设置</h2>
+                <h2>配置文件</h2>
                 <button class="modal-close" onclick="closeConfig()">&times;</button>
             </div>
             
-            <div class="config-toggle">
-                <label for="useUserConfig" style="font-weight: bold; color: #1a1a2e;">
-                    <input type="checkbox" id="useUserConfig" onchange="toggleUserConfig()" checked>
-                    ✓ 使用自定义配置
-                </label>
-                <span class="config-info" style="margin-left: 10px; font-size: 11px; color: #666;">
-                    配置持久化到服务端，按用户账号隔离
-                </span>
-            </div>
-
             <div class="config-tabs">
                 <button class="config-tab active" onclick="switchConfigTab('company')">机构配置</button>
                 <button class="config-tab" onclick="switchConfigTab('compare')">比较配置</button>
@@ -829,8 +932,8 @@
                         <li>单位名称：发文单位全称</li>
                         <li>简称：单位简称列表，用于匹配印章文件</li>
                         <li>代字：发文代字，用于生成文号</li>
-                        <li>印章位置：印章图片文件路径，如 ./单位名.png</li>
-                        <li>印章文件名需与单位名称一致，如"哈喽沃尔得有限公司.png"</li>
+                        <li>印章位置：印章图片文件路径（可自定义路径和文件名）</li>
+                        <li>不填写印章位置时，默认按 单位全称.png 在 config/ 目录下查找</li>
                     </ul>
                 </div>
             </div>
@@ -976,10 +1079,46 @@
         .fb-docx-preview-content img { max-width: 100% !important; height: auto !important; }
     </style>
     
-    <script src="js/main.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+    <script src="js/main.js" defer></script>
+    <script>
+    window._loadScriptAsync = function(url) {
+        return new Promise(function(resolve, reject) {
+            var s = document.createElement('script');
+            s.src = url;
+            s.async = true;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    };
+    window._ensureQuill = function() {
+        if (window._quillPromise) return window._quillPromise;
+        if (typeof Quill !== 'undefined') return Promise.resolve();
+        window._quillPromise = Promise.all([
+            window._loadScriptAsync('https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js'),
+            new Promise(function(resolve) {
+                var l = document.createElement('link');
+                l.rel = 'stylesheet';
+                l.href = 'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css';
+                l.onload = resolve;
+                document.head.appendChild(l);
+            })
+        ]);
+        return window._quillPromise;
+    };
+    window._ensureMarked = function() {
+        if (window._markedPromise) return window._markedPromise;
+        if (typeof marked !== 'undefined') return Promise.resolve();
+        window._markedPromise = window._loadScriptAsync('https://cdn.jsdelivr.net/npm/marked/marked.min.js');
+        return window._markedPromise;
+    };
+    window._ensureTurndown = function() {
+        if (window._turndownPromise) return window._turndownPromise;
+        if (typeof TurndownService !== 'undefined') return Promise.resolve();
+        window._turndownPromise = window._loadScriptAsync('https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js');
+        return window._turndownPromise;
+    };
+    </script>
 
 
     <!-- KB选择器弹窗 -->
@@ -996,5 +1135,8 @@
             </div>
         </div>
     </div>
+
+    <!-- 应用设置弹窗 -->
+    <div id="settingsOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
 </body>
 </html>

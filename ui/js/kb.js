@@ -632,49 +632,50 @@ var WikiKnowledge = {
     deleteMessage: function(index) {
         var msg = this.messages[index];
         if (!msg) return;
-        if (!confirm('确定要删除这条消息吗？')) return;
-
         var self = this;
-        var idsToDelete = [];
-        var deleteCount = 0;
+        showConfirm('确定要删除这条消息吗？').then(function(ok) {
+            if (!ok) return;
+            var idsToDelete = [];
+            var deleteCount = 0;
 
-        if (msg.role === 'assistant' && index > 0 && this.messages[index - 1].role === 'user') {
-            if (this.messages[index].msg_id) idsToDelete.push(this.messages[index].msg_id);
-            if (this.messages[index - 1].msg_id) idsToDelete.push(this.messages[index - 1].msg_id);
-            deleteCount = 2;
-        } else if (msg.role === 'user' && index + 1 < this.messages.length && this.messages[index + 1].role === 'assistant') {
-            if (this.messages[index].msg_id) idsToDelete.push(this.messages[index].msg_id);
-            if (this.messages[index + 1].msg_id) idsToDelete.push(this.messages[index + 1].msg_id);
-            deleteCount = 2;
-        } else {
-            if (msg.msg_id) idsToDelete.push(msg.msg_id);
-            deleteCount = 1;
-        }
-
-        var doLocalDelete = function() {
             if (msg.role === 'assistant' && index > 0 && self.messages[index - 1].role === 'user') {
-                self.messages.splice(index - 1, 2);
+                if (self.messages[index].msg_id) idsToDelete.push(self.messages[index].msg_id);
+                if (self.messages[index - 1].msg_id) idsToDelete.push(self.messages[index - 1].msg_id);
+                deleteCount = 2;
             } else if (msg.role === 'user' && index + 1 < self.messages.length && self.messages[index + 1].role === 'assistant') {
-                self.messages.splice(index, 2);
+                if (self.messages[index].msg_id) idsToDelete.push(self.messages[index].msg_id);
+                if (self.messages[index + 1].msg_id) idsToDelete.push(self.messages[index + 1].msg_id);
+                deleteCount = 2;
             } else {
-                self.messages.splice(index, 1);
+                if (msg.msg_id) idsToDelete.push(msg.msg_id);
+                deleteCount = 1;
             }
-            self._renderMessages();
-        };
 
-        if (idsToDelete.length > 0 && this.sessionId) {
-            apiFetch('/api/kb/session/' + this.sessionId + '/messages', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message_ids: idsToDelete })
-            }).catch(function(e) {
-                console.error('删除消息失败:', e);
-            }).then(function() {
+            var doLocalDelete = function() {
+                if (msg.role === 'assistant' && index > 0 && self.messages[index - 1].role === 'user') {
+                    self.messages.splice(index - 1, 2);
+                } else if (msg.role === 'user' && index + 1 < self.messages.length && self.messages[index + 1].role === 'assistant') {
+                    self.messages.splice(index, 2);
+                } else {
+                    self.messages.splice(index, 1);
+                }
+                self._renderMessages();
+            };
+
+            if (idsToDelete.length > 0 && self.sessionId) {
+                apiFetch('/api/kb/session/' + self.sessionId + '/messages', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_ids: idsToDelete })
+                }).catch(function(e) {
+                    console.error('删除消息失败:', e);
+                }).then(function() {
+                    doLocalDelete();
+                });
+            } else {
                 doLocalDelete();
-            });
-        } else {
-            doLocalDelete();
-        }
+            }
+        });
     },
 
     retryMessage: function(index) {
@@ -740,9 +741,12 @@ var WikiKnowledge = {
                     var src = msg.sources[j];
                     var srcIdx = this._allSources.length;
                     this._allSources.push(src);
+                    var detectPath = src.fb_path || src.path;
+                    var pathName = detectPath ? detectPath.split('/').pop() : '';
+                    var displayName = pathName || src.title || src.path || '';
                     html += '<div class="kb-chat-source-item"' + (j >= maxVisible ? ' style="display:none"' : '') + '>' +
                         '<span class="icon">' + (src._type === 'web' ? '&#x1F310;' : '&#x1F4C4;') + '</span>' +
-                        '<a href="#" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + (src.title || src.path) + '</a>' +
+                        '<a href="javascript:void(0)" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + this._escapeHtml(displayName) + '</a>' +
                     '</div>';
                 }
                 if (msg.sources.length > maxVisible) {
@@ -834,10 +838,10 @@ var WikiKnowledge = {
         escaped = escaped.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
-        // 标题（在 \n→<br> 之前处理）
-        escaped = escaped.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-        escaped = escaped.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-        escaped = escaped.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+        // 标题（在 \n→<br> 之前处理，同时消耗标题后的空行避免多余间距）
+        escaped = escaped.replace(/^###\s+(.+)\n*/gm, '<h3>$1</h3>');
+        escaped = escaped.replace(/^##\s+(.+)\n*/gm, '<h2>$1</h2>');
+        escaped = escaped.replace(/^#\s+(.+)\n*/gm, '<h1>$1</h1>');
 
         // 表格（在 \n→<br> 之前处理）
         escaped = escaped.replace(/((?:^\|.*(?:\n|$))+)/gm, function(m) {
@@ -890,20 +894,23 @@ var WikiKnowledge = {
 
     clearChat: function() {
         if (this.messages.length === 0) return;
-        if (!confirm('确定要清空当前对话吗？')) return;
+        var self = this;
+        showConfirm('确定要清空当前对话吗？').then(function(ok) {
+            if (!ok) return;
 
-        if (this.sessionId) {
-            apiFetch('/api/kb/session/' + this.sessionId, { method: 'DELETE' })
-                .catch(function(e) { console.error('删除会话失败:', e); });
-            this.sessionId = null;
-            this._saveSessionId();
-        }
+            if (self.sessionId) {
+                apiFetch('/api/kb/session/' + self.sessionId, { method: 'DELETE' })
+                    .catch(function(e) { console.error('删除会话失败:', e); });
+                self.sessionId = null;
+                self._saveSessionId();
+            }
 
-        this.messages = [];
-        this._renderMessages();
+            self.messages = [];
+            self._renderMessages();
 
-        var emptyEl = document.getElementById('kb-empty-state');
-        if (emptyEl) emptyEl.style.display = 'flex';
+            var emptyEl = document.getElementById('kb-empty-state');
+            if (emptyEl) emptyEl.style.display = 'flex';
+        });
     },
 
     newSession: function() {
@@ -946,43 +953,41 @@ var WikiKnowledge = {
     viewSource: function(index) {
         var src = this._allSources[index];
         if (!src || !src.path) return;
-        // 网页搜索结果，直接打开 URL
+        // 网页搜索结果
         if (src._type === 'web') {
             window.open(src.path, '_blank');
             return;
         }
-        var detectPath = src.fb_path || src.path;
-        var fileName = detectPath.split('/').pop();
-        var ext = fileName.split('.').pop().toLowerCase();
-
-        if (ext === 'docx') {
-            this._previewDocxFile(src);
-        } else if (ext === 'md' || ext === 'txt') {
-            this._previewTextFile(src);
-        } else if (ext === 'pdf') {
-            this._previewPdfFile(src);
-        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-            this._previewImageFile(src);
-        } else {
-            if (src.fb_id && src.fb_path) {
-                window.open('/api/fb/' + src.fb_id + '/local-files/open?path=' + encodeURIComponent(src.fb_path), '_blank');
+        // 文件库文件：直接用 fb_id + fb_path 调预览
+        if (src.fb_id && src.fb_path) {
+            var ext = src.fb_path.split('.').pop().toLowerCase();
+            if (['docx', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext)) {
+                this._previewDocxFile(src);
+            } else if (ext === 'pdf') {
+                this._previewPdfFile(src);
+            } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+                this._previewImageFile(src);
             } else {
-                window.open('/api/kb/files/' + encodeURIComponent(src.path), '_blank');
+                this._previewTextFile(src);
             }
+            return;
         }
+        // wiki 原生文件
+        this._previewTextFile(src);
     },
     
     _previewDocxFile: async function(src) {
         var fileName = (src.fb_path || src.path).split('/').pop();
         var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
         var filePath = src.fb_path || src.path;
+        var safeName = (typeof escapeHtmlText === 'function') ? escapeHtmlText(fileName) : this._escapeHtml(fileName);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
             '<div class="fb-docx-preview-container">' +
             '<div class="fb-docx-preview-header">' +
-            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<span>📄 ' + safeName + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
             '<div class="fb-docx-preview-content" id="preview-content">' +
@@ -995,11 +1000,20 @@ var WikiKnowledge = {
         document.body.appendChild(overlay);
         
         try {
-            var res = await apiFetch('/api/fb/' + kbId + '/local-files/docx-preview?path=' + encodeURIComponent(filePath), { method: 'GET' });
+            var res = await apiFetch('/api/fb/' + kbId + '/local-files/preview?path=' + encodeURIComponent(filePath), { method: 'GET' });
             var data = await res.json();
             var contentEl = document.getElementById('preview-content');
             if (data.success) {
-                contentEl.innerHTML = data.html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+                var html = data.markdown || '';
+                if (html) {
+                    try {
+                        await window._ensureMarked();
+                        html = marked.parse(html);
+                    } catch (e) {
+                        html = '<pre style="white-space:pre-wrap;word-break:break-all">' + this._escapeHtml(html) + '</pre>';
+                    }
+                }
+                contentEl.innerHTML = html || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
             } else {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (data.message || '未知错误') + '</div>';
             }
@@ -1041,7 +1055,12 @@ var WikiKnowledge = {
             if (data.success) {
                 var content = escapeHtmlText(data.content || '');
                 if (data.file_type === '.md') {
-                    content = marked.parse(content);
+                    try {
+                        await window._ensureMarked();
+                        content = marked.parse(content);
+                    } catch (e) {
+                        content = '<pre style="white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 13px;">' + content + '</pre>';
+                    }
                 } else {
                     content = '<pre style="white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 13px;">' + content + '</pre>';
                 }
@@ -1067,17 +1086,18 @@ var WikiKnowledge = {
         var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
         var filePath = src.fb_path || src.path;
         var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(filePath);
+        var safeName = (typeof escapeHtmlText === 'function') ? escapeHtmlText(fileName) : this._escapeHtml(fileName);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
             '<div class="fb-docx-preview-container">' +
             '<div class="fb-docx-preview-header">' +
-            '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
+            '<span>📄 ' + safeName + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
             '<div class="fb-docx-preview-content" style="padding:0">' +
-            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
+            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;"></iframe>' +
             '</div>' +
             '</div>';
         document.body.appendChild(overlay);
@@ -1088,17 +1108,18 @@ var WikiKnowledge = {
         var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
         var filePath = src.fb_path || src.path;
         var fileUrl = '/api/fb/' + kbId + '/local-files/open?path=' + encodeURIComponent(filePath);
+        var safeName = (typeof escapeHtmlText === 'function') ? escapeHtmlText(fileName) : this._escapeHtml(fileName);
         
         var overlay = document.createElement('div');
         overlay.className = 'fb-docx-preview-overlay';
         overlay.innerHTML = 
             '<div class="fb-docx-preview-container">' +
             '<div class="fb-docx-preview-header">' +
-            '<span>🖼️ ' + escapeHtmlText(fileName) + '</span>' +
+            '<span>🖼️ ' + safeName + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
             '<div class="fb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
-            '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
+            '<img src="' + fileUrl + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
             '</div>' +
             '</div>';
         document.body.appendChild(overlay);
@@ -1223,32 +1244,33 @@ var WikiKnowledge = {
                 }
                 self.showSessions();
             } else {
-                alert('删除失败: ' + (data.error || '未知错误'));
+                showToast('删除失败: ' + (data.error || '未知错误'), 'error');
             }
         }).catch(function(e) {
-            alert('删除失败: ' + e.message);
+            showToast('删除失败: ' + e.message, 'error');
         });
     },
 
     clearAllSessions: function() {
-        if (!confirm('确定要清除所有会话吗？此操作不可恢复！')) return;
-
         var self = this;
-        apiFetch('/api/kb/sessions', { method: 'DELETE' }).then(function(resp) {
-            return resp.json();
-        }).then(function(data) {
-            if (data.success) {
-                self.sessionId = null;
-                self._saveSessionId();
-                self.messages = [];
-                self._switchToInitial();
-                self._renderMessages();
-                self.closeSidebar();
-            } else {
-                alert('清除失败: ' + (data.error || '未知错误'));
-            }
-        }).catch(function(e) {
-            alert('清除失败: ' + e.message);
+        showConfirm('确定要清除所有会话吗？此操作不可恢复！').then(function(ok) {
+            if (!ok) return;
+            apiFetch('/api/kb/sessions', { method: 'DELETE' }).then(function(resp) {
+                return resp.json();
+            }).then(function(data) {
+                if (data.success) {
+                    self.sessionId = null;
+                    self._saveSessionId();
+                    self.messages = [];
+                    self._switchToInitial();
+                    self._renderMessages();
+                    self.closeSidebar();
+                } else {
+                    showToast('清除失败: ' + (data.error || '未知错误'), 'error');
+                }
+            }).catch(function(e) {
+                showToast('清除失败: ' + e.message, 'error');
+            });
         });
     },
 
@@ -1340,10 +1362,10 @@ var WikiKnowledge = {
                 self._loadMemoryUsage();
                 self.showMemory();
             } else {
-                alert(data.error || '添加失败');
+                showToast(data.error || '添加失败', 'error');
             }
         }).catch(function(e) {
-            alert('添加失败: ' + e.message);
+            showToast('添加失败: ' + e.message, 'error');
         });
     },
 
@@ -1414,12 +1436,12 @@ var WikiKnowledge = {
         var description = inputEl.value.trim();
 
         if (!rawName) {
-            alert('请输入技能名称');
+            showToast('请输入技能名称', 'error');
             nameEl.focus();
             return;
         }
         if (!description) {
-            alert('请输入技能描述');
+            showToast('请输入技能描述', 'error');
             inputEl.focus();
             return;
         }
@@ -1446,10 +1468,10 @@ var WikiKnowledge = {
                 inputEl.value = '';
                 self.showSkills();
             } else {
-                alert(data.error || '创建失败');
+                showToast(data.error || '创建失败', 'error');
             }
         }).catch(function(e) {
-            alert('创建失败: ' + e.message);
+            showToast('创建失败: ' + e.message, 'error');
         });
     },
 
@@ -1458,7 +1480,7 @@ var WikiKnowledge = {
         apiFetch('/api/kb/skills/' + skillName, { method: 'GET' }).then(function(resp) {
             return resp.json();
         }).then(function(data) {
-            if (!data.success) { alert(data.error || '加载失败'); return; }
+            if (!data.success) { showToast(data.error || '加载失败', 'error'); return; }
             var fm = data.frontmatter || {};
             var cat = fm.category || '';
             // 从 content 中去掉 frontmatter 得到描述
@@ -1478,7 +1500,7 @@ var WikiKnowledge = {
             '</div>';
             self.openSidebar('📝 编辑技能', html);
         }).catch(function(e) {
-            alert('加载失败: ' + e.message);
+            showToast('加载失败: ' + e.message, 'error');
         });
     },
 
@@ -1489,7 +1511,7 @@ var WikiKnowledge = {
         if (!inputEl) return;
         var category = catEl ? catEl.value.trim() : '';
         var description = inputEl.value.trim();
-        if (!description) { alert('请输入技能描述'); return; }
+        if (!description) { showToast('请输入技能描述', 'error'); return; }
         var name = nameEl ? nameEl.value.trim() : skillName;
         var content = '---\nname: ' + name + '\n';
         if (category) content += 'category: ' + category + '\n';
@@ -1506,17 +1528,18 @@ var WikiKnowledge = {
             if (data.success) {
                 self.showSkills();
             } else {
-                alert(data.error || '保存失败');
+                showToast(data.error || '保存失败', 'error');
             }
         }).catch(function(e) {
-            alert('保存失败: ' + e.message);
+            showToast('保存失败: ' + e.message, 'error');
         });
     },
 
     deleteSkill: function(skillName) {
-        if (!confirm('确定要删除技能 "' + skillName + '" 吗？')) return;
         var self = this;
-        apiFetch('/api/kb/skills/' + skillName, {
+        showConfirm('确定要删除技能 "' + skillName + '" 吗？').then(function(ok) {
+            if (!ok) return;
+            apiFetch('/api/kb/skills/' + skillName, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: '{}'
@@ -1526,10 +1549,11 @@ var WikiKnowledge = {
             if (data.success) {
                 self.showSkills();
             } else {
-                alert(data.error || '删除失败');
+                showToast(data.error || '删除失败', 'error');
             }
         }).catch(function(e) {
-            alert('删除失败: ' + e.message);
+            showToast('删除失败: ' + e.message, 'error');
+        });
         });
     },
 
@@ -1715,7 +1739,7 @@ var WikiKnowledge = {
         var fetchBtn = document.getElementById('kb-llm-fetch-models');
 
         if (!baseUrlInput || !baseUrlInput.value.trim()) {
-            alert('请先填写 API 地址');
+            showToast('请先填写 API 地址', 'error');
             return;
         }
 

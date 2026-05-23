@@ -1,4 +1,7 @@
+import asyncio
+import os
 import socket
+import sys
 import threading
 import time
 
@@ -7,8 +10,15 @@ from logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Windows 上 zeroconf 使用 asyncio ProactorEventLoop (IOCP) 时，
+# UDP multicast socket 在网络波动后可能抛出 WinError 59。
+# 改用 SelectorEventLoop 策略兼容性更好。
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 _SERVICE_TYPE = "_docflow-p2p._tcp.local."
 _TTL = 120  # 节点存活时间（秒）
+_HEALTH_CHECK_INTERVAL = 30  # 健康检查间隔（秒）
 
 
 class NodeDiscovery:
@@ -27,6 +37,9 @@ class NodeDiscovery:
         self._discovered: dict[str, dict] = {}
         self._lock = threading.Lock()
 
+        self._stopped = False
+        self._health_thread: threading.Thread | None = None
+
     # ─────────────────────────────────────────────
     # 公开 API
     # ─────────────────────────────────────────────
@@ -36,26 +49,96 @@ class NodeDiscovery:
         if self._zeroconf is not None:
             return
 
+        self._stopped = False
         self._zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
         self._register()
         self._browse()
         logger.info("P2P discovery started (mDNS %s)", _SERVICE_TYPE)
 
+        # 启动后台健康检查线程
+        self._health_thread = threading.Thread(target=self._health_check_loop, daemon=True, name="mDNSHealth")
+        self._health_thread.start()
+
     def stop(self):
         """停止并清理资源"""
+        self._stopped = True
+
         if self._browser:
             self._browser.cancel()
             self._browser = None
 
         if self._service_info and self._zeroconf:
-            self._zeroconf.unregister_service(self._service_info)
+            try:
+                self._zeroconf.unregister_service(self._service_info)
+            except Exception:
+                pass  # socket 可能已损坏
             self._service_info = None
 
         if self._zeroconf:
-            self._zeroconf.close()
+            try:
+                self._zeroconf.close()
+            except Exception:
+                pass  # socket 可能已损坏
             self._zeroconf = None
 
         logger.info("P2P discovery stopped")
+
+    def _health_check_loop(self):
+        """定期检查 zeroconf 实例的健康状态，损坏时自动重启"""
+        while not self._stopped:
+            time.sleep(_HEALTH_CHECK_INTERVAL)
+            if self._stopped:
+                break
+            if self._zeroconf and not self._is_zeroconf_alive():
+                logger.warning("mDNS zeroconf 实例检测到异常，正在重启...")
+                self._restart_zeroconf()
+
+    def _is_zeroconf_alive(self) -> bool:
+        """通过尝试获取本地服务列表来判断 zeroconf 是否存活"""
+        try:
+            if self._zeroconf is None:
+                return False
+            _ = self._zeroconf.get_service_info(_SERVICE_TYPE, f"{self.node_id}.{_SERVICE_TYPE}", 0.5)
+            return True
+        except (OSError, RuntimeError, Exception):
+            return False
+
+    def _restart_zeroconf(self):
+        """安全重启 zeroconf 实例"""
+        logger.info("正在重启 mDNS 服务...")
+        old_zc = self._zeroconf
+        old_browser = self._browser
+        old_service = self._service_info
+
+        self._zeroconf = None
+        self._browser = None
+        self._service_info = None
+
+        # 清理旧的资源（忽略错误）
+        if old_browser:
+            try:
+                old_browser.cancel()
+            except Exception:
+                pass
+        if old_service and old_zc:
+            try:
+                old_zc.unregister_service(old_service)
+            except Exception:
+                pass
+        if old_zc:
+            try:
+                old_zc.close()
+            except Exception:
+                pass
+
+        try:
+            self._zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
+            self._register()
+            self._browse()
+            logger.info("mDNS 服务重启成功")
+        except Exception as e:
+            logger.warning("mDNS 服务重启失败: %s", e)
+            self._zeroconf = None
 
     def get_discovered_nodes(self) -> list[dict]:
         """返回当前在线的节点列表"""

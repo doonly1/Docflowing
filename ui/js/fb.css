@@ -366,8 +366,6 @@ body.fb-resizing {
 .fb-file-table td {
     padding: 5px 10px;
     border-bottom: 1px solid #f0f0f0;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .fb-file-table tbody tr:hover {
@@ -383,7 +381,7 @@ body.fb-resizing {
 }
 
 .fb-file-table .col-cb {
-    width: 32px;
+    width: 28px;
     text-align: center;
 }
 
@@ -393,7 +391,7 @@ body.fb-resizing {
 }
 
 .fb-file-table .col-icon {
-    width: 32px;
+    width: 28px;
     text-align: center;
 }
 
@@ -410,20 +408,21 @@ body.fb-resizing {
 }
 
 .fb-file-table .col-size {
-    width: 80px;
+    width: 70px;
     text-align: right;
 }
 
 .fb-file-table .col-actions {
-    width: 90px;
+    width: 70px;
     text-align: center;
 }
 
 .fb-file-icon {
     font-size: 16px;
-    width: 20px;
-    text-align: center;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
 }
 
 /* 文件类型图标 */
@@ -453,14 +452,22 @@ body.fb-resizing {
 .fb-icon-html { background: #e44d26; }
 .fb-icon-img  { background: #9b59b6; }
 .fb-icon-zip  { background: #795548; }
+.fb-icon-py   { background: #3572a5; color:#fff; }
+.fb-icon-js   { background: #f7df1e; color:#333; }
+.fb-icon-css  { background: #563d7c; }
+.fb-icon-json { background: #5a5a5a; }
+.fb-icon-xml  { background: #5a5a5a; }
+.fb-icon-audio { background: #e91e63; }
+.fb-icon-video { background: #9c27b0; }
 .fb-icon-other { background: #b0b0b0; }
+.fb-file-icon-file.fb-icon-other { font-size: 6px; }
 
 .fb-file-name {
     color: #333;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
 }
 
 .fb-file-name:hover {

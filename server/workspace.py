@@ -200,6 +200,31 @@ def api_download_results():
     except Exception as e:
         return jsonify({'success': False, 'message': f'打包失败: {str(e)}'})
 
+@workspace_bp.route('/open_folder', methods=['POST'])
+@login_required
+def api_open_folder():
+    """用系统文件管理器打开指定目录"""
+    import platform
+    import subprocess
+
+    data = request.get_json() or {}
+    directory = data.get('directory')
+
+    if not directory or not os.path.isdir(directory):
+        return jsonify({'success': False, 'message': '目录不存在或无效'})
+
+    try:
+        system = platform.system()
+        if system == 'Windows':
+            os.startfile(directory)
+        elif system == 'Darwin':
+            subprocess.run(['open', directory], check=True)
+        else:
+            subprocess.run(['xdg-open', directory], check=True)
+        return jsonify({'success': True, 'message': '已打开目录'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @workspace_bp.route('/clear_workspace', methods=['POST'])
 @login_required
 def api_clear_workspace():

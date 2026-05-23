@@ -52,6 +52,15 @@ def setup_logging(level=None):
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
 
+    # 压制 zeroconf 库的冗余 WARNING 日志（WinError 59 等已被内部捕获）
+    _suppress_noisy_loggers()
+
+
+def _suppress_noisy_loggers():
+    """将已知的嘈杂日志器提升到 ERROR 级别"""
+    for logger_name in ('zeroconf', 'asyncio'):
+        logging.getLogger(logger_name).setLevel(logging.ERROR)
+
 
 def get_logger(name):
     return logging.getLogger(name)

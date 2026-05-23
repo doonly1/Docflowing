@@ -447,9 +447,9 @@ def _extract_relevant_snippets(content: str, keywords: list, max_chars: int = 30
         trimmed_bodies.append(_extract_from_keyword(para, keywords))
 
     # 限制总长
-    snippet = '\n\n'.join(trimmed_bodies)
+    snippet = '\n'.join(trimmed_bodies)
     if len(snippet) > max_chars:
-        snippet = snippet[:max_chars] + f"\n\n... (truncated at {max_chars} chars)"
+        snippet = snippet[:max_chars] + "..."
 
     return snippet
 

@@ -3,7 +3,10 @@
 配置存储位置：workspaces/config/user_config.yaml（首次启动自动用默认值生成）
 """
 
+import json
 import os
+import platform
+
 import yaml
 
 from flask import Blueprint, request, jsonify, g
@@ -20,6 +23,16 @@ _DEFAULT_DOC_CONFIG = {
         'short_para_char_threshold': 50,
     },
     'last_workdir': '',
+    '哈喽沃尔得有限公司': {
+        '简称': ['哈喽公司', '沃尔得'],
+        '代字': '哈沃发',
+        '印章位置': './config/哈喽沃尔得有限公司.png',
+    },
+}
+
+_DEFAULT_APP_SETTINGS = {
+    'autostart': False,
+    'close_action': 'exit',
 }
 
 # ==================== 配置路径 / 初始化 ====================
@@ -35,6 +48,10 @@ def _get_user_config_path(user_id=None):
     """获取用户配置文件路径"""
     return os.path.join(_get_user_config_dir(), 'user_config.yaml')
 
+def _get_app_settings_path():
+    """获取应用设置文件路径"""
+    return os.path.join(_get_user_config_dir(), 'app_settings.json')
+
 def ensure_user_config(user_id=None):
     """确保配置文件存在（首次用默认值创建）"""
     config_path = _get_user_config_path()
@@ -46,12 +63,11 @@ def ensure_user_config(user_id=None):
             pass
     return config_path
 
-# ==================== 配置 API ====================
+# ==================== 文档配置 API ====================
 
 @settings_bp.route('/get_config', methods=['POST'])
 @login_required
 def api_get_config():
-    data = request.get_json() if request.is_json else {}
     config_path = ensure_user_config(g.user_id)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -76,3 +92,105 @@ def api_save_config():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': f'保存配置失败: {str(e)}'})
+
+# ==================== 应用设置 API（开机自启/关闭行为）====================
+
+def _load_app_settings():
+    """加载应用设置"""
+    settings_path = _get_app_settings_path()
+    try:
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            settings = dict(_DEFAULT_APP_SETTINGS)
+            settings.update(saved)
+            return settings
+    except Exception:
+        pass
+    return dict(_DEFAULT_APP_SETTINGS)
+
+
+def _save_app_settings(settings):
+    """保存应用设置"""
+    settings_path = _get_app_settings_path()
+    try:
+        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+        with open(settings_path, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _is_autostart_enabled():
+    """检查开机自启是否已启用（Windows）"""
+    if platform.system() != 'Windows':
+        return False
+    try:
+        import winreg
+        key_path = r'Software\Microsoft\Windows\CurrentVersion\Run'
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+            winreg.QueryValueEx(key, 'DocFlow')
+            return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _set_autostart(enabled):
+    """设置或取消开机自启动（Windows）"""
+    if platform.system() != 'Windows':
+        return False
+    try:
+        import winreg
+        key_path = r'Software\Microsoft\Windows\CurrentVersion\Run'
+        if enabled:
+            python_exe = _find_pythonw()
+            script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app_desktop.py')
+            cmd = f'"{python_exe}" "{script_path}"'
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, 'DocFlow', 0, winreg.REG_SZ, cmd)
+        else:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, 'DocFlow')
+        return True
+    except Exception:
+        return False
+
+
+def _find_pythonw():
+    """查找 pythonw.exe 路径"""
+    import sys
+    pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+    if os.path.isfile(pythonw):
+        return pythonw
+    return sys.executable
+
+
+@settings_bp.route('/get_app_settings', methods=['POST'])
+@login_required
+def api_get_app_settings():
+    settings = _load_app_settings()
+    settings['autostart'] = _is_autostart_enabled()
+    return jsonify({'success': True, 'settings': settings})
+
+
+@settings_bp.route('/save_app_settings', methods=['POST'])
+@login_required
+def api_save_app_settings():
+    data = request.get_json()
+    new_settings = data.get('settings')
+
+    if not new_settings:
+        return jsonify({'success': False, 'message': '设置不能为空'})
+
+    if 'autostart' in new_settings:
+        _set_autostart(True if new_settings['autostart'] else False)
+
+    current = _load_app_settings()
+    current.update(new_settings)
+    ok = _save_app_settings(current)
+
+    if ok:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'message': '保存设置失败'})

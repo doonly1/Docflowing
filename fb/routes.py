@@ -110,10 +110,56 @@ def _require_fb_permission(required_level):
 # ==================== 文件库 CRUD ====================
 
 def _get_user_workspace(user_id=None):
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ws = os.path.join(root_dir, 'workspaces')
-    os.makedirs(ws, exist_ok=True)
-    return ws
+    # 获取系统标准桌面目录（支持自定义位置）
+    try:
+        import platform
+        system = platform.system()
+        desktop = None
+
+        if system == 'Windows':
+            # Windows: 从注册表读取桌面位置
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders')
+            desktop, _ = winreg.QueryValueEx(key, 'Desktop')
+            winreg.CloseKey(key)
+            # 展开环境变量（如 %USERPROFILE%）
+            desktop = os.path.expandvars(desktop)
+        else:
+            # Linux/macOS: 使用 XDG 环境变量或标准位置
+            desktop = os.environ.get('XDG_DESKTOP_DIR')
+            if not desktop:
+                # 检查 ~/.config/user-dirs.dirs
+                user_dirs = os.path.join(os.path.expanduser('~'), '.config', 'user-dirs.dirs')
+                if os.path.exists(user_dirs):
+                    with open(user_dirs, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.strip().startswith('XDG_DESKTOP_DIR'):
+                                desktop = line.split('=', 1)[1].strip().strip('"')
+                                desktop = os.path.expandvars(desktop)
+                                break
+                if not desktop:
+                    home = os.path.expanduser('~')
+                    # 回退到硬编码检查
+                    for name in ('Desktop', '桌面'):
+                        candidate = os.path.join(home, name)
+                        if os.path.isdir(candidate):
+                            desktop = candidate
+                            break
+
+        if desktop and os.path.isdir(desktop):
+            return desktop
+    except Exception:
+        pass
+
+    # 都找不到时回退到用户家目录
+    return os.path.expanduser('~')
+
+
+def _get_trash_dir():
+    """获取回收站目录，放在用户主目录下的 .trash 中"""
+    trash_dir = os.path.join(os.path.expanduser('~'), '.trash')
+    os.makedirs(trash_dir, exist_ok=True)
+    return trash_dir
 
 
 @fb_bp.route('/create-folder', methods=['POST'])
@@ -126,9 +172,12 @@ def create_folder():
     local_path = (data.get('local_path') or '').strip()
 
     if filebase_type == 'net':
-        network_path = local_path
+        network_path = (data.get('network_path') or data.get('local_path') or '').strip()
         if not network_path:
             return jsonify({'success': False, 'message': '网络路径不能为空'})
+
+        if not name:
+            return jsonify({'success': False, 'message': '网络文件库名称不能为空'})
 
         db = get_db()
         filebase_id = str(uuid.uuid4())
@@ -149,15 +198,20 @@ def create_folder():
                    'local_path': network_path}
         })
 
+    # 未提供路径时，自动在桌面创建目录
     if not local_path:
-        return jsonify({'success': False, 'message': '请输入本机目录路径'})
-
-    if not os.path.isdir(local_path):
-        return jsonify({'success': False, 'message': '目录不存在或无效'})
-
-    folder_name = os.path.basename(local_path.rstrip('/\\'))
-    if not folder_name:
-        return jsonify({'success': False, 'message': '无效的目录路径'})
+        if not name:
+            return jsonify({'success': False, 'message': '请输入文件库名称'})
+        ws = _get_user_workspace(user_id)
+        local_path = os.path.join(ws, name)
+        os.makedirs(local_path, exist_ok=True)
+        folder_name = name
+    else:
+        if not os.path.isdir(local_path):
+            return jsonify({'success': False, 'message': '目录不存在或无效'})
+        folder_name = os.path.basename(local_path.rstrip('/\\'))
+        if not folder_name:
+            return jsonify({'success': False, 'message': '无效的目录路径'})
 
     db = get_db()
     filebase_id = str(uuid.uuid4())
@@ -263,7 +317,14 @@ def list_fb():
 
     fs_paths = set()
 
-    for entry_name in sorted(os.listdir(ws)):
+    try:
+        ws_entries = sorted(os.listdir(ws))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning('无法扫描工作空间 %s: %s', ws, e)
+        ws_entries = []
+
+    for entry_name in ws_entries:
         if entry_name.startswith('.') or entry_name == 'trash':
             continue
         entry_path = os.path.join(ws, entry_name)
@@ -285,11 +346,13 @@ def list_fb():
                 if row['filebase_type'] != 'net' and row['name'] != entry_name:
                     db.execute("UPDATE filebases SET name = ? WHERE id = ?", (entry_name, row['id']))
 
-    # 删除不存在于文件系统的本地文件库
+    # 删除不存在于文件系统的本地文件库（仅限 workspaces 目录下的）
     for path in local_existing_paths - fs_paths:
         row = db_kbs[path]
-        db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (row['id'],))
-        db.execute("DELETE FROM filebases WHERE id = ?", (row['id'],))
+        # 只删除位于当前 workspaces 目录下的文件库，保留用户自定义路径的文件库
+        if path.startswith(ws + os.sep) or path == ws:
+            db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (row['id'],))
+            db.execute("DELETE FROM filebases WHERE id = ?", (row['id'],))
     db.commit()
 
     if is_admin:
@@ -423,8 +486,7 @@ def delete_fb(filebase_id):
 
     local_path = row['local_path']
     filebase_type = row['filebase_type'] or 'local'
-    ws = _get_user_workspace(row['owner_id'])
-    trash_dir = os.path.join(ws, 'trash')
+    trash_dir = _get_trash_dir()
 
     # 网络文件库：只删除数据库记录
     if filebase_type == 'net':
@@ -462,8 +524,7 @@ def delete_fb(filebase_id):
 @login_required
 def clear_trash():
     user_id = g.user_id
-    ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, 'trash')
+    trash_dir = _get_trash_dir()
     if not os.path.isdir(trash_dir):
         return jsonify({'success': True, 'deleted': 0})
 
@@ -503,8 +564,7 @@ def clear_trash():
 @login_required
 def list_trash():
     user_id = g.user_id
-    ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, 'trash')
+    trash_dir = _get_trash_dir()
     if not os.path.isdir(trash_dir):
         return jsonify({'success': True, 'items': []})
 
@@ -533,13 +593,13 @@ def restore_from_trash():
     if not item_name:
         return jsonify({'success': False, 'message': '未指定项目'})
 
-    ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, 'trash')
+    trash_dir = _get_trash_dir()
     src = os.path.join(trash_dir, item_name)
     if not os.path.isdir(src):
         return jsonify({'success': False, 'message': '项目不存在'})
 
     dst_name = item_name.rsplit('_', 1)[0] if '_' in item_name else item_name
+    ws = _get_user_workspace(user_id)
     dst = os.path.join(ws, dst_name)
     orig_dst = dst
     counter = 1
@@ -577,8 +637,7 @@ def delete_trash_item():
     if not name:
         return jsonify({'success': False, 'message': '未指定项目'})
 
-    ws = _get_user_workspace(user_id)
-    trash_dir = os.path.join(ws, 'trash')
+    trash_dir = _get_trash_dir()
     target = os.path.join(trash_dir, name)
     if not os.path.exists(target):
         return jsonify({'success': False, 'message': '项目不存在'})

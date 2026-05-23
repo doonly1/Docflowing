@@ -122,6 +122,10 @@ def create_app():
 
     # 后台启动 P2P 发现（mDNS 注册不阻塞主线程）
     def _start_p2p():
+        # Windows 上为 zeroconf 强制使用兼容的事件循环策略
+        if sys.platform == 'win32':
+            import asyncio
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         try:
             global _p2p_discovery
             if not _node_identity:

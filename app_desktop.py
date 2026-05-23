@@ -1,10 +1,7 @@
 """DocFlow 桌面版入口 — pywebview 壳
 
 启动 Flask 后台线程 + 原生桌面窗口
-支持：系统托盘、开机自启、Owner 签名认证
-
-认证方式：Python 启动时预先生成 Owner Token，通过 evaluate_js 注入前端
-无需 JS bridge 参与初始登录，消除 bridge 注入时机问题
+开机自启管理由 settings API 通过 Windows 注册表完成
 """
 import os
 import sys
@@ -17,51 +14,6 @@ from tools.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def _get_startup_dir():
-    return os.path.join(
-        os.environ.get('APPDATA', ''),
-        r'Microsoft\Windows\Start Menu\Programs\Startup'
-    )
-
-
-def _get_startup_vbs_path():
-    return os.path.join(_get_startup_dir(), 'docflow-desktop.vbs')
-
-
-def install_startup():
-    startup_dir = _get_startup_dir()
-    if not os.path.isdir(startup_dir):
-        print("错误：找不到 Windows 启动文件夹")
-        return False
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    app_path = os.path.join(script_dir, 'app_desktop.py')
-    pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
-    if not os.path.isfile(pythonw):
-        pythonw = sys.executable
-
-    vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "{pythonw}" "{app_path}", 0, False
-'''
-
-    vbs_path = _get_startup_vbs_path()
-    with open(vbs_path, 'w', encoding='utf-8') as f:
-        f.write(vbs_content)
-
-    print(f"已安装开机自启 -> {vbs_path}")
-    return True
-
-
-def remove_startup():
-    vbs_path = _get_startup_vbs_path()
-    if os.path.isfile(vbs_path):
-        os.remove(vbs_path)
-        print(f"已移除开机自启: {vbs_path}")
-        return True
-    print("未找到开机自启配置")
-    return False
-
-
 def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
     """等待 Flask 服务就绪"""
     deadline = time.time() + timeout
@@ -72,6 +24,21 @@ def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
         except Exception:
             time.sleep(0.1)
     return False
+
+
+class JsBridge:
+    """JS Bridge: 暴露给前端调用的原生 API"""
+
+    def selectDirectory(self):
+        """弹出 Windows 原生目录选择对话框"""
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.askdirectory(title='选择文件夹')
+        root.destroy()
+        return path or ''
 
 
 # ==================== 主入口 ====================
@@ -119,6 +86,7 @@ def main():
         'min_size': (800, 500),
         'resizable': True,
         'easy_drag': False,
+        'js_api': JsBridge(),
     }
     if win_x is not None:
         kwargs['x'] = win_x
@@ -129,11 +97,4 @@ def main():
 
 
 if __name__ == '__main__':
-    if '--install-startup' in sys.argv:
-        install_startup()
-        sys.exit(0)
-    if '--remove-startup' in sys.argv:
-        remove_startup()
-        sys.exit(0)
-
     main()

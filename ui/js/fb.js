@@ -112,7 +112,6 @@ var FileBase = {
                 return;
             }
 
-            // 重新构建整个视图
             var h = '<div class="fb-explorer">';
             h += '<div class="fb-breadcrumb"><span class="fb-bc-current">🏠 文件库</span></div>';
             h += '<div class="fb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
@@ -121,10 +120,11 @@ var FileBase = {
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
             h += '<button onclick="FileBase.search()">🔍 搜索</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
+            if (window.authRole === 'admin') h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
             h += '<button onclick="FileBase.showTrash()">🗑️ 回收站</button>';
             h += '</div>';
-            h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"></div>';
+            h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"><div class="fb-empty">刷新中...</div></div>';
             h += '</div></div></div>';
             kbView.innerHTML = h;
 
@@ -134,12 +134,9 @@ var FileBase = {
                 return;
             }
 
-            // 显示加载中
-            grid.innerHTML = '<div class="fb-empty">刷新中...</div>';
-
             var res = await this.api('/api/fb/list', 'GET');
             if (!res || !res.success) {
-                grid.innerHTML = '<div class="fb-empty">刷新失败: ' + (res?.message || '未知错误') + '</div>';
+                grid.innerHTML = '<div class="fb-empty">刷新失败: ' + (res && res.message ? res.message : '未知错误') + '</div>';
                 return;
             }
 
@@ -162,7 +159,6 @@ var FileBase = {
             html += '</div>';
             grid.innerHTML = html;
 
-            // 加载所有文件库的同步状态
             for (var i = 0; i < kbs.length; i++) {
                 this._loadSyncStatus(kbs[i].id);
             }
@@ -203,66 +199,82 @@ var FileBase = {
 
     _showLocalPathDialog: function() {
         var self = this;
-        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:500px">';
-        h += '<h3>📁 添加本机目录到文件库</h3>';
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:420px">';
+        h += '<h3>📁 新建文件库</h3>';
         h += '<div style="margin-bottom:12px">';
-        h += '<label style="display:block;font-size:13px;color:#555;margin-bottom:4px">目录路径</label>';
-        h += '<input type="text" id="fb-local-path" placeholder="输入本机目录路径，如 D:\\Documents" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
-        h += '<div style="margin-top:8px">';
-        h += '<button type="button" onclick="FileBase._selectLocalPath()" style="padding:5px 12px;background:#f0f0f0;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px">📂 浏览...</button>';
-        h += '<input type="file" id="fb-path-browse" webkitdirectory directory style="display:none" onchange="FileBase._handlePathBrowse(this)">';
-        h += '</div>';
-        h += '<div style="font-size:11px;color:#888;margin-top:6px">请输入本机已有的目录路径，该目录将被添加到文件库中</div>';
+        h += '<input type="text" id="fb-local-name" placeholder="输入文件库名称" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
         h += '</div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button onclick="FileBase._doCreateLocalRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">添加</button>';
+        h += '<button onclick="FileBase._doCreateLocalRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
-        setTimeout(function() { document.getElementById('fb-local-path').focus(); }, 100);
-    },
-
-    _selectLocalPath: function() {
-        document.getElementById('fb-path-browse').click();
-    },
-
-    _handlePathBrowse: function(input) {
-        if (input.files && input.files.length > 0) {
-            var file = input.files[0];
-            var path = file.path || '';
-            if (path) {
-                var lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-                if (lastSep > 0) {
-                    path = path.substring(0, lastSep);
-                }
-            }
-            if (!path && file.webkitRelativePath) {
-                path = file.webkitRelativePath.split('/')[0];
-            }
-            if (path) {
-                document.getElementById('fb-local-path').value = path;
-            }
-        }
+        setTimeout(function() { document.getElementById('fb-local-name').focus(); }, 100);
     },
 
     _doCreateLocalRootFolder: async function() {
-        var localPath = (document.getElementById('fb-local-path').value || '').trim();
-        if (!localPath) { alert('请输入目录路径'); return; }
+        var name = (document.getElementById('fb-local-name').value || '').trim();
+        if (!name) { showToast('请输入文件库名称', 'error'); return; }
         this.closeModal();
-        await this._createLocalRootFolder(localPath);
+        await this._createLocalRootFolder(name);
     },
 
-    _createLocalRootFolder: async function(localPath) {
+    _createLocalRootFolder: async function(name) {
         var self = this;
         var res = await this.api('/api/fb/create-folder', 'POST', {
             filebase_type: 'local',
-            local_path: localPath
+            name: name
         });
         if (res.success) {
             await self.renderKbList();
         } else {
-            alert(res.message || '添加失败');
+            showToast(res.message || '添加失败', 'error');
+        }
+    },
+
+    // ─────────────────── 网络文件库 ───────────────────
+
+    showCreateNetworkRootFolder: function() {
+        this._showNetworkPathDialog();
+    },
+
+    _showNetworkPathDialog: function() {
+        var self = this;
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:420px">';
+        h += '<h3>🌐 新建网络文件库</h3>';
+        h += '<div style="margin-bottom:12px">';
+        h += '<input type="text" id="fb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
+        h += '</div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+        setTimeout(function() { document.getElementById('fb-net-path').focus(); }, 100);
+    },
+
+    _doCreateNetworkRootFolder: async function() {
+        var networkPath = (document.getElementById('fb-net-path').value || '').trim();
+        if (!networkPath) { showToast('请输入网络路径', 'error'); return; }
+        var parts = networkPath.replace(/\\/g, '/').split('/').filter(function(p) { return p && p !== ''; });
+        var name = parts.length > 0 ? parts[parts.length - 1] : '网络文件库';
+        this.closeModal();
+        await this._createNetworkRootFolder(name, networkPath);
+    },
+
+    _createNetworkRootFolder: async function(name, networkPath) {
+        var self = this;
+        var res = await this.api('/api/fb/create-folder', 'POST', {
+            name: name,
+            filebase_type: 'net',
+            network_path: networkPath
+        });
+        if (res.success) {
+            await self.renderKbList();
+        } else {
+            showToast(res.message || '创建失败', 'error');
         }
     },
 
@@ -314,7 +326,7 @@ var FileBase = {
         if (permission === 'manage') {
             h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
             h += '<div class="fb-menu-divider"></div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到 KB</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到Wiki</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon">📄</span> doc转docx</div>';
             h += '<div class="fb-menu-divider"></div>';
@@ -331,7 +343,7 @@ var FileBase = {
         try {
             var res = await this.api('/api/fb/' + kbId + '/sync-status', 'GET');
             if (!res.success) {
-                alert('获取同步状态失败');
+                showToast('获取同步状态失败', 'error');
                 return;
             }
 
@@ -340,10 +352,10 @@ var FileBase = {
             if (res2.success) {
                 await this._loadSyncStatus(kbId);
             } else {
-                alert(res2.message || '操作失败');
+                showToast(res2.message || '操作失败', 'error');
             }
         } catch (e) {
-            alert('操作失败: ' + e.message);
+            showToast('操作失败: ' + e.message, 'error');
         }
     },
 
@@ -352,14 +364,14 @@ var FileBase = {
         try {
             var res = await this.api('/api/fb/' + kbId + '/sync-now', 'POST');
             if (!res.success) {
-                alert(res.message || '同步触发失败');
+                showToast(res.message || '同步触发失败', 'error');
                 return;
             }
             setTimeout(function() {
                 FileBase._loadSyncStatus(kbId);
             }, 1000);
         } catch (e) {
-            alert('同步失败: ' + e.message);
+            showToast('同步失败: ' + e.message, 'error');
         }
     },
 
@@ -368,7 +380,7 @@ var FileBase = {
         try {
             await this.api('/api/fb/' + kbId + '/convert-doc', 'POST');
         } catch (e) {
-            alert('转换失败: ' + e.message);
+            showToast('转换失败: ' + e.message, 'error');
         }
     },
 
@@ -380,19 +392,19 @@ var FileBase = {
 
     kbListRename: async function(kbId, oldName) {
         this.hideContextMenu();
-        var newName = prompt('重命名文件库：', oldName);
+        var newName = await showPrompt('重命名文件库：', oldName);
         if (!newName || !newName.trim() || newName.trim() === oldName) return;
         var res = await this.api('/api/fb/' + kbId, 'PUT', { name: newName.trim() });
         if (res.success) {
             await this.renderKbList();
         } else {
-            alert(res.message || '重命名失败');
+            showToast(res.message || '重命名失败', 'error');
         }
     },
 
     kbListCopy: async function(kbId, kbName) {
         this.hideContextMenu();
-        var newName = prompt('复制文件库为：', kbName + '_副本');
+        var newName = await showPrompt('复制文件库为：', kbName + '_副本');
         if (!newName || !newName.trim()) return;
         var res = await this.api('/api/fb/copy-folder', 'POST', {
             kb_id: kbId,
@@ -401,18 +413,23 @@ var FileBase = {
         if (res.success) {
             await this.renderKbList();
         } else {
-            alert(res.message || '复制失败');
+            showToast(res.message || '复制失败', 'error');
         }
     },
 
     kbListDelete: async function(kbId, kbName) {
         this.hideContextMenu();
-        if (!confirm('确定删除文件库 "' + kbName + '" 吗？')) return;
-        var res = await this.api('/api/fb/' + kbId, 'DELETE');
-        if (res.success) {
-            await this.renderKbList();
-        } else {
-            alert(res.message || '删除失败');
+        if (!(await showConfirm('确定删除文件库 "' + kbName + '" 吗？'))) return;
+        try {
+            var res = await this.api('/api/fb/' + kbId, 'DELETE');
+            if (res.success) {
+                await this.renderKbList();
+            } else {
+                showToast(res.message || '删除失败', 'error');
+            }
+        } catch (e) {
+            console.error('kbListDelete error:', e);
+            showToast('删除请求失败: ' + e.message, 'error');
         }
     },
 
@@ -681,7 +698,7 @@ var FileBase = {
             var catEscPathAttr = cat.path.replace(/'/g, "\\'");
             h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '">';
             h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
-            h += '<td class="col-icon"><img src="/icons/folder.png" width="16" height="16" style="vertical-align:middle;border-radius:2px;"></td>';
+            h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
             h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
             h += '<td class="col-type">文件夹</td>';
@@ -734,7 +751,7 @@ var FileBase = {
     downloadAction: async function() {
         var items = this.getSelectedPaths();
         if (items.length === 0) {
-            alert('请至少选择一个文件或文件夹');
+            showToast('请至少选择一个文件或文件夹', 'error');
             return;
         }
         if (items.length === 1 && items[0].type === 'file') {
@@ -745,7 +762,7 @@ var FileBase = {
                 paths.push(items[i].path);
             }
             if (paths.length === 0) {
-                alert('请至少选择一个文件或文件夹');
+                showToast('请至少选择一个文件或文件夹', 'error');
                 return;
             }
             var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download';
@@ -755,7 +772,7 @@ var FileBase = {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ paths: paths })
                 });
-                if (!resp.ok) { alert('下载失败'); return; }
+                if (!resp.ok) { showToast('下载失败', 'error'); return; }
                 var blob = await resp.blob();
                 var a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
@@ -765,7 +782,7 @@ var FileBase = {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(a.href);
             } catch (e) {
-                alert('下载失败');
+                showToast('下载失败', 'error');
             }
         }
     },
@@ -773,10 +790,10 @@ var FileBase = {
     batchDelete: async function() {
         var items = this.getSelectedPaths();
         if (items.length === 0) {
-            alert('请至少选择一个文件或文件夹');
+            showToast('请至少选择一个文件或文件夹', 'error');
             return;
         }
-        if (!confirm('确定删除选中的 ' + items.length + ' 个项目吗？（此操作不可恢复）')) return;
+        if (!(await showConfirm('确定删除选中的 ' + items.length + ' 个项目吗？（此操作不可恢复）'))) return;
         var paths = [];
         for (var i = 0; i < items.length; i++) paths.push(items[i].path);
         var self = this;
@@ -785,11 +802,11 @@ var FileBase = {
             this.fbCategoryTree = null;
             this.fbTreeLoaded = false;
             if (res.errors && res.errors.length > 0) {
-                alert('成功删除 ' + res.deleted + ' 个，失败: ' + res.errors.join(', '));
+                showToast('成功删除 ' + res.deleted + ' 个，失败: ' + res.errors.join(', '), 'error');
             }
             await self.renderDetail();
         } else {
-            alert(res.message || '删除失败');
+            showToast(res.message || '删除失败', 'error');
         }
     },
 
@@ -817,7 +834,7 @@ var FileBase = {
             this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
-            alert(res.message || '替换失败');
+            showToast(res.message || '替换失败', 'error');
         }
     },
 
@@ -884,7 +901,7 @@ var FileBase = {
             self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
-            alert(res.message || '上传失败');
+            showToast(res.message || '上传失败', 'error');
         }
     },
 
@@ -909,7 +926,7 @@ var FileBase = {
             self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
-            alert(res.message || '上传失败');
+            showToast(res.message || '上传失败', 'error');
         }
     },
 
@@ -928,7 +945,7 @@ var FileBase = {
             self.fbTreeLoaded = false;
             await self.renderDetail();
         } else {
-            alert(res.message || '创建失败');
+            showToast(res.message || '创建失败', 'error');
         }
     },
 
@@ -947,7 +964,7 @@ var FileBase = {
             self.fbTreeLoaded = false;
             self.openMarkdownEditor(res.path);
         } else {
-            alert(res.message || '创建失败');
+            showToast(res.message || '创建失败', 'error');
         }
     },
 
@@ -966,7 +983,7 @@ var FileBase = {
             self.fbTreeLoaded = false;
             self.openMarkdownEditor(res.path);
         } else {
-            alert(res.message || '创建失败');
+            showToast(res.message || '创建失败', 'error');
         }
     },
 
@@ -1034,7 +1051,7 @@ var FileBase = {
     contextRename: async function(path) {
         this.hideContextMenu();
         var oldName = path.split('/').pop();
-        var newName = prompt('重命名为：', oldName);
+        var newName = await showPrompt('重命名为：', oldName);
         if (!newName || !newName.trim() || newName.trim() === oldName) return;
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/rename', 'PUT', {
             path: path,
@@ -1045,7 +1062,7 @@ var FileBase = {
             this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
-            alert(res.message || '重命名失败');
+            showToast(res.message || '重命名失败', 'error');
         }
     },
 
@@ -1083,7 +1100,7 @@ var FileBase = {
             this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
-            alert(res.message || '复制失败');
+            showToast(res.message || '复制失败', 'error');
         }
     },
 
@@ -1104,21 +1121,21 @@ var FileBase = {
 
     contextDeleteOne: async function(path) {
         this.hideContextMenu();
-        if (!confirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）')) return;
+        if (!(await showConfirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）'))) return;
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: [path] });
         if (res.success) {
             this.fbCategoryTree = null;
             this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
-            alert(res.message || '删除失败');
+            showToast(res.message || '删除失败', 'error');
         }
     },
 
     showMoveDialog: function() {
         var items = this.getSelectedPaths();
         if (items.length === 0) {
-            alert('请至少选择一个文件或文件夹');
+            showToast('请至少选择一个文件或文件夹', 'error');
             return;
         }
         var self = this;
@@ -1177,13 +1194,13 @@ var FileBase = {
         this.closeModal();
         if (res.success) {
             if (res.errors && res.errors.length > 0) {
-                alert('成功移动 ' + res.moved + ' 个，失败: ' + res.errors.join(', '));
+                showToast('成功移动 ' + res.moved + ' 个，失败: ' + res.errors.join(', '), 'error');
             }
             this.fbCategoryTree = null;
             this.fbTreeLoaded = false;
             await this.renderDetail();
         } else {
-            alert(res.message || '移动失败');
+            showToast(res.message || '移动失败', 'error');
         }
     },
 
@@ -1224,11 +1241,11 @@ var FileBase = {
             .then(function(res) { return res.json(); })
             .then(function(data) {
                 if (!data.success) {
-                    alert(data.message || '打开失败');
+                    showToast(data.message || '打开失败', 'error');
                 }
             })
             .catch(function(e) {
-                alert('打开失败: ' + e.message);
+                showToast('打开失败: ' + e.message, 'error');
             });
     },
     
@@ -1257,9 +1274,13 @@ var FileBase = {
             var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/preview?path=' + encodeURIComponent(relPath), 'GET');
             var contentEl = document.getElementById('fb-docx-preview-content');
             if (res.success) {
-                var html = (typeof marked !== 'undefined' && res.markdown)
-                    ? marked.parse(res.markdown)
-                    : (res.markdown || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>');
+                var html = res.markdown || '<div style="text-align: center; padding: 40px; color: #999;">文件内容为空</div>';
+                if (res.markdown) {
+                    try {
+                        await window._ensureMarked();
+                        html = marked.parse(res.markdown);
+                    } catch (e) {}
+                }
                 contentEl.innerHTML = html;
             } else {
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">预览失败: ' + (res.message || '未知错误') + '</div>';
@@ -1332,42 +1353,44 @@ var FileBase = {
             '<button class="fb-md-btn-save" onclick="FileBase._saveMdContent()">💾 保存</button>' +
             '<button class="fb-md-btn-close" onclick="FileBase._closeMdEditor()">✖ 关闭</button>' +
             '</div></div>' +
-            '<div id="fb-wysiwyg-editor"></div>' +
+            '<div id="fb-wysiwyg-editor"><div style="padding:20px;color:#999;">正在加载编辑器...</div></div>' +
             '</div>';
         document.body.appendChild(overlay);
 
         this.fbMdEditorRelPath = relPath;
 
-        var editorEl = document.getElementById('fb-wysiwyg-editor');
-        if (typeof Quill !== 'undefined') {
-            var quill = new Quill(editorEl, {
-                theme: 'snow',
-                placeholder: '开始编写...',
-                modules: {
-                    toolbar: [
-                        [{ 'header': [1, 2, 3, false] }],
-                        ['bold', 'italic', 'underline', 'strike'],
-                        [{ 'color': [] }, { 'background': [] }],
-                        [{ 'align': [] }],
-                        ['blockquote', { 'list': 'ordered' }, { 'list': 'bullet' }],
-                        ['link', 'image'],
-                        ['clean']
-                    ]
-                }
-            });
-
-            if (content) {
-                var html = '';
-                if (typeof marked !== 'undefined') {
-                    html = marked.parse(content);
-                }
-                quill.clipboard.dangerouslyPasteHTML(html);
-            }
-
-            this.fbMdEditorInstance = quill;
-        } else {
-            editorEl.innerHTML = '<div style="padding:20px;color:#999;">编辑器加载失败，请刷新页面重试</div>';
+        try {
+            await window._ensureQuill();
+            await window._ensureMarked();
+        } catch (e) {
+            document.getElementById('fb-wysiwyg-editor').innerHTML = '<div style="padding:20px;color:#999;">编辑器加载失败，请检查网络连接</div>';
+            return;
         }
+
+        var editorEl = document.getElementById('fb-wysiwyg-editor');
+        editorEl.innerHTML = '';
+        var quill = new Quill(editorEl, {
+            theme: 'snow',
+            placeholder: '开始编写...',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'color': [] }, { 'background': [] }],
+                    [{ 'align': [] }],
+                    ['blockquote', { 'list': 'ordered' }, { 'list': 'bullet' }],
+                    ['link', 'image'],
+                    ['clean']
+                ]
+            }
+        });
+
+        if (content) {
+            var html = marked.parse(content);
+            quill.clipboard.dangerouslyPasteHTML(html);
+        }
+
+        this.fbMdEditorInstance = quill;
 
         overlay.addEventListener('click', function(e) {
             if (e.target === overlay) self._closeMdEditor();
@@ -1378,7 +1401,8 @@ var FileBase = {
         var content = '';
         if (this.fbMdEditorInstance && typeof this.fbMdEditorInstance.root !== 'undefined') {
             var html = this.fbMdEditorInstance.root.innerHTML;
-            if (typeof TurndownService !== 'undefined') {
+            try {
+                await window._ensureTurndown();
                 var turndownService = new TurndownService({
                     headingStyle: 'atx',
                     bulletListMarker: '-',
@@ -1389,7 +1413,7 @@ var FileBase = {
                     replacement: function(content) { return '~~' + content + '~~'; }
                 });
                 content = turndownService.turndown(html);
-            } else {
+            } catch (e) {
                 content = html;
             }
         }
@@ -1403,7 +1427,7 @@ var FileBase = {
             this._closeMdEditor();
             this.renderDetail();
         } else {
-            alert(res.message || '保存失败');
+            showToast(res.message || '保存失败', 'error');
         }
     },
 
@@ -1539,7 +1563,7 @@ var FileBase = {
     },
 
     _removeMemberAct: async function(uid) {
-        if (!confirm('确定要移除该成员吗？')) return;
+        if (!(await showConfirm('确定要移除该成员吗？'))) return;
         await this.api('/api/fb/' + this.currentFbId + '/members/' + uid, 'DELETE');
         var self = this; self.closeModal(); await self.showSettings();
     },
@@ -1550,7 +1574,7 @@ var FileBase = {
         if (!uname) return;
         var res = await this.api('/api/fb/' + this.currentFbId + '/members', 'POST', { username: uname, permission: perm });
         if (res.success) { var self = this; self.closeModal(); await self.showSettings(); }
-        else alert(res.message);
+        else showToast(res.message, 'error');
     },
 
     _batchSetUsers: async function() {
@@ -1566,7 +1590,7 @@ var FileBase = {
         }
         this.closeModal();
         this.showSettings();
-        if (count > 0) alert('已为 ' + count + ' 个用户设置权限');
+        if (count > 0) showToast('已为 ' + count + ' 个用户设置权限', 'success');
     },
 
     _batchSetAllUsers: async function() {
@@ -1578,23 +1602,23 @@ var FileBase = {
     _transferAct: async function() {
         var uname = document.getElementById('fb-transfer-user').value.trim();
         if (!uname) return;
-        if (!confirm('确定将文件库所有权转让给 ' + uname + ' 吗？')) return;
+        if (!(await showConfirm('确定将文件库所有权转让给 ' + uname + ' 吗？'))) return;
         var users = JSON.parse(this._lsGet('fb_user_list') || '[]');
         var tid = null;
         for (var i = 0; i < users.length; i++) {
             if (users[i].username === uname) { tid = users[i].user_id; break; }
         }
-        if (!tid) { alert('用户不存在'); return; }
+        if (!tid) { showToast('用户不存在', 'error'); return; }
         var res = await this.api('/api/fb/' + this.currentFbId + '/transfer', 'POST', { new_owner_id: tid });
         if (res.success) { this.closeModal(); this.currentFbId = null; await this.renderKbList(); }
-        else alert(res.message);
+        else showToast(res.message, 'error');
     },
 
     _deleteKbAct: async function() {
-        if (!confirm('确定要删除此文件库吗？')) return;
+        if (!(await showConfirm('确定要删除此文件库吗？'))) return;
         var res = await this.api('/api/fb/' + this.currentFbId, 'DELETE');
         if (res.success) { this.closeModal(); this.currentFbId = null; await this.renderKbList(); }
-        else alert(res.message);
+        else showToast(res.message, 'error');
     },
 
     showUserManage: async function() {
@@ -1626,7 +1650,7 @@ var FileBase = {
     _updateUserRole: async function(uid, role) {
         var res = await this.api('/api/users/' + uid + '/role', 'PUT', { role: role });
         if (res.success) await this.refreshUserCache();
-        else alert(res.message);
+        else showToast(res.message, 'error');
     },
 
     search: async function() {
@@ -1726,39 +1750,43 @@ var FileBase = {
         if (res.success) {
             await this.renderKbList();
         } else {
-            alert(res.message || '恢复失败');
+            showToast(res.message || '恢复失败', 'error');
         }
     },
 
     deleteTrashItem: async function(name) {
-        if (!confirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！')) return;
+        if (!(await showConfirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！'))) return;
         var url = '/api/fb/trash-item?name=' + encodeURIComponent(name);
         await fetch(url, { method: 'DELETE' });
         await this.showTrash();
     },
 
     clearTrash: async function() {
-        if (!confirm('确定清空回收站吗？此操作不可恢复！')) return;
+        if (!(await showConfirm('确定清空回收站吗？此操作不可恢复！'))) return;
         await this.api('/api/fb/trash', 'DELETE');
         await this.renderKbList();
     },
 
     getFileIcon: function(ext) {
-        var e = (ext || '').toLowerCase().replace('.', '');
-        var colors = {
-            doc: '#2b5797', docx: '#2b5797', xls: '#217346', xlsx: '#217346',
-            ppt: '#d24726', pptx: '#d24726', pdf: '#b30b00', txt: '#666',
-            md: '#083fa1', html: '#e44d26', htm: '#e44d26',
-            jpg: '#888', jpeg: '#888', png: '#888', gif: '#888',
-            bmp: '#888', svg: '#ffb13b', webp: '#888', ico: '#888',
-            zip: '#f0ad4e', rar: '#f0ad4e', '7z': '#f0ad4e', tar: '#f0ad4e', gz: '#f0ad4e',
-            py: '#3572a5', js: '#f7df1e', css: '#563d7c', json: '#555', xml: '#555',
-            mp3: '#e91e63', mp4: '#9c27b0', avi: '#9c27b0', mov: '#9c27b0', wav: '#e91e63',
-        };
-        var label = (e || '?').substring(0, 2).toUpperCase();
-        var color = colors[e] || '#999';
-        var textColor = (color === '#f7df1e' || color === '#ffb13b' || color === '#f0ad4e') ? '#333' : '#fff';
-        return '<svg width="16" height="16" viewBox="0 0 32 32" style="vertical-align:middle;border-radius:3px"><rect width="32" height="32" rx="4" fill="' + color + '"/><text x="16" y="22" text-anchor="middle" font-size="14" font-family="Arial,sans-serif" font-weight="700" fill="' + textColor + '">' + label + '</text></svg>';
+        var e = (ext || '').toLowerCase();
+        var cls = 'fb-file-icon-file fb-icon-other', label = (e.replace('.', '') || '?').substring(0, 3).toUpperCase();
+        if (e === '.doc' || e === '.docx') { cls = 'fb-file-icon-file fb-icon-doc'; label = 'W'; }
+        else if (e === '.xls' || e === '.xlsx') { cls = 'fb-file-icon-file fb-icon-xls'; label = 'X'; }
+        else if (e === '.ppt' || e === '.pptx') { cls = 'fb-file-icon-file fb-icon-ppt'; label = 'P'; }
+        else if (e === '.pdf') { cls = 'fb-file-icon-file fb-icon-pdf'; label = 'P'; }
+        else if (e === '.md') { cls = 'fb-file-icon-file fb-icon-md'; label = 'M'; }
+        else if (e === '.txt') { cls = 'fb-file-icon-file fb-icon-txt'; label = 'T'; }
+        else if (e === '.html' || e === '.htm') { cls = 'fb-file-icon-file fb-icon-html'; label = 'H'; }
+        else if (/^\.(jpe?g|png|gif|svg|bmp|webp|ico)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-img'; label = 'Pic'; }
+        else if (/^\.(zip|rar|7z|tar|gz)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-zip'; label = 'Z'; }
+        else if (e === '.py') { cls = 'fb-file-icon-file fb-icon-py'; label = 'Py'; }
+        else if (e === '.js') { cls = 'fb-file-icon-file fb-icon-js'; label = 'JS'; }
+        else if (e === '.css') { cls = 'fb-file-icon-file fb-icon-css'; label = 'C'; }
+        else if (e === '.json') { cls = 'fb-file-icon-file fb-icon-json'; label = '{'; }
+        else if (e === '.xml') { cls = 'fb-file-icon-file fb-icon-xml'; label = 'X'; }
+        else if (/^\.(mp3|wav)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-audio'; label = '♪'; }
+        else if (/^\.(mp4|avi|mov)$/i.test(e)) { cls = 'fb-file-icon-file fb-icon-video'; label = '▶'; }
+        return '<span class="' + cls + '">' + label + '</span>';
     },
 
     formatSize: function(bytes) {

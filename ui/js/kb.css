@@ -96,6 +96,7 @@
     flex-direction: column;
     gap: 16px;
     background: #fff;
+    user-select: text;
 }
 
 .kb-chat-empty {
@@ -130,17 +131,18 @@
 .kb-chat-message {
     display: flex;
     gap: 12px;
-    max-width: 85%;
     width: 100%;
 }
 
 .kb-chat-message.user {
     align-self: flex-end;
     flex-direction: row-reverse;
+    max-width: 85%;
 }
 
 .kb-chat-message.assistant {
     align-self: flex-start;
+    max-width: 100%;
 }
 
 .kb-chat-message-avatar {
@@ -180,20 +182,22 @@
     font-size: 14px;
     line-height: 1.6;
     word-break: break-word;
+    user-select: text;
 }
 
 .kb-chat-message.user .kb-chat-message-bubble {
-    background: #fff;
-    color: #333;
-    border: 1px solid #eee;
+    background: linear-gradient(135deg, #e94560, #c41e3a);
+    color: #fff;
+    border: none;
     border-bottom-right-radius: 4px;
 }
 
 .kb-chat-message.assistant .kb-chat-message-bubble {
-    background: #fff;
+    background: transparent;
     color: #333;
-    border: 1px solid #eee;
-    border-bottom-left-radius: 4px;
+    border: none;
+    border-radius: 0;
+    padding: 0;
 }
 
 .kb-chat-message-bubble mark {

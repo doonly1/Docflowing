@@ -6,6 +6,86 @@
             console.error('[UNHANDLED REJECTION]', e.reason);
         });
 
+        // ==================== 自定义弹窗工具 ====================
+        function _escapeDialog(str) {
+            var d = document.createElement('div');
+            d.textContent = str || '';
+            return d.innerHTML;
+        }
+
+        function showToast(message, type) {
+            type = type || 'info';
+            var toast = document.createElement('div');
+            toast.className = 'custom-toast custom-toast-' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            requestAnimationFrame(function() { toast.classList.add('show'); });
+            setTimeout(function() {
+                toast.classList.remove('show');
+                setTimeout(function() { if (toast.parentNode) toast.remove(); }, 300);
+            }, 3000);
+        }
+
+        function showConfirm(message) {
+            return new Promise(function(resolve) {
+                var overlay = document.createElement('div');
+                overlay.className = 'custom-dialog-overlay';
+                overlay.innerHTML =
+                    '<div class="custom-dialog">' +
+                    '<div class="custom-dialog-message">' + _escapeDialog(message) + '</div>' +
+                    '<div class="custom-dialog-actions">' +
+                    '<button class="custom-dialog-btn custom-dialog-btn-cancel">取消</button>' +
+                    '<button class="custom-dialog-btn custom-dialog-btn-confirm">确定</button>' +
+                    '</div></div>';
+                document.body.appendChild(overlay);
+                requestAnimationFrame(function() { overlay.classList.add('show'); });
+
+                function closeAndResolve(value) {
+                    overlay.classList.remove('show');
+                    setTimeout(function() { if (overlay.parentNode) overlay.remove(); resolve(value); }, 200);
+                }
+                overlay.querySelector('.custom-dialog-btn-confirm').onclick = function() { closeAndResolve(true); };
+                overlay.querySelector('.custom-dialog-btn-cancel').onclick = function() { closeAndResolve(false); };
+                overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAndResolve(false); });
+                setTimeout(function() {
+                    var btn = overlay.querySelector('.custom-dialog-btn-confirm');
+                    if (btn) btn.focus();
+                }, 100);
+            });
+        }
+
+        function showPrompt(message, defaultValue) {
+            return new Promise(function(resolve) {
+                defaultValue = defaultValue || '';
+                var overlay = document.createElement('div');
+                overlay.className = 'custom-dialog-overlay';
+                overlay.innerHTML =
+                    '<div class="custom-dialog">' +
+                    '<div class="custom-dialog-message">' + _escapeDialog(message) + '</div>' +
+                    '<input type="text" class="custom-dialog-input" value="' + _escapeDialog(defaultValue) + '">' +
+                    '<div class="custom-dialog-actions">' +
+                    '<button class="custom-dialog-btn custom-dialog-btn-cancel">取消</button>' +
+                    '<button class="custom-dialog-btn custom-dialog-btn-confirm">确定</button>' +
+                    '</div></div>';
+                document.body.appendChild(overlay);
+                requestAnimationFrame(function() { overlay.classList.add('show'); });
+                var input = overlay.querySelector('.custom-dialog-input');
+                input.focus();
+                input.select();
+                function closeAndResolve(value) {
+                    overlay.classList.remove('show');
+                    setTimeout(function() { if (overlay.parentNode) overlay.remove(); resolve(value); }, 200);
+                }
+                overlay.querySelector('.custom-dialog-btn-confirm').onclick = function() { closeAndResolve(input.value.trim() || null); };
+                overlay.querySelector('.custom-dialog-btn-cancel').onclick = function() { closeAndResolve(null); };
+                overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAndResolve(null); });
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') { closeAndResolve(input.value.trim() || null); }
+                    if (e.key === 'Escape') { closeAndResolve(null); }
+                });
+            });
+        }
+
         // ==================== 用户信息 ====================
 
         function updateSidebarUser(username, role) {
@@ -34,8 +114,6 @@
             document.head.appendChild(s);
         }
 
-        function apiHeaders() {
-
         async function apiFetch(url, options) {
             options = options || {};
             if (!options.headers) options.headers = {};
@@ -45,16 +123,8 @@
 
         // ==================== 远程模式（统一模式） ====================
         function updateModeUI() {
-            // 统一为远程模式，始终显示上传和下载按钮
             const selectBtn = document.getElementById('selectFolderBtn');
-            const remoteGroup = document.getElementById('remoteUploadGroup');
-            const openBtn = document.getElementById('openDirBtn');
-            const downloadBtn = document.getElementById('downloadBtn');
-
-            selectBtn.textContent = '从本地选择';
-            remoteGroup.style.display = 'block';
-            openBtn.style.display = 'none';
-            downloadBtn.style.display = 'inline-block';
+            if (selectBtn) selectBtn.textContent = '从本地选择';
         }
 
         // ==================== 工具定义 ====================
@@ -281,227 +351,109 @@
                         .map(t => t.dataset.filename);
         }
 
-        // 清理目录文件
-        window.clearWorkspace = async function() {
-            var selDir = getSelectedDirectory();
+        // 切换文件列表显示
+        window.toggleFileList = async function() {
+            const panel = document.getElementById('fileListPanel');
+            const fileList = document.getElementById('fileList');
+            const selDir = getSelectedDirectory();
+
             if (!selDir) {
-                alert('请先选择目录');
                 return;
             }
-            if (!confirm('确定要清理目录中的文件吗？此操作不可恢复。')) return;
-            try {
-                var body = {};
-                if (selDir.type === 'local') {
-                    body.directory = selDir.path;
+
+            if (panel.style.display === 'none' || panel.style.display === '') {
+                // 展开：获取文件列表
+                let filesData;
+                if (selDir.type === 'kb') {
+                    let url = '/api/fb/' + selDir.kbId + '/local-files';
+                    let params = [];
+                    if (selDir.subdir) params.push('subdir=' + encodeURIComponent(selDir.subdir));
+                    if (currentTool) params.push('tool=' + encodeURIComponent(currentTool));
+                    if (params.length > 0) url += '?' + params.join('&');
+                    const filesRes = await apiFetch(url, { method: 'GET' });
+                    const kbData = await filesRes.json();
+                    filesData = kbData;
                 } else {
-                    alert('文件库模式请直接在文件库中删除文件');
-                    return;
+                    const body = { directory: selDir.path, tool: currentTool };
+                    const filesRes = await apiFetch('/list_files', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(body)
+                    });
+                    filesData = await filesRes.json();
                 }
-                const res = await apiFetch('/clear_workspace', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(body)
-                });
-                const data = await res.json();
-                if (data.success) {
-                    await loadFileList(null, currentTool);
+
+                if (filesData && filesData.success && filesData.files) {
+                    if (filesData.files.length > 0) {
+                        fileList.innerHTML = filesData.files.map(f =>
+                            `<span style="padding:2px 6px;background:#f0f0f0;border-radius:3px;font-size:12px;">📄 ${f.name}</span>`
+                        ).join('');
+                    } else {
+                        fileList.innerHTML = '<span style="color:#999;font-size:12px;">目录为空</span>';
+                    }
                 } else {
-                    alert('清理失败: ' + (data.message || ''));
+                    fileList.innerHTML = '<span style="color:#999;font-size:12px;">获取文件列表失败</span>';
                 }
-            } catch (e) {
-                alert('清理失败: ' + e.message);
+                panel.style.display = 'block';
+            } else {
+                // 收起
+                panel.style.display = 'none';
             }
         };
 
-        window.openWorkdir = function() {
+        window.openWorkdir = async function() {
             var selDir = getSelectedDirectory();
             if (!selDir) {
-                alert('请先选择目录');
+                showToast('请先选择目录', 'error');
                 return;
             }
             if (selDir.type === 'kb') {
-                alert('文件库文件请在文件库中查看');
-            } else {
-                window.open('file:///' + selDir.path.replace(/\\/g, '/'), '_blank');
+                showToast('文件库文件请在文件库中查看', 'error');
+                return;
+            }
+            try {
+                var res = await apiFetch('/open_folder', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({directory: selDir.path})
+                });
+                var data = await res.json();
+                if (!data.success) {
+                    showToast('打开目录失败: ' + (data.message || ''), 'error');
+                }
+            } catch (e) {
+                showToast('打开目录失败: ' + e.message, 'error');
             }
         };
 
         // ==================== 选择本机目录 ====================
-        window.selectFolder = function() {
-            document.getElementById('folderInput').click();
-        };
-
-        // 远程模式：处理本机目录选择
-        async function handleRemoteUpload(event) {
-            const files = event.target.files;
-            if (!files || files.length === 0) return;
-
-            // 从 webkitRelativePath 获取目录路径
-            let directory = '';
-            if (files[0] && files[0].webkitRelativePath) {
-                const parts = files[0].webkitRelativePath.split('/');
-                if (parts.length > 0) {
-                    // 获取实际目录路径（文件选择器会限制在选定目录内）
-                    const fullPath = files[0].path || '';
-                    if (fullPath) {
-                        // 从完整路径中提取目录
-                        const lastSep = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
-                        if (lastSep > 0) {
-                            directory = fullPath.substring(0, lastSep);
-                        }
+        window.selectFolder = async function() {
+            try {
+                const path = await window.pywebview.api.selectDirectory();
+                if (path) {
+                    const workdirInput = document.getElementById('workdir');
+                    workdirInput.value = path;
+                    workdirInput.removeAttribute('data-fb-id');
+                    workdirInput.removeAttribute('data-fb-subdir');
+                    if (currentTool) {
+                        await loadFileList({type: 'local', path: path}, currentTool);
                     }
                 }
+            } catch (e) {
+                console.error('pywebview selectDirectory error:', e);
+                showToast('选择目录失败', 'error');
             }
-
-            if (!directory) {
-                alert('无法获取目录路径，请确认已选择整个文件夹');
-                return;
-            }
-
-            // 更新 workdir 输入框
-            const workdirInput = document.getElementById('workdir');
-            workdirInput.value = directory;
-            workdirInput.removeAttribute('data-fb-id');
-            workdirInput.removeAttribute('data-fb-subdir');
-
-            const progress = document.getElementById('uploadProgress');
-            progress.style.display = 'block';
-            progress.innerHTML = '正在处理...';
-
-            if (currentTool === 'to_index') {
-                await handleIndexMetadataOnly(files, progress, directory);
-                return;
-            }
-
-            progress.innerHTML = '正在处理文件...';
-
-            const extensions = {
-                'to_docx': ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.md'],
-                'to_compare': ['.docx', '.doc'],
-                'to_pdf': ['.docx', '.doc'],
-                'to_pageNum': ['.docx', '.doc'],
-                'to_redhead': ['.docx']
-            };
-            const allowedExt = extensions[currentTool] || ['.docx'];
-
-            const formData = new FormData();
-            let uploadCount = 0;
-            for (const file of files) {
-                const relativePath = file.webkitRelativePath || file.name;
-                const pathParts = relativePath.split('/');
-
-                if (pathParts.length > 2) {
-                    continue;
-                }
-
-                const ext = '.' + file.name.split('.').pop().toLowerCase();
-                if (allowedExt.length === 0 || allowedExt.includes(ext)) {
-                    formData.append('files', file);
-                    uploadCount++;
-                }
-            }
-
-            if (uploadCount === 0) {
-                progress.innerHTML = '<span style="color: #dc3545;">✗ 没有支持的文件类型</span>';
-                setTimeout(() => { progress.style.display = 'none'; }, 3000);
-                return;
-            }
-
-            formData.append('tool', currentTool);
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-            try {
-                const bodyData = { directory: selDir.path };
-                const response = await fetch('/upload_files', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(bodyData)
-                });
-                const data = await response.json();
-                if (data.success) {
-                    progress.innerHTML = `<span style="color: #28a745;">✓ 目录已就绪: ${selDir.path}</span>`;
-                    await loadFileList(selDir, currentTool);
-                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
-                } else {
-                    throw new Error(data.message || '操作失败');
-                }
-            } catch (error) {
-                clearTimeout(timeoutId);
-                let msg = error.message;
-                if (error.name === 'AbortError') {
-                    msg = '操作超时';
-                }
-                progress.innerHTML = `<span style="color: #dc3545;">✗ 操作失败: ${msg}</span>`;
-                console.error('Upload error:', error);
-            }
-        }
-
-        async function handleIndexMetadataOnly(files, progress, directory) {
-            progress.innerHTML = '正在提取文件信息...';
-
-            let folderName = 'unknown';
-            const metadataList = [];
-            
-            for (const file of files) {
-                const relativePath = file.webkitRelativePath || file.name;
-                const pathParts = relativePath.split('/');
-                
-                if (pathParts.length > 1 && folderName === 'unknown') {
-                    folderName = pathParts[0];
-                }
-
-                metadataList.push({
-                    name: pathParts[pathParts.length - 1],
-                    path: relativePath,
-                    size: file.size,
-                    lastModified: file.lastModified
-                });
-            }
-
-            if (metadataList.length === 0) {
-                progress.innerHTML = '<span style="color: #dc3545;">✗ 未找到文件</span>';
-                setTimeout(() => { progress.style.display = 'none'; }, 3000);
-                return;
-            }
-
-            progress.innerHTML = `正在索引 ${metadataList.length} 个文件...`;
-
-            try {
-                const response = await apiFetch('/build_index_from_metadata', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        metadata: metadataList,
-                        folder_name: folderName,
-                        directory: directory
-                    })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    progress.innerHTML = `<span style="color: #28a745;">✓ 索引完成，共 ${data.file_count} 个文件</span>`;
-                    await loadFileList(null, currentTool);
-                    setTimeout(() => { progress.style.display = 'none'; }, 3000);
-                } else {
-                    throw new Error(data.message || '索引生成失败');
-                }
-            } catch (error) {
-                progress.innerHTML = `<span style="color: #dc3545;">✗ 索引失败: ${error.message}</span>`;
-                console.error('Index error:', error);
-            }
-        }
+        };
 
         // 下载结果（打包 ZIP）
         window.downloadResults = async function() {
             var selDir = getSelectedDirectory();
             if (!selDir) {
-                alert('请先选择目录');
+                showToast('请先选择目录', 'error');
                 return;
             }
             if (selDir.type === 'kb') {
-                alert('请在文件库中下载文件');
+                showToast('请在文件库中下载文件', 'error');
                 return;
             }
             try {
@@ -637,7 +589,6 @@
 
         // ==================== 配置管理 ====================
         let userConfig = null;
-        let isUsingUserConfig = false;
 
         // 打开配置弹窗
         window.openConfig = async function() {
@@ -679,14 +630,6 @@
                         console.log('加载配置失败:', e);
                     }
                 }
-            }
-        };
-
-        window.toggleUserConfig = function() {
-            isUsingUserConfig = document.getElementById('useUserConfig').checked;
-            if (!isUsingUserConfig) {
-                userConfig = null;
-                localStorage.removeItem('userConfig');
             }
         };
 
@@ -740,6 +683,7 @@
 
             const configWithoutMeta = {...config};
             delete configWithoutMeta.compare;
+            delete configWithoutMeta.last_workdir;
 
             let formHtml = '';
 
@@ -850,11 +794,13 @@
         };
 
         window.removeCompany = function(companyName) {
-            if (confirm(`确定要删除 "${companyName}" 的配置吗？`)) {
-                delete userConfig[companyName];
-                loadCompanyConfigForm(userConfig);
-                document.getElementById('rawYamlText').value = objectToYaml(userConfig);
-            }
+            showConfirm('确定要删除 "' + companyName + '" 的配置吗？').then(function(ok) {
+                if (ok) {
+                    delete userConfig[companyName];
+                    loadCompanyConfigForm(userConfig);
+                    document.getElementById('rawYamlText').value = objectToYaml(userConfig);
+                }
+            });
         };
 
         window.saveUserConfig = async function() {
@@ -899,8 +845,6 @@
                 if (Object.keys(updatedConfig).length === 0) throw new Error('配置不能为空');
 
                 userConfig = updatedConfig;
-                isUsingUserConfig = true;
-                document.getElementById('useUserConfig').checked = true;
 
                 localStorage.setItem('userConfig', JSON.stringify(userConfig));
 
@@ -915,7 +859,7 @@
                 document.getElementById('rawYamlText').value = objectToYaml(userConfig);
                 closeConfig();
             } catch (error) {
-                alert('保存配置失败: ' + error.message);
+                showToast('保存配置失败: ' + error.message, 'error');
             }
         };
 
@@ -1022,11 +966,6 @@
             return val;
         }
 
-        window.getUserConfig = function() {
-            if (isUsingUserConfig && userConfig) return userConfig;
-            return null;
-        };
-
         // ==================== 关于弹窗 ====================
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
@@ -1059,6 +998,101 @@
             setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 250);
         };
 
+        // ==================== 应用设置 ====================
+
+        let appSettings = { autostart: false, close_action: 'exit' };
+
+        window.openAppSettings = async function() {
+            try {
+                const response = await apiFetch('/get_app_settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await response.json();
+                if (data.success) {
+                    appSettings = data.settings;
+                }
+            } catch (e) {
+                console.log('加载设置失败:', e);
+            }
+
+            const overlay = document.getElementById('settingsOverlay');
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="background:#fff;border-radius:12px;padding:18px 20px;max-width:380px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);transform:scale(0.95);transition:transform 0.25s ease;">
+                    <h2 style="margin:0 0 14px;font-size:16px;color:#1a1a2e;border-bottom:1px solid #eee;padding-bottom:8px;">应用设置</h2>
+
+                    <div style="margin-bottom:14px;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#333;">
+                            <input type="checkbox" id="settingAutostart" ${appSettings.autostart ? 'checked' : ''}>
+                            开机自启动
+                        </label>
+                        <div style="font-size:11px;color:#999;margin:4px 0 0 24px;">启动时自动运行文枢桌面版</div>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:13px;color:#333;margin-bottom:6px;">点击关闭按钮时</div>
+                        <div style="display:flex;gap:12px;">
+                            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:#555;">
+                                <input type="radio" name="closeAction" value="exit" ${appSettings.close_action !== 'minimize' ? 'checked' : ''}>
+                                退出应用
+                            </label>
+                            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:#555;">
+                                <input type="radio" name="closeAction" value="minimize" ${appSettings.close_action === 'minimize' ? 'checked' : ''}>
+                                最小化到托盘
+                            </label>
+                        </div>
+                        <div style="font-size:11px;color:#999;margin:4px 0 0 0;">最小化到托盘后可从系统托盘恢复窗口</div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button onclick="closeAppSettings()" style="padding:5px 16px;background:#6c757d;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">取消</button>
+                        <button onclick="saveAppSettings()" style="padding:5px 16px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">保存</button>
+                    </div>
+                </div>
+            `;
+            requestAnimationFrame(() => {
+                overlay.style.opacity = '1';
+                overlay.querySelector('div').style.transform = 'scale(1)';
+            });
+            overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAppSettings(); });
+        };
+
+        window.closeAppSettings = function() {
+            const overlay = document.getElementById('settingsOverlay');
+            overlay.style.opacity = '0';
+            overlay.querySelector('div').style.transform = 'scale(0.95)';
+            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 250);
+        };
+
+        window.saveAppSettings = async function() {
+            const autostart = document.getElementById('settingAutostart').checked;
+            const closeAction = document.querySelector('input[name="closeAction"]:checked').value;
+
+            const newSettings = {
+                autostart: autostart,
+                close_action: closeAction
+            };
+
+            try {
+                const response = await apiFetch('/save_app_settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: newSettings})
+                });
+                const data = await response.json();
+                if (data.success) {
+                    appSettings = newSettings;
+                    closeAppSettings();
+                } else {
+                    showToast('保存设置失败: ' + (data.message || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showToast('保存设置失败: ' + e.message, 'error');
+            }
+        };
+
         // 链接拦截（防止在 iframe/WebView 内导航）
         document.addEventListener('click', function(e) {
             const link = e.target.closest('a');
@@ -1072,14 +1106,13 @@
         async function initApp() {
             updateModeUI();
 
-            // 加载本地缓存配置
+            // 加载本地缓存配置（非阻塞）
             var savedConfig = localStorage.getItem('userConfig');
             if (savedConfig) {
                 try {
                     var parsed = JSON.parse(savedConfig);
                     if (parsed && Object.keys(parsed).length > 0) {
                         userConfig = parsed;
-                        isUsingUserConfig = true;
                     }
                 } catch(e) {}
             }
@@ -1089,7 +1122,7 @@
                 fetch('/api/user/me').then(function(r) { return r.json(); }).catch(function() { return { success: false }; }),
                 fetch('/get_config', {
                     method: 'POST',
-                    headers: apiHeaders(),
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({})
                 }).then(function(r) { return r.json(); }).catch(function() { return { success: false }; })
             ]);
@@ -1104,7 +1137,6 @@
 
             if (configResp.success && configResp.config) {
                 userConfig = configResp.config;
-                isUsingUserConfig = true;
                 localStorage.setItem('userConfig', JSON.stringify(configResp.config));
             } else if (!userConfig) {
                 userConfig = {
@@ -1114,21 +1146,24 @@
                         short_para_char_threshold: 50
                     }
                 };
-                isUsingUserConfig = true;
             }
 
             if (currentTool) {
-                document.querySelectorAll('.tool-item').forEach(function(item) { item.classList.remove('active'); });
+                var toolItems = document.querySelectorAll('.tool-item');
+                for (var i = 0; i < toolItems.length; i++) toolItems[i].classList.remove('active');
                 var toolEl = document.querySelector('.tool-item[onclick*="' + currentTool + '"]');
                 if (toolEl) toolEl.classList.add('active');
                 var toolInfo = tools[currentTool];
                 if (toolInfo) {
                     document.getElementById('toolTitle').textContent = toolInfo.name;
-                    document.getElementById('toolIntro').textContent = toolInfo.intro;
+                    var introEl = document.getElementById('toolIntro');
+                    introEl.textContent = toolInfo.intro;
                     var featureHtml = '<ul class="feature-list">';
-                    toolInfo.features.forEach(function(f) { featureHtml += '<li>' + f + '</li>'; });
+                    for (var j = 0; j < toolInfo.features.length; j++) {
+                        featureHtml += '<li>' + toolInfo.features[j] + '</li>';
+                    }
                     featureHtml += '</ul>';
-                    document.getElementById('toolIntro').innerHTML += featureHtml;
+                    introEl.insertAdjacentHTML('beforeend', featureHtml);
                     document.getElementById('toolPanel').style.display = 'block';
                 }
             }
@@ -1164,7 +1199,8 @@
                             }
                         }
                     }
-                    document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
+                    var navItems = document.querySelectorAll('.sidebar-nav-item');
+                    for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
                     var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');
                     if (navItem) navItem.classList.add('active');
                     var homeView = document.getElementById('home-view');
@@ -1174,7 +1210,8 @@
                     if (typeof FileBase !== 'undefined') FileBase.init();
                 });
             } else if (savedView === 'kb') {
-                document.querySelectorAll('.sidebar-nav-item').forEach(function(el) { el.classList.remove('active'); });
+                var navItems = document.querySelectorAll('.sidebar-nav-item');
+                for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
                 var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
                 if (navItem) navItem.classList.add('active');
                 var homeView = document.getElementById('home-view');
@@ -1227,9 +1264,8 @@ document.addEventListener('click', function(e) {
 function navigateTo(view) {
     localStorage.setItem('docflow_current_view', view);
 
-    document.querySelectorAll('.sidebar-nav-item').forEach(function(el) {
-        el.classList.remove('active');
-    });
+    var navItems = document.querySelectorAll('.sidebar-nav-item');
+    for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
     var navItem = document.querySelector('.sidebar-nav-item[data-view="' + view + '"]');
     if (navItem) navItem.classList.add('active');
 
@@ -1536,7 +1572,7 @@ function _updateWorkdirFromKbState() {
 
 window.confirmKbSelection = function() {
     if (!kbSelectorState.selectedKbId) {
-        alert('请先选择一个文件库');
+        showToast('请先选择一个文件库', 'error');
         return;
     }
 
