@@ -326,7 +326,7 @@ var FileBase = {
         if (permission === 'manage') {
             h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
             h += '<div class="fb-menu-divider"></div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到Wiki</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到知识库</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon">📄</span> doc转docx</div>';
             h += '<div class="fb-menu-divider"></div>';
