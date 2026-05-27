@@ -244,11 +244,11 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
             pPr.append(adj)
         adj.set(qn('w:val'), '0')
         # 不允许标点溢出界外
-        ovf = pPr.find(qn('w:overflowPunct'))
-        if ovf is None:
-            ovf = OxmlElement('w:overflowPunct')
-            pPr.append(ovf)
-        ovf.set(qn('w:val'), '0')
+        # ovf = pPr.find(qn('w:overflowPunct'))
+        # if ovf is None:
+        #     ovf = OxmlElement('w:overflowPunct')
+        #     pPr.append(ovf)
+        # ovf.set(qn('w:val'), '0')
 
 
 def run_fm(run, font_type=None, font_size=None, bold=None, r=None, g=None, b=None):

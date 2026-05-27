@@ -3,6 +3,9 @@ var WikiKnowledge = {
     isLoading: false,
     sessionId: null,
     memoryUsage: null,
+    _messageHistory: [],
+    _historyIndex: -1,
+    _historyTempInput: '',
 
     init: function() {
         if (!document.getElementById('kb-messages')) {
@@ -14,6 +17,123 @@ var WikiKnowledge = {
             }
         }
         this._loadMemoryUsage();
+    },
+    // ==================== 参考来源右键菜单 ====================
+    showSourceContextMenu: function(event, srcIdx) {
+        event.preventDefault();
+        event.stopPropagation();
+        WikiKnowledge._hideSourceContextMenu();
+
+        var src = WikiKnowledge._allSources[srcIdx];
+        if (!src) return;
+
+        var isWeb = src._type === 'web';
+        var isFile = src.fb_id && src.fb_path;
+
+        var menu = document.createElement('div');
+        menu.className = 'kb-context-menu';
+        menu.id = 'kb-source-context-menu';
+
+        var html = '';
+        html += '<div class="kb-context-menu-item" onclick="WikiKnowledge._contextOpen(' + srcIdx + ')">打开</div>';
+
+        if (isFile) {
+            html += '<div class="kb-context-menu-item" onclick="WikiKnowledge._contextSaveAs(' + srcIdx + ')">另存为</div>';
+            html += '<div class="kb-context-menu-divider"></div>';
+            html += '<div class="kb-context-menu-item" onclick="WikiKnowledge._contextLocate(' + srcIdx + ')">定位到文件库</div>';
+        }
+
+        menu.innerHTML = html;
+
+        var menuW = 160, menuH = isFile ? 130 : 42;
+        menu.style.left = Math.min(event.clientX, window.innerWidth - menuW) + 'px';
+        menu.style.top = Math.min(event.clientY, window.innerHeight - menuH) + 'px';
+        document.body.appendChild(menu);
+
+        setTimeout(function() {
+            document.addEventListener('click', WikiKnowledge._onContextClickOutside);
+            document.addEventListener('contextmenu', WikiKnowledge._onContextClickOutside);
+        }, 0);
+    },
+    _hideSourceContextMenu: function() {
+        var menu = document.getElementById('kb-source-context-menu');
+        if (menu) menu.remove();
+        document.removeEventListener('click', WikiKnowledge._onContextClickOutside);
+        document.removeEventListener('contextmenu', WikiKnowledge._onContextClickOutside);
+    },
+    _onContextClickOutside: function(e) {
+        var menu = document.getElementById('kb-source-context-menu');
+        if (menu && !menu.contains(e.target)) {
+            WikiKnowledge._hideSourceContextMenu();
+        }
+    },
+    _openSource: function(srcIdx) {
+        WikiKnowledge._hideSourceContextMenu();
+        var src = WikiKnowledge._allSources[srcIdx];
+        if (!src) return;
+
+        if (src._type === 'web') {
+            window.open(src.path, '_blank');
+            return;
+        }
+
+        if (src.fb_id && src.fb_path) {
+            var url = '/api/fb/' + src.fb_id + '/local-files/open-with-app?path=' + encodeURIComponent(src.fb_path);
+            fetch(url, { credentials: 'same-origin' }).then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.success) {
+                    WikiKnowledge.viewSource(srcIdx);
+                }
+            }).catch(function() {
+                WikiKnowledge.viewSource(srcIdx);
+            });
+        }
+    },
+    _contextOpen: function(srcIdx) {
+        WikiKnowledge._openSource(srcIdx);
+    },
+    _contextSaveAs: function(srcIdx) {
+        WikiKnowledge._hideSourceContextMenu();
+        var src = WikiKnowledge._allSources[srcIdx];
+        if (!src || !src.fb_id || !src.fb_path) return;
+
+        var fileName = src.fb_path.split('/').pop();
+
+        if (typeof window.pywebview !== 'undefined' && window.pywebview.api && window.pywebview.api.saveFileAs) {
+            window.pywebview.api.saveFileAs(fileName).then(function(savePath) {
+                if (!savePath) return;
+                apiFetch('/api/fb/' + src.fb_id + '/local-files/save-as', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: src.fb_path, save_path: savePath })
+                }).then(function(r) { return r.json(); }).then(function(data) {
+                    if (data.success) {
+                        if (typeof showToast === 'function') showToast('文件已保存', 'success');
+                    } else {
+                        if (typeof showToast === 'function') showToast(data.message || '保存失败', 'error');
+                    }
+                }).catch(function(err) {
+                    if (typeof showToast === 'function') showToast('保存失败: ' + err.message, 'error');
+                });
+            }).catch(function(err) {
+                if (typeof showToast === 'function') showToast('保存失败: ' + err.message, 'error');
+            });
+        }
+    },
+    _contextLocate: function(srcIdx) {
+        WikiKnowledge._hideSourceContextMenu();
+        var src = WikiKnowledge._allSources[srcIdx];
+        if (!src || !src.fb_id || !src.fb_path) return;
+
+        var fbPath = src.fb_path;
+        var dirPath = fbPath.substring(0, fbPath.lastIndexOf('/'));
+
+        localStorage.setItem('docflow_current_view', 'fb');
+        localStorage.setItem('docflow_current_fb_id', src.fb_id);
+        localStorage.setItem('docflow_current_subdir', dirPath);
+
+        if (typeof navigateTo === 'function') {
+            navigateTo('fb');
+        }
     },
 
     _restoreSession: function(sessionId) {
@@ -97,6 +217,11 @@ var WikiKnowledge = {
             content: content,
             time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         });
+
+        this._messageHistory.push(content);
+        if (this._messageHistory.length > 50) this._messageHistory.shift();
+        this._historyIndex = -1;
+        this._historyTempInput = '';
 
         var inputEl = document.getElementById('kb-input');
         if (inputEl) {
@@ -230,12 +355,49 @@ var WikiKnowledge = {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             this.sendMessage();
+            return;
+        }
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            this._navigateHistory(-1);
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            this._navigateHistory(1);
         }
     },
 
     autoResize: function(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+    },
+
+    _navigateHistory: function(direction) {
+        var inputEl = document.getElementById('kb-input');
+        if (!inputEl || this._messageHistory.length === 0) return;
+
+        if (direction === -1) {
+            if (this._historyIndex === -1) {
+                this._historyTempInput = inputEl.value;
+                this._historyIndex = this._messageHistory.length - 1;
+            } else if (this._historyIndex > 0) {
+                this._historyIndex--;
+            } else {
+                return;
+            }
+            inputEl.value = this._messageHistory[this._historyIndex];
+        } else {
+            if (this._historyIndex === -1) return;
+            if (this._historyIndex < this._messageHistory.length - 1) {
+                this._historyIndex++;
+                inputEl.value = this._messageHistory[this._historyIndex];
+            } else {
+                this._historyIndex = -1;
+                inputEl.value = this._historyTempInput;
+                this._historyTempInput = '';
+            }
+        }
+        this.autoResize(inputEl);
+        inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
     },
 
     _getAIResponse: function(query) {
@@ -746,7 +908,7 @@ var WikiKnowledge = {
                     var displayName = pathName || src.title || src.path || '';
                     html += '<div class="kb-chat-source-item"' + (j >= maxVisible ? ' style="display:none"' : '') + '>' +
                         '<span class="icon">' + (src._type === 'web' ? '&#x1F310;' : '&#x1F4C4;') + '</span>' +
-                        '<a href="javascript:void(0)" onclick="WikiKnowledge.viewSource(' + srcIdx + ');return false;">' + this._escapeHtml(displayName) + '</a>' +
+                        '<a href="javascript:void(0)" onclick="WikiKnowledge._openSource(' + srcIdx + ');return false;" oncontextmenu="WikiKnowledge.showSourceContextMenu(event,' + srcIdx + ');return false;">' + this._escapeHtml(displayName) + '</a>' +
                     '</div>';
                 }
                 if (msg.sources.length > maxVisible) {

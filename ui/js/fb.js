@@ -298,11 +298,11 @@ var FileBase = {
             var kbDisplayPath = kbCard.getAttribute('data-fb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 新建文件库</div>';
             if (window.authRole === 'admin') {
-                emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
+                emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.2"/><ellipse cx="7" cy="7" rx="3" ry="5" stroke="currentColor" stroke-width="1.2"/><path d="M2 7h10M3 4.5h8M3 9.5h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span> 新建网络文件库</div>';
             }
-            emptyMenu += '<div class="fb-menu-divider"></div><div class="fb-menu-item" onclick="FileBase.refreshKbList()"><span class="icon">🔄</span> 刷新</div>';
+            emptyMenu += '<div class="fb-menu-divider"></div><div class="fb-menu-item" onclick="FileBase.refreshKbList()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 刷新</div>';
             menu.innerHTML = emptyMenu;
         }
 
@@ -324,16 +324,16 @@ var FileBase = {
 
         var h = '';
         if (permission === 'manage') {
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon">⚙</span> 管理</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.1"/><path d="M7 2v1.5M7 10.5V12M2.5 4.5l1.3.75M10.2 8.75l1.3.75M2.5 9.5l1.3-.75M10.2 5.25l1.3-.75M4.5 2.5l.75 1.3M8.75 10.2l.75 1.3M4.5 11.5l.75-1.3M8.75 3.8l.75-1.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></span> 管理</div>';
             h += '<div class="fb-menu-divider"></div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon">☁️</span> 同步到知识库</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon">🔄</span> 立即同步</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon">📄</span> doc转docx</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 9.5a2.5 2.5 0 01-.5-4.97A3 3 0 019.5 6a1.8 1.8 0 01.5 3.5H4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 6v4M6 7l1-1.5L8 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 同步到知识库</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 立即同步</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2.5h4l3 3v6a1 1 0 01-1 1H2a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 8.5l1.5-1.5L9 5.5M10.5 7H8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> doc转docx</div>';
             h += '<div class="fb-menu-divider"></div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon">✏️</span> 重命名</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon">📋</span> 复制</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3.5h5a1 1 0 011 1V11a1 1 0 01-1 1H5a1 1 0 01-1-1V4.5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3 2h5a1 1 0 011 1v.5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 复制</div>';
             h += '<div class="fb-menu-divider"></div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon">🗑️</span> 删除</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
         }
         return h;
     },
@@ -987,6 +987,26 @@ var FileBase = {
         }
     },
 
+    showCreateOfficeFile: function(ext, label) {
+        var name = '新建' + label + '.' + ext;
+        this._createOfficeFile(name);
+    },
+
+    _createOfficeFile: async function(name) {
+        var self = this;
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/create-office', 'POST', {
+            name: name,
+            parent: this.fbLocalCurrentSubdir || ''
+        });
+        if (res.success) {
+            self.fbCategoryTree = null;
+            self.fbTreeLoaded = false;
+            await self.renderDetail();
+        } else {
+            showToast(res.message || '创建失败', 'error');
+        }
+    },
+
     showContextMenu: function(event) {
         event.preventDefault();
         event.stopPropagation();
@@ -1030,21 +1050,24 @@ var FileBase = {
     _buildFileContextMenu: function(path, isDir) {
         var escPath = path.replace(/'/g, "\\'");
         var h = '';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon">✏️</span> 重命名</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon">📋</span> 复制</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon">📦</span> 移动</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon">📥</span> 下载</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3.5h5a1 1 0 011 1V11a1 1 0 01-1 1H5a1 1 0 01-1-1V4.5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3 2h5a1 1 0 011 1v.5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 复制</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 7.5l1.5 1.5-1.5 1.5M11.5 9H7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
         h += '<div class="fb-menu-divider"></div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon">🗑️</span> 删除</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
         return h;
     },
 
     _buildEmptyContextMenu: function() {
-        var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建md</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon">📄</span> 新建txt</div>' +
+        var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 新建文件夹</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 1.5h4l3 3v8a1 1 0 01-1 1h-6a1 1 0 01-1-1v-10a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.5 8l1 1.5 2-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 新建md</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 1.5h4l3 3v8a1 1 0 01-1 1h-6a1 1 0 01-1-1v-10a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M4.5 7h5M4.5 9h5M4.5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span> 新建txt</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'docx\',\'Word文档\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#2B579A"/><path d="M4 5h6M4 7h6M4 9h3" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建docx</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'xlsx\',\'Excel表格\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#217346"/><path d="M4 5l6 4M10 5l-6 4" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建xlsx</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'pptx\',\'PPT演示\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#D04526"/><circle cx="7" cy="6" r="2.5" fill="#fff"/><path d="M7 8.5v4" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建pptx</div>' +
                 '<div class="fb-menu-divider"></div>' +
-                '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
+                '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 刷新</div>';
         return h;
     },
 

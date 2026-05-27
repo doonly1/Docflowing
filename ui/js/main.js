@@ -1285,7 +1285,24 @@ function navigateTo(view) {
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
         _loadScript('js/fb.js', function() {
-            if (typeof FileBase !== 'undefined') { FileBase.currentFbId = null; FileBase.init(); }
+            if (typeof FileBase !== 'undefined') {
+                var locFbId = localStorage.getItem('docflow_current_fb_id');
+                var locSubdir = localStorage.getItem('docflow_current_subdir');
+                if (locFbId) {
+                    FileBase.currentFbId = locFbId;
+                    FileBase.fbLocalCurrentSubdir = locSubdir || '';
+                    var parts = (locSubdir || '').replace(/\\/g, '/').split('/');
+                    FileBase.currentPath = [{ id: locFbId, name: '文件库', type: 'kb' }];
+                    for (var i = 0; i < parts.length; i++) {
+                        if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
+                    }
+                    localStorage.removeItem('docflow_current_fb_id');
+                    localStorage.removeItem('docflow_current_subdir');
+                } else {
+                    FileBase.currentFbId = null;
+                }
+                FileBase.init();
+            }
         });
     } else if (view === 'kb') {
         if (homeView) homeView.style.display = 'none';

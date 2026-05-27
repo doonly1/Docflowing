@@ -1118,4 +1118,46 @@
     margin: 2px 0;
 }
 
+/* ==================== 参考来源右键菜单 ==================== */
+
+.kb-context-menu {
+    position: fixed;
+    min-width: 145px;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    padding: 3px 0;
+    z-index: 3000;
+    font-size: 12px;
+    border: 1px solid rgba(0,0,0,0.08);
+    user-select: none;
+}
+
+.kb-context-menu-item {
+    padding: 5px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #333;
+    transition: background 0.1s;
+    white-space: nowrap;
+}
+
+.kb-context-menu-item:hover {
+    background: #f0f2f5;
+}
+
+.kb-context-menu-item .icon {
+    width: 16px;
+    font-size: 12px;
+    text-align: center;
+}
+
+.kb-context-menu-divider {
+    height: 1px;
+    background: #eee;
+    margin: 3px 8px;
+}
+
 

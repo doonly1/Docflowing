@@ -201,9 +201,28 @@ class SyncStateManager:
     def update_file_state(self, user_id: str, filebase_id: str, file_path: str,
                          source_mtime: float, status: str,
                          error: Optional[str] = None, target_mtime: Optional[float] = None):
-        """更新单个文件的同步状态"""
+        """更新单个文件的同步状态（立即持久化）"""
         state = self.load_state(user_id, filebase_id)
+        self._apply_file_state(state, file_path, source_mtime, status, error, target_mtime)
+        self.save_state(user_id, filebase_id, state)
 
+    def batch_update_file_states(self, user_id: str, filebase_id: str,
+                                 updates: list) -> SyncState:
+        """批量更新文件同步状态，最后只持久化一次
+
+        updates: [(file_path, source_mtime, status, error, target_mtime), ...]
+        """
+        state = self.load_state(user_id, filebase_id)
+        for file_path, source_mtime, status, error, target_mtime in updates:
+            self._apply_file_state(state, file_path, source_mtime, status, error, target_mtime)
+        self.save_state(user_id, filebase_id, state)
+        return state
+
+    def _apply_file_state(self, state: SyncState, file_path: str,
+                          source_mtime: float, status: str,
+                          error: Optional[str] = None,
+                          target_mtime: Optional[float] = None):
+        """在内存中应用一个文件的状态更新（不持久化）"""
         existing_retry = 0
         if file_path in state.files:
             existing_retry = state.files[file_path].retry_count
@@ -232,7 +251,6 @@ class SyncStateManager:
                 })
 
         state.update_file_state(file_path, file_state)
-        self.save_state(user_id, filebase_id, state)
 
     def remove_file(self, user_id: str, filebase_id: str, file_path: str):
         """移除文件的同步状态"""

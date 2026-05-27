@@ -1036,6 +1036,68 @@ def create_local_file(filebase_id):
     return jsonify({'success': True, 'path': rel})
 
 
+@fb_bp.route('/<fb_id>/local-files/create-office', methods=['POST'])
+@login_required
+@_require_fb_permission('edit')
+@_ensure_local_fb_route
+def create_office_file(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        result = p2p_proxy.remote_create_file(info['owner_addr'], node, filebase_id, data.get('name', ''), data.get('parent', ''))
+        return jsonify(result or {'success': False, 'message': '远程节点不可用'})
+
+    db = get_db()
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    parent = (data.get('parent') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '文件名不能为空'})
+    if '/' in name or '\\' in name:
+        return jsonify({'success': False, 'message': '文件名不能包含路径分隔符'})
+
+    local_path, target_dir = _resolve_local_path(db, filebase_id, parent)
+    if local_path is None:
+        return jsonify({'success': False, 'message': '文件库不存在或路径非法'})
+
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ('.docx', '.xlsx', '.pptx'):
+        return jsonify({'success': False, 'message': f'不支持的文件类型: {ext}'})
+
+    base = os.path.splitext(name)[0]
+    file_path = os.path.join(target_dir, name)
+    counter = 1
+    while os.path.exists(file_path) and counter < 100:
+        filename = f'{base}_{counter}{ext}'
+        file_path = os.path.join(target_dir, filename)
+        counter += 1
+    if os.path.exists(file_path):
+        return jsonify({'success': False, 'message': '无法生成唯一的文件名'})
+
+    try:
+        if ext == '.docx':
+            from docx import Document
+            doc = Document()
+            doc.save(file_path)
+        elif ext == '.xlsx':
+            import openpyxl
+            wb = openpyxl.Workbook()
+            wb.save(file_path)
+        elif ext == '.pptx':
+            from pptx import Presentation
+            prs = Presentation()
+            prs.save(file_path)
+    except ImportError as e:
+        return jsonify({'success': False, 'message': f'缺少创建 {ext} 文件所需的库: {str(e)}'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'创建文件失败: {str(e)}'})
+
+    rel = os.path.relpath(file_path, local_path).replace('\\', '/')
+    return jsonify({'success': True, 'path': rel})
+
+
 @fb_bp.route('/<fb_id>/local-files/content', methods=['PUT'])
 @login_required
 @_require_fb_permission('edit')
@@ -1267,6 +1329,40 @@ def download_local_file(filebase_id):
         return jsonify({'success': False, 'message': '文件不存在'})
 
     return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+
+
+@fb_bp.route('/<fb_id>/local-files/save-as', methods=['POST'])
+@login_required
+@_require_fb_permission('view')
+def save_local_file_as(filebase_id):
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    rel_path = data.get('path', '').strip()
+    save_path = data.get('save_path', '').strip()
+
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定源文件路径'})
+    if not save_path:
+        return jsonify({'success': False, 'message': '未指定保存路径'})
+
+    src_file = os.path.normpath(os.path.join(local_path, rel_path))
+    if not src_file.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '路径非法'})
+    if not os.path.isfile(src_file):
+        return jsonify({'success': False, 'message': '源文件不存在'})
+
+    try:
+        import shutil
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        shutil.copy2(src_file, save_path)
+        return jsonify({'success': True, 'message': '文件已保存'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'保存失败: {str(e)}'}), 500
 
 
 # ==================== KB 同步管理 ====================

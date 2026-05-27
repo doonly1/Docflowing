@@ -40,6 +40,21 @@ class JsBridge:
         root.destroy()
         return path or ''
 
+    def saveFileAs(self, suggested_name):
+        """弹出 Windows 原生文件保存对话框，返回用户选择的路径（取消返回空字符串）"""
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.asksaveasfilename(
+            title='另存为',
+            initialfile=suggested_name or '文件',
+            defaultextension=''
+        )
+        root.destroy()
+        return path or ''
+
 
 # ==================== 主入口 ====================
 

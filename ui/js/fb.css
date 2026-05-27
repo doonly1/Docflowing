@@ -536,6 +536,9 @@ body.fb-resizing {
     width: 16px;
     font-size: 12px;
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .fb-menu-divider {

@@ -1,7 +1,13 @@
 """
-FB 文件库同步 - 后台同步线程
+FB 文件库同步 - 后台同步线程（优化版）
 
 定时扫描启用了同步的文件库，执行增量同步
+优化项：
+- 消除重复目录扫描
+- 批量持久化同步状态
+- 一次性迁移标记
+- md/txt 轻量文件内联处理
+- 减少主循环阻塞等待
 """
 
 import logging
@@ -15,6 +21,9 @@ from .sync_converters import can_convert, convert_file
 from .sync_state import get_sync_state_manager
 
 logger = logging.getLogger(__name__)
+
+# 无需线程开销的轻量文件扩展名（转换就是读文件，几乎无耗时）
+_LIGHT_EXTENSIONS = {'.md', '.txt'}
 
 
 class SyncWorker:
@@ -45,6 +54,8 @@ class SyncWorker:
         self._semaphore = threading.Semaphore(self._max_concurrent)
 
         self._state_manager = get_sync_state_manager()
+        # 标记已执行过一次迁移的文件库，避免每轮主循环重复检查
+        self._migrated_filebases: Set[str] = set()
 
     def start(self):
         """启动同步线程"""
@@ -69,7 +80,7 @@ class SyncWorker:
 
     def _run(self):
         """同步线程主循环"""
-        self._migrate_existing_wiki_files()
+        self._run_migration_once()
         while self._running:
             try:
                 self._sync_all_enabled_filebases()
@@ -183,7 +194,7 @@ class SyncWorker:
 
             self._process_changes(user_id, filebase_id, source_dir, current_files, state)
 
-            self._cleanup_deleted(user_id, filebase_id, source_dir, state)
+            self._cleanup_deleted(user_id, filebase_id, current_files, state)
 
             state.total_files = len(current_files)
             self._state_manager.save_state(user_id, filebase_id, state)
@@ -254,8 +265,9 @@ class SyncWorker:
 
     def _process_changes(self, user_id: str, filebase_id: str, source_dir: str,
                         current_files: Dict, state):
-        """处理文件变化：新增和修改"""
-        files_to_sync = []
+        """处理文件变化：新增和修改（优化版：轻量文件内联 + 批量持久化）"""
+        heavy_files = []
+        light_files = []
 
         for relative_path, file_info in current_files.items():
             if not file_info['syncable']:
@@ -271,18 +283,56 @@ class SyncWorker:
             )
 
             if needs_sync:
-                files_to_sync.append((relative_path, file_info))
+                ext = os.path.splitext(file_info['path'])[1].lower()
+                if ext in _LIGHT_EXTENSIONS:
+                    light_files.append((relative_path, file_info))
+                else:
+                    heavy_files.append((relative_path, file_info))
 
         state.syncable_files = sum(1 for f in current_files.values() if f['syncable'])
 
-        if not files_to_sync:
+        if not light_files and not heavy_files:
             return
 
-        logger.info(f"Filebase {filebase_id}: {len(files_to_sync)} files to sync")
+        logger.info(
+            f"Filebase {filebase_id}: {len(light_files)} light + "
+            f"{len(heavy_files)} heavy files to sync"
+        )
+
+        light_updates = []
+        for relative_path, file_info in light_files:
+            result = self._convert_single(
+                user_id, filebase_id, relative_path, file_info, state
+            )
+            if result:
+                light_updates.append(result)
+
+        if light_updates:
+            self._state_manager.batch_update_file_states(
+                user_id, filebase_id, light_updates
+            )
+            logger.debug(f"Filebase {filebase_id}: batch saved {len(light_updates)} light files")
+
+        if not heavy_files:
+            return
+
+        heavy_updates_lock = threading.Lock()
+        heavy_updates = []
 
         deadline = time.time() + 600
 
-        for i, (relative_path, file_info) in enumerate(files_to_sync):
+        def _sync_heavy(relative_path, file_info):
+            try:
+                result = self._convert_single(
+                    user_id, filebase_id, relative_path, file_info, state
+                )
+                if result:
+                    with heavy_updates_lock:
+                        heavy_updates.append(result)
+            finally:
+                self._semaphore.release()
+
+        for i, (relative_path, file_info) in enumerate(heavy_files):
             remaining = deadline - time.time()
             if remaining <= 0:
                 logger.warning(f"Sync timeout for {filebase_id}: no time left to start more conversions")
@@ -292,8 +342,8 @@ class SyncWorker:
                 break
 
             thread = threading.Thread(
-                target=self._convert_and_sync,
-                args=(user_id, filebase_id, relative_path, file_info, state),
+                target=_sync_heavy,
+                args=(relative_path, file_info),
                 daemon=True
             )
             thread.start()
@@ -304,9 +354,17 @@ class SyncWorker:
                 break
             self._semaphore.acquire(timeout=min(remaining, 60))
 
-    def _convert_and_sync(self, user_id: str, filebase_id: str,
-                         relative_path: str, file_info: Dict, state):
-        """转换并同步单个文件"""
+        if heavy_updates:
+            self._state_manager.batch_update_file_states(
+                user_id, filebase_id, heavy_updates
+            )
+            logger.debug(f"Filebase {filebase_id}: batch saved {len(heavy_updates)} heavy files")
+
+    def _convert_single(self, user_id: str, filebase_id: str,
+                          relative_path: str, file_info: Dict,
+                          state) -> Optional[tuple]:
+        """转换单个文件，返回 (relative_path, source_mtime, status, error, target_mtime)
+        不直接写入 DB，由调用方批量持久化。返回 None 表示无需更新。"""
         try:
             source_path = file_info['path']
             source_mtime = file_info['mtime']
@@ -316,13 +374,8 @@ class SyncWorker:
             md_content = convert_file(source_path, relative_path, filebase_id)
 
             if md_content is None:
-                self._state_manager.update_file_state(
-                    user_id, filebase_id, relative_path,
-                    source_mtime, 'failed',
-                    error='conversion_failed'
-                )
                 logger.warning(f"Failed to convert: {relative_path}")
-                return
+                return (relative_path, source_mtime, 'failed', 'conversion_failed', None)
 
             kb_relative_path = f"imported/{filebase_id}/{relative_path}"
             if not kb_relative_path.lower().endswith('.md'):
@@ -332,28 +385,15 @@ class SyncWorker:
             title = _extract_title_from_md(md_content) or os.path.splitext(os.path.basename(source_path))[0]
             update_search_index(user_id, kb_relative_path, title, md_content)
 
-            self._state_manager.update_file_state(
-                user_id, filebase_id, relative_path,
-                source_mtime, 'synced',
-                target_mtime=time.time()
-            )
-
             logger.debug(f"Synced: {relative_path}")
+            return (relative_path, source_mtime, 'synced', None, time.time())
 
         except Exception as e:
-            self._state_manager.update_file_state(
-                user_id, filebase_id, relative_path,
-                file_info['mtime'], 'failed',
-                error=str(e)
-            )
             logger.error(f"Error syncing {relative_path}: {e}")
+            return (relative_path, file_info['mtime'], 'failed', str(e), None)
 
-        finally:
-            self._semaphore.release()
-
-    def _cleanup_deleted(self, user_id: str, filebase_id: str, source_dir: str, state):
-        """清理已删除的文件"""
-        current_files = self._scan_filebase(source_dir)
+    def _cleanup_deleted(self, user_id: str, filebase_id: str, current_files: Dict, state):
+        """清理已删除的文件（使用已有扫描结果，避免重复目录遍历）"""
         current_paths = set(current_files.keys())
 
         synced_paths = set(state.files.keys())
@@ -423,40 +463,49 @@ class SyncWorker:
         except Exception as e:
             logger.error(f"Failed to cleanup filebase {filebase_id}: {e}")
 
-    def _migrate_existing_wiki_files(self):
-        """确保现有 imported 文件在 wiki_files 表中有记录（一次性迁移）"""
+    def _run_migration_once(self):
+        """一次性迁移：确保启用了同步的文件库的 imported 文件在 wiki_files 表中有记录"""
         try:
             enabled_filebases = self._get_enabled_filebases()
             for fb in enabled_filebases:
-                user_id = fb['user_id']
-                filebase_id = fb['id']
-                state = self._state_manager.get_state(user_id, filebase_id)
-
-                for relative_path, file_state in state.files.items():
-                    if file_state.status != 'synced':
-                        continue
-                    kb_path = f"imported/{filebase_id}/{relative_path}"
-                    if not kb_path.lower().endswith('.md'):
-                        kb_path += '.md'
-
-                    from .database import get_db
-                    conn = get_db(user_id)
-                    row = conn.execute(
-                        "SELECT path FROM wiki_files WHERE usr_id = ? AND path = ?",
-                        (user_id, kb_path)
-                    ).fetchone()
-                    if not row and file_state.source:
-                        ft_row = conn.execute(
-                            "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
-                            (user_id, kb_path)
-                        ).fetchone()
-                        if ft_row:
-                            from .routes import update_search_index
-                            update_search_index(user_id, kb_path, file_state.source, ft_row['content'])
-
+                fb_key = fb['id']
+                if fb_key in self._migrated_filebases:
+                    continue
+                self._migrate_single_filebase(fb['user_id'], fb['id'])
+                self._migrated_filebases.add(fb_key)
             logger.info("Migration of wiki_files table completed")
         except Exception as e:
             logger.error(f"Failed to migrate wiki_files: {e}")
+
+    def _migrate_single_filebase(self, user_id: str, filebase_id: str):
+        """迁移单个文件库的 wiki_files 记录"""
+        state = self._state_manager.get_state(user_id, filebase_id)
+
+        for relative_path, file_state in state.files.items():
+            if file_state.status != 'synced':
+                continue
+            kb_path = f"imported/{filebase_id}/{relative_path}"
+            if not kb_path.lower().endswith('.md'):
+                kb_path += '.md'
+
+            from .database import get_db
+            conn = get_db(user_id)
+            row = conn.execute(
+                "SELECT path FROM wiki_files WHERE usr_id = ? AND path = ?",
+                (user_id, kb_path)
+            ).fetchone()
+            if not row and file_state.source:
+                ft_row = conn.execute(
+                    "SELECT content FROM wiki_fts WHERE usr_id = ? AND path = ?",
+                    (user_id, kb_path)
+                ).fetchone()
+                if ft_row:
+                    from .routes import update_search_index
+                    update_search_index(user_id, kb_path, file_state.source, ft_row['content'])
+
+    def _migrate_existing_wiki_files(self):
+        """保留旧接口以兼容外部调用"""
+        self._run_migration_once()
 
 
 _sync_worker = None

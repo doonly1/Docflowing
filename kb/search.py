@@ -1,4 +1,8 @@
+import logging
+
 from kb.database import get_db
+
+logger = logging.getLogger(__name__)
 
 
 def search_wiki(usr_id, query):
@@ -9,7 +13,6 @@ def search_wiki(usr_id, query):
     search_terms = query.strip().split()
     fts_query = ' OR '.join(f'title:{t} OR content:{t}' for t in search_terms)
 
-    # FTS5 全文搜索（trigram tokenizer 对中文词组匹配良好）
     try:
         rows = conn.execute(
             "SELECT path, title, "
@@ -18,19 +21,35 @@ def search_wiki(usr_id, query):
             "FROM wiki_fts WHERE usr_id = ? AND wiki_fts MATCH ?",
             (usr_id, fts_query)
         ).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.warning("FTS5 search failed, fallback to LIKE (query=%r, terms=%r): %s", query, search_terms, e)
         rows = []
 
-    # LIKE 兜底（加上 LIMIT 避免全表扫描拖垮性能）
     if not rows:
         try:
-            rows = conn.execute(
+            like_parts = []
+            like_params = []
+            for t in search_terms:
+                like_parts.append("(title LIKE ? OR content LIKE ?)")
+                like_params.extend([f'%{t}%', f'%{t}%'])
+            like_params.insert(0, usr_id)
+
+            # 先用 AND：所有关键词都必须匹配
+            sql = (
                 "SELECT path, title, '' as title_snippet, '' as content_snippet "
-                "FROM wiki_fts WHERE usr_id = ? AND (title LIKE ? OR content LIKE ?) "
-                "LIMIT 99",
-                (usr_id, f'%{query}%', f'%{query}%')
-            ).fetchall()
-        except Exception:
+                "FROM wiki_fts WHERE usr_id = ? AND ({}) LIMIT 99"
+            ).format(' AND '.join(like_parts))
+            rows = conn.execute(sql, like_params).fetchall()
+
+            # AND 无结果时降级为 OR：匹配任意关键词即可
+            if not rows:
+                sql = (
+                    "SELECT path, title, '' as title_snippet, '' as content_snippet "
+                    "FROM wiki_fts WHERE usr_id = ? AND ({}) LIMIT 99"
+                ).format(' OR '.join(like_parts))
+                rows = conn.execute(sql, like_params).fetchall()
+        except Exception as e:
+            logger.error("LIKE fallback search failed (query=%r): %s", query, e)
             return []
 
     return [
