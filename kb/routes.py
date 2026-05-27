@@ -390,9 +390,10 @@ def agent_context():
 
         kb_context = '\n\n'.join(context_parts)
 
-        # 移除 markdown 加粗/斜体标记，避免与标题混淆
+        # 移除 markdown 加粗/斜体/删除线标记，避免与标题混淆
         kb_context = re.sub(r'\*\*([^*]+)\*\*', r'\1', kb_context)
         kb_context = re.sub(r'\*([^*]+)\*', r'\1', kb_context)
+        kb_context = re.sub(r'~~([^~]+)~~', r'\1', kb_context)
 
         # 对非LLM返回的匹配内容做关键词高亮标记
         kb_context_marked = kb_context or ''
@@ -401,7 +402,7 @@ def agent_context():
                 if len(kw) < 1:
                     continue
                 pattern = re.compile(re.escape(kw), re.IGNORECASE)
-                kb_context_marked = pattern.sub(lambda m: f'<mark>{m.group()}</mark>', kb_context)
+                kb_context_marked = pattern.sub(lambda m: f'<mark>{m.group()}</mark>', kb_context_marked)
 
         from .memory import get_memory_store
         from .context_fence import build_memory_context_block

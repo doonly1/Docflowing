@@ -78,6 +78,9 @@ def main():
     except Exception:
         win_x = win_y = None
 
+    # 图标路径（相对于脚本所在目录）
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui', 'favicon.ico')
+
     kwargs = {
         'title': '文枢',
         'url': server_url,
@@ -93,7 +96,7 @@ def main():
         kwargs['y'] = win_y
 
     webview.create_window(**kwargs)
-    webview.start(debug=False, http_server=False)
+    webview.start(debug=False, http_server=False, icon=icon_path)
 
 
 if __name__ == '__main__':
