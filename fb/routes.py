@@ -15,6 +15,7 @@ from functools import wraps
 from server.auth import login_required
 from fb.database import get_db, get_visible_fb_ids, get_user_role
 from tools.tool_defs import TOOL_SCRIPTS, TOOL_EXTENSIONS
+from server import get_p2p_discovery, get_node_identity
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -895,6 +896,45 @@ def _resolve_local_path(db, filebase_id, subdir=''):
     return local_path, target
 
 
+def _trigger_fb_sync(filebase_id):
+    """文件变更后触发同步"""
+    try:
+        from kb.sync_worker import get_sync_worker
+        from flask import g
+        worker = get_sync_worker()
+        worker._trigger_sync(g.user_id, filebase_id)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to trigger sync for {filebase_id}")
+
+
+def _toggle_fb_sync_visibility(filebase_id, visible):
+    """切换同步数据在 KB 中的可见性，visible=True 显示（imported/），False 隐藏（_disabled/）"""
+    try:
+        from flask import g
+        from kb.database import get_db as get_kb_db
+        conn = get_kb_db(g.user_id)
+        if visible:
+            old_prefix = f'_disabled/{filebase_id}/'
+            new_prefix = f'imported/{filebase_id}/'
+        else:
+            old_prefix = f'imported/{filebase_id}/'
+            new_prefix = f'_disabled/{filebase_id}/'
+
+        conn.execute(
+            "UPDATE wiki_files SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
+            (old_prefix, new_prefix, g.user_id, old_prefix + '%')
+        )
+        conn.execute(
+            "UPDATE wiki_fts SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
+            (old_prefix, new_prefix, g.user_id, old_prefix + '%')
+        )
+        conn.commit()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to toggle visibility for {filebase_id}")
+
+
 @fb_bp.route('/<fb_id>/local-files', methods=['POST'])
 @login_required
 @_require_fb_permission('edit')
@@ -942,6 +982,9 @@ def upload_local_files(filebase_id):
                 'size': stat.st_size,
                 'mtime': stat.st_mtime
             })
+
+    if uploaded:
+        _trigger_fb_sync(filebase_id)
 
     return jsonify({'success': True, 'uploaded': uploaded})
 
@@ -1033,6 +1076,7 @@ def create_local_file(filebase_id):
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write('')
     rel = os.path.relpath(file_path, local_path).replace('\\', '/')
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'path': rel})
 
 
@@ -1095,6 +1139,7 @@ def create_office_file(filebase_id):
         return jsonify({'success': False, 'message': f'创建文件失败: {str(e)}'})
 
     rel = os.path.relpath(file_path, local_path).replace('\\', '/')
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'path': rel})
 
 
@@ -1144,6 +1189,7 @@ def save_local_file_content(filebase_id):
     with open(target, 'w', encoding='utf-8') as f:
         f.write(content)
     stat = os.stat(target)
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'mtime': stat.st_mtime})
 
 
@@ -1387,14 +1433,10 @@ def toggle_sync(filebase_id):
     db.execute("UPDATE filebases SET is_synced_to_kb = ? WHERE id = ?", (1 if enabled else 0, filebase_id))
     db.commit()
 
+    _toggle_fb_sync_visibility(filebase_id, enabled)
+
     if enabled:
-        try:
-            from kb.sync_worker import get_sync_worker
-            worker = get_sync_worker()
-            worker.trigger_sync_now(g.user_id, filebase_id)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to trigger sync: {e}")
+        _trigger_fb_sync(filebase_id)
 
     return jsonify({'success': True, 'enabled': enabled})
 
@@ -1782,6 +1824,7 @@ def replace_local_file(filebase_id):
     try:
         upload_file.save(file_path)
         new_stat = os.stat(file_path)
+        _trigger_fb_sync(filebase_id)
         return jsonify({
             'success': True,
             'message': '文件已替换',
@@ -1847,6 +1890,7 @@ def move_local_items(filebase_id):
         except Exception as e:
             errors.append(f'{src}: {str(e)}')
 
+    _trigger_fb_sync(filebase_id)
     return jsonify({
         'success': True,
         'moved': moved,
@@ -1898,6 +1942,7 @@ def delete_local_items(filebase_id):
         except Exception as e:
             errors.append(f'{rel}: {str(e)}')
 
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
@@ -1949,6 +1994,7 @@ def rename_local_item(filebase_id):
         return jsonify({'success': False, 'message': str(e)})
 
     new_rel = os.path.relpath(new_path, local_path).replace('\\', '/')
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'new_path': new_rel})
 
 
@@ -2015,6 +2061,7 @@ def copy_local_items(filebase_id):
         except Exception as e:
             errors.append(f'{rel}: {str(e)}')
 
+    _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'copied': copied, 'errors': errors})
 
 
@@ -2083,6 +2130,270 @@ def open_with_app(filebase_id):
         return jsonify({'success': True, 'message': '已用本地软件打开'})
     except Exception as e:
         return jsonify({'success': False, 'message': f'打开失败: {str(e)}'}), 500
+
+
+# ==================== P2P 共享管理 ====================
+
+@fb_bp.route('/<fb_id>/share', methods=['POST'])
+@login_required
+@_require_fb_permission('manage')
+def share_filebase(filebase_id):
+    """将文件库共享给其他 P2P 节点"""
+    data = request.get_json() or {}
+    target_nodes = data.get('nodes', [])
+    permission = (data.get('permission') or 'view').strip()
+
+    if not target_nodes:
+        return jsonify({'success': False, 'message': '请选择目标节点'})
+    if permission not in ('view', 'edit', 'manage'):
+        return jsonify({'success': False, 'message': '无效的权限级别'})
+
+    db = get_db()
+    row = db.execute("SELECT name, owner_id FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    fb_name = row['name']
+    identity = get_node_identity()
+    if not identity:
+        return jsonify({'success': False, 'message': '节点身份未初始化'})
+
+    owner_addr = f'{identity.node_id}:{identity.port}'
+
+    now = time.time()
+    success_count = 0
+    for node in target_nodes:
+        node_id = node.get('node_id', '')
+        node_name = node.get('display_name', '')
+        node_addr = node.get('addr', '')
+
+        if not node_id or not node_addr:
+            continue
+
+        host = node_addr.split(':')[0] if ':' in node_addr else node_addr
+        owner_full_addr = f'{host}:{identity.port}'
+
+        try:
+            import requests
+            notify_url = f'http://{node_addr}/p2p/share/notify'
+            resp = requests.post(notify_url, json={
+                'fb_id': filebase_id,
+                'fb_name': fb_name,
+                'owner_addr': owner_full_addr,
+                'permission': permission,
+                'node_id': identity.node_id,
+                'node_name': identity.display_name,
+                'node_public_key': identity.get_public_key_b64()
+            }, timeout=10)
+            if resp.ok:
+                success_count += 1
+        except Exception as e:
+            logger.warning("Failed to notify node %s: %s", node_addr, e)
+
+        db.execute(
+            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (filebase_id, node_id, node_name, node_addr, permission, now)
+        )
+
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'已共享给 {success_count}/{len(target_nodes)} 个节点',
+        'shared_count': success_count,
+        'total': len(target_nodes)
+    })
+
+
+@fb_bp.route('/<fb_id>/shared-nodes', methods=['GET'])
+@login_required
+@_require_fb_permission('manage')
+def list_shared_nodes(filebase_id):
+    """获取文件库已共享的节点列表"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT node_id, node_name, node_addr, permission_level, created_at FROM shared_nodes WHERE filebase_id = ? ORDER BY created_at DESC",
+        (filebase_id,)
+    ).fetchall()
+
+    nodes = []
+    for r in rows:
+        nodes.append({
+            'node_id': r['node_id'],
+            'node_name': r['node_name'],
+            'node_addr': r['node_addr'],
+            'permission': r['permission_level'],
+            'created_at': r['created_at']
+        })
+
+    return jsonify({'success': True, 'nodes': nodes})
+
+
+@fb_bp.route('/<fb_id>/shared-nodes/<node_id>', methods=['DELETE'])
+@login_required
+@_require_fb_permission('manage')
+def revoke_share(filebase_id, node_id):
+    """撤销对某个节点的共享"""
+    db = get_db()
+    db.execute("DELETE FROM shared_nodes WHERE filebase_id = ? AND node_id = ?", (filebase_id, node_id))
+    db.commit()
+
+    # 通知远程节点移除文件库
+    row = db.execute("SELECT node_addr FROM shared_nodes WHERE filebase_id = ? AND node_id = ?",
+                     (filebase_id, node_id)).fetchone()
+    if row:
+        node_addr = row['node_addr']
+        try:
+            import requests
+            identity = get_node_identity()
+            from p2p.proxy import _sign_request
+            if identity:
+                headers = _sign_request(identity, 'DELETE', f'/p2p/fb/{filebase_id}/revoke')
+                requests.delete(f'http://{node_addr}/p2p/fb/{filebase_id}/revoke',
+                                headers=headers, timeout=10)
+        except Exception:
+            pass
+
+    return jsonify({'success': True, 'message': '共享已撤销'})
+
+
+@fb_bp.route('/share-batch', methods=['POST'])
+@login_required
+def batch_share():
+    """一键共享给所有在线节点（由前端指定节点列表）"""
+    data = request.get_json() or {}
+    fb_id = data.get('fb_id', '')
+    permission = (data.get('permission') or 'view').strip()
+    all_nodes = data.get('all_nodes', [])
+
+    if not fb_id or not all_nodes:
+        return jsonify({'success': False, 'message': '参数不完整'})
+
+    db = get_db()
+    row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+    if not row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    identity = get_node_identity()
+    if not identity:
+        return jsonify({'success': False, 'message': '节点身份未初始化'})
+
+    fb_row = db.execute("SELECT name FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+    fb_name = fb_row['name'] if fb_row else ''
+    owner_addr = f'{identity.node_id}:{identity.port}'
+    now = time.time()
+
+    success_count = 0
+    for node in all_nodes:
+        node_id = node.get('node_id', '')
+        node_name = node.get('display_name', '')
+        node_addr = node.get('addr', '')
+        if not node_id or not node_addr:
+            continue
+        try:
+            import requests
+            host = node_addr.split(':')[0] if ':' in node_addr else node_addr
+            notify_url = f'http://{node_addr}/p2p/share/notify'
+            resp = requests.post(notify_url, json={
+                'fb_id': fb_id,
+                'fb_name': fb_name,
+                'owner_addr': f'{host}:{identity.port}',
+                'permission': permission,
+                'node_id': identity.node_id,
+                'node_name': identity.display_name,
+                'node_public_key': identity.get_public_key_b64()
+            }, timeout=10)
+            if resp.ok:
+                success_count += 1
+        except Exception as e:
+            logger.warning("batch share failed for %s: %s", node_addr, e)
+
+        db.execute(
+            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (fb_id, node_id, node_name, node_addr, permission, now)
+        )
+    db.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'已共享给 {success_count}/{len(all_nodes)} 个在线节点',
+        'shared_count': success_count,
+        'total': len(all_nodes)
+    })
+
+
+# ==================== P2P 节点信息 ====================
+
+@fb_bp.route('/p2p/node', methods=['GET'])
+@login_required
+def get_p2p_node_info():
+    """获取本机 P2P 节点身份信息"""
+    identity = get_node_identity()
+    if not identity:
+        return jsonify({'success': False, 'message': '节点身份未初始化'})
+
+    return jsonify({
+        'success': True,
+        'node_id': identity.node_id,
+        'display_name': identity.display_name,
+        'port': identity.port,
+    })
+
+
+@fb_bp.route('/p2p/node', methods=['PUT'])
+@login_required
+def update_p2p_node_info():
+    """更新本机 P2P 节点身份配置"""
+    data = request.get_json() or {}
+    display_name = (data.get('display_name') or '').strip()
+    port = data.get('port')
+
+    identity = get_node_identity()
+    if not identity:
+        return jsonify({'success': False, 'message': '节点身份未初始化'})
+
+    changed = False
+    if display_name and display_name != identity.display_name:
+        identity.display_name = display_name
+        changed = True
+    if port is not None:
+        try:
+            new_port = int(port)
+            if new_port < 1024 or new_port > 65535:
+                return jsonify({'success': False, 'message': '端口号范围 1024-65535'})
+            if new_port != identity.port:
+                identity.port = new_port
+                changed = True
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'message': '端口号无效'})
+
+    if changed:
+        if not identity.save_config():
+            return jsonify({'success': False, 'message': '配置保存失败'})
+        # 重启 P2P 发现服务以应用新配置
+        try:
+            discovery = get_p2p_discovery()
+            if discovery:
+                discovery.stop()
+                discovery.display_name = identity.display_name
+                discovery.port = identity.port
+                discovery.start()
+        except Exception as e:
+            logger.warning("Failed to restart P2P discovery: %s", e)
+
+    return jsonify({'success': True, 'message': '配置已更新'})
+
+
+@fb_bp.route('/p2p/discovered-nodes', methods=['GET'])
+@login_required
+def get_discovered_nodes():
+    """获取局域网发现的其他 P2P 节点"""
+    discovery = get_p2p_discovery()
+    if not discovery:
+        return jsonify({'success': True, 'nodes': []})
+
+    nodes = discovery.get_discovered_nodes()
+    return jsonify({'success': True, 'nodes': nodes})
 
 
 @fb_bp.route('/<fb_id>/convert-doc', methods=['POST'])

@@ -756,3 +756,16 @@ def p2p_share_list():
 
     filebases = [{'id': r['id'], 'name': r['name'], 'type': r['filebase_type']} for r in rows]
     return jsonify({'success': True, 'filebases': filebases})
+
+
+@p2p_bp.route('/fb/<fb_id>/revoke', methods=['DELETE'])
+def p2p_revoke_share(fb_id):
+    """接收远端所有者的撤销共享通知，从本地移除远程文件库"""
+    remote_store = RemoteFilebaseStore()
+    info = remote_store.get(fb_id)
+    if not info:
+        return jsonify({'success': False, 'message': '文件库不在共享列表中'}), 404
+
+    remote_store.remove(fb_id)
+    logger.info("Revoked shared filebase: %s from %s", fb_id[:8], info.get('owner_node_id', '')[:8])
+    return jsonify({'success': True, 'message': '共享已撤销'})

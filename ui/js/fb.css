@@ -990,3 +990,118 @@ body.fb-resizing {
 #fb-wysiwyg-editor .ql-editor ol { margin: 0 0 10px; padding-left: 24px; }
 #fb-wysiwyg-editor .ql-editor a { color: #0066cc; }
 #fb-wysiwyg-editor .ql-editor img { max-width: 100%; }
+
+/* ──────────── P2P: 在线节点栏 ──────────── */
+
+.fb-p2p-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: #f0f2f5;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.fb-p2p-bar-label {
+    color: #666;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.fb-p2p-nodes {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.fb-p2p-node-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.fb-p2p-node-offline {
+    color: #999;
+    font-size: 11px;
+}
+
+.fb-p2p-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #4caf50;
+    flex-shrink: 0;
+}
+
+.fb-p2p-settings-btn {
+    padding: 2px 6px !important;
+    border: none !important;
+    background: transparent !important;
+    cursor: pointer;
+    font-size: 14px !important;
+    border-radius: 4px;
+    line-height: 1;
+    transition: background 0.15s;
+}
+
+.fb-p2p-settings-btn:hover {
+    background: #e0e0e0 !important;
+}
+
+.fb-toolbar-spacer {
+    flex: 1;
+}
+
+/* ──────────── P2P: 共享对话框 ──────────── */
+
+.fb-share-node-list {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+.fb-share-node-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s;
+}
+
+.fb-share-node-item:hover {
+    background: #f0f2f5;
+}
+
+.fb-share-all-btn {
+    padding: 3px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 11px;
+    cursor: pointer;
+    color: #666;
+    transition: all 0.15s;
+}
+
+.fb-share-all-btn:hover {
+    border-color: #e94560;
+    color: #e94560;
+}

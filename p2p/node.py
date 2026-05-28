@@ -97,6 +97,32 @@ class NodeIdentity:
         pub_der = self._pub_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
         return base64.b64encode(pub_der).decode()
 
+    def save_config(self) -> bool:
+        """持久化当前配置到 p2p_node.yaml"""
+        try:
+            config_path = _get_config_path()
+            priv_b64, pub_b64 = self._get_keypair_b64()
+            cfg = {
+                'display_name': self.display_name,
+                'port': self.port,
+                'private_key': priv_b64,
+                'public_key': pub_b64,
+                'updated_at': time.time()
+            }
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(cfg, f, allow_unicode=True)
+            logger.info("Saved node config: %s port=%d", self.display_name, self.port)
+            return True
+        except Exception as e:
+            logger.warning("Failed to save node config: %s", e)
+            return False
+
+    def _get_keypair_b64(self):
+        priv_der = self._priv_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+        pub_der = self._pub_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+        return base64.b64encode(priv_der).decode(), base64.b64encode(pub_der).decode()
+
 
 def verify_signature(pub_key_b64: str, data: bytes, sig_b64: str) -> bool:
     try:

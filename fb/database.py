@@ -2,7 +2,7 @@ import os
 import sqlite3
 import threading
 
-from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS, CREATE_INDEX_SYNC_STATES
+from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS, CREATE_INDEX_SYNC_STATES, CREATE_INDEX_SHARED
 
 _local = threading.local()
 
@@ -32,6 +32,11 @@ def init_db(conn):
     for sql in CREATE_INDEXES:
         conn.execute(sql)
     for sql in CREATE_INDEX_SYNC_STATES:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
+    for sql in CREATE_INDEX_SHARED:
         try:
             conn.execute(sql)
         except Exception:

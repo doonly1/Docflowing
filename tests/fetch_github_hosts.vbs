@@ -1,11 +1,11 @@
 ' ================================
-' GitHub Hosts 更新工具 (VBS版本)
+' GitHub Hosts Updater (VBS Version - Silent Mode)
 ' ================================
 
 Option Explicit
 
-Dim shell, fso, tempFile, hostsFile, remoteUrl, objHTTP, objStream
-Dim content, newContent, skip, line, lines, success
+Dim shell, fso, tempFile, hostsFile, remoteUrl
+Dim newContent, skip, line, lines, success
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -14,21 +14,15 @@ tempFile = shell.ExpandEnvironmentStrings("%TEMP%") & "\hosts_temp_" & Rnd(1000)
 hostsFile = shell.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\drivers\etc\hosts"
 remoteUrl = "https://raw.hellogithub.com/hosts"
 
-' 检查管理员权限
+' Check admin privileges
 If Not IsAdmin() Then
     RunAsAdmin()
     WScript.Quit
 End If
 
-WScript.Echo "==============================" & vbCrLf & _
-             "GitHub Hosts 更新工具" & vbCrLf & _
-             "==============================" & vbCrLf & vbCrLf & _
-             "开始更新 hosts 文件..."
-
 On Error Resume Next
 
-' 步骤1: 读取 hosts 文件并清理旧记录
-WScript.Echo "[1/3] 正在清理旧的 GitHub520 记录..."
+' Step 1: Read hosts file and remove old records
 newContent = ""
 skip = False
 
@@ -45,41 +39,34 @@ If fso.FileExists(hostsFile) Then
         End If
     Loop
     lines.Close
-Else
-    WScript.Echo "警告: hosts 文件不存在，将创建新文件"
 End If
 
-' 保存清理后的内容到临时文件
+' Save cleaned content to temp file
 Set lines = fso.CreateTextFile(tempFile, True)
 lines.Write newContent
 lines.Close
 
-' 步骤2: 下载最新的 GitHub Hosts
-WScript.Echo "[2/3] 正在下载最新的 GitHub Hosts..."
+' Step 2: Download latest GitHub Hosts
 success = DownloadFile(remoteUrl, tempFile, True)
 
 If Not success Then
-    WScript.Echo "错误: 下载失败，请检查网络连接"
-    fso.DeleteFile tempFile, True
+    If fso.FileExists(tempFile) Then fso.DeleteFile tempFile, True
     WScript.Quit 1
 End If
 
-' 步骤3: 更新 hosts 文件
-WScript.Echo "[3/3] 正在更新 hosts 文件..."
+' Step 3: Update hosts file
 fso.CopyFile tempFile, hostsFile, True
 
-' 清理临时文件
-fso.DeleteFile tempFile, True
+' Clean up temp file
+If fso.FileExists(tempFile) Then fso.DeleteFile tempFile, True
 
 If Err.Number <> 0 Then
-    WScript.Echo "错误: " & Err.Description
-    WScript.Quit 1
+    shell.Popup "Error: " & Err.Description, 3, "GitHub Hosts", vbCritical
+Else
+    shell.Popup "Hosts file updated successfully!", 1, "GitHub Hosts", vbInformation
 End If
 
-WScript.Echo vbCrLf & "==============================" & vbCrLf & _
-             "✓ Hosts 文件更新完成！" & vbCrLf & _
-             "=============================="
-WScript.Sleep 2000
+WScript.Quit 0
 
 ' ================================
 ' 函数: 检查是否为管理员

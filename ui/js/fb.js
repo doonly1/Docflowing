@@ -114,6 +114,12 @@ var FileBase = {
 
             var h = '<div class="fb-explorer">';
             h += '<div class="fb-breadcrumb"><span class="fb-bc-current">🏠 文件库</span></div>';
+            h += '<div class="fb-p2p-bar" id="fb-p2p-bar">';
+            h += '<span class="fb-p2p-bar-label">🌐 在线节点：</span>';
+            h += '<span class="fb-p2p-nodes" id="fb-online-nodes"><span class="fb-p2p-node-offline">◉ 扫描中...</span></span>';
+            h += '<span class="fb-toolbar-spacer"></span>';
+            h += '<button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置">⚙️</button>';
+            h += '</div>';
             h += '<div class="fb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
             h += '<div class="fb-file-pane" style="width:100%">';
             h += '<div class="fb-file-toolbar">';
@@ -162,6 +168,8 @@ var FileBase = {
             for (var i = 0; i < kbs.length; i++) {
                 this._loadSyncStatus(kbs[i].id);
             }
+
+            this.initNodePolling();
         } catch (e) {
             console.error('renderKbList error:', e);
             var grid = document.getElementById('fb-grid-container');
@@ -298,11 +306,11 @@ var FileBase = {
             var kbDisplayPath = kbCard.getAttribute('data-fb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 新建文件库</div>';
+            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
             if (window.authRole === 'admin') {
-                emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.2"/><ellipse cx="7" cy="7" rx="3" ry="5" stroke="currentColor" stroke-width="1.2"/><path d="M2 7h10M3 4.5h8M3 9.5h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span> 新建网络文件库</div>';
+                emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
             }
-            emptyMenu += '<div class="fb-menu-divider"></div><div class="fb-menu-item" onclick="FileBase.refreshKbList()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 刷新</div>';
+            emptyMenu += '<div class="fb-menu-divider"></div><div class="fb-menu-item" onclick="FileBase.refreshKbList()"><span class="icon">🔄</span> 刷新</div>';
             menu.innerHTML = emptyMenu;
         }
 
@@ -324,14 +332,14 @@ var FileBase = {
 
         var h = '';
         if (permission === 'manage') {
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.1"/><path d="M7 2v1.5M7 10.5V12M2.5 4.5l1.3.75M10.2 8.75l1.3.75M2.5 9.5l1.3-.75M10.2 5.25l1.3-.75M4.5 2.5l.75 1.3M8.75 10.2l.75 1.3M4.5 11.5l.75-1.3M8.75 3.8l.75-1.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></span> 管理</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListManage(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="2.8" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="7" r="4.8" stroke="currentColor" stroke-width=".7" stroke-dasharray="1.3 1.3"/></svg></span> 管理</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.showShareDialog(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 4.5a2 2 0 100-4 2 2 0 000 4zM10 7a2 2 0 100-4 2 2 0 000 4zM4 13.5a2 2 0 100-4 2 2 0 000 4z" stroke="currentColor" stroke-width="1.2"/><path d="M6 6l4 1M6 8l4-1" stroke="currentColor" stroke-width="1.2"/></svg></span> 共享...</div>';
             h += '<div class="fb-menu-divider"></div>';
             h += '<div class="fb-menu-item" onclick="FileBase.toggleSync(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 9.5a2.5 2.5 0 01-.5-4.97A3 3 0 019.5 6a1.8 1.8 0 01.5 3.5H4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 6v4M6 7l1-1.5L8 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 同步到知识库</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.syncNow(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 立即同步</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.convertDoc(\'' + escId + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2.5h4l3 3v6a1 1 0 01-1 1H2a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 8.5l1.5-1.5L9 5.5M10.5 7H8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> doc转docx</div>';
             h += '<div class="fb-menu-divider"></div>';
             h += '<div class="fb-menu-item" onclick="FileBase.kbListRename(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3.5h5a1 1 0 011 1V11a1 1 0 01-1 1H5a1 1 0 01-1-1V4.5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3 2h5a1 1 0 011 1v.5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 复制</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.kbListCopy(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
             h += '<div class="fb-menu-divider"></div>';
             h += '<div class="fb-menu-item" onclick="FileBase.kbListDelete(\'' + escId + '\',\'' + escName + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
         }
@@ -474,8 +482,8 @@ var FileBase = {
             h += '<div class="fb-upload-wrap">';
             h += '<button onclick="FileBase.toggleUploadMenu(event)">📤 上传</button>';
             h += '<div class="fb-upload-menu" style="display:none">';
-            h += '<div class="fb-menu-item" onclick="FileBase.triggerFileUpload()"><span class="icon">📄</span> 上传文件</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.triggerFolderUpload()"><span class="icon">📁</span> 上传文件夹</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.triggerFileUpload()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 2.5h4l3 3v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.triggerFolderUpload()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件夹</div>';
             h += '</div>';
             h += '</div>';
             h += '<button onclick="FileBase.showCreateFolderDialog()">📁 新建文件夹</button>';
@@ -1051,8 +1059,8 @@ var FileBase = {
         var escPath = path.replace(/'/g, "\\'");
         var h = '';
         h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3.5h5a1 1 0 011 1V11a1 1 0 01-1 1H5a1 1 0 01-1-1V4.5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3 2h5a1 1 0 011 1v.5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 复制</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 7.5l1.5 1.5-1.5 1.5M11.5 9H7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
         h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
         h += '<div class="fb-menu-divider"></div>';
         h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
@@ -1060,14 +1068,14 @@ var FileBase = {
     },
 
     _buildEmptyContextMenu: function() {
-        var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 新建文件夹</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 1.5h4l3 3v8a1 1 0 01-1 1h-6a1 1 0 01-1-1v-10a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.5 8l1 1.5 2-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 新建md</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 1.5h4l3 3v8a1 1 0 01-1 1h-6a1 1 0 01-1-1v-10a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M4.5 7h5M4.5 9h5M4.5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span> 新建txt</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'docx\',\'Word文档\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#2B579A"/><path d="M4 5h6M4 7h6M4 9h3" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建docx</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'xlsx\',\'Excel表格\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#217346"/><path d="M4 5l6 4M10 5l-6 4" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建xlsx</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'pptx\',\'PPT演示\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.5" fill="#D04526"/><circle cx="7" cy="6" r="2.5" fill="#fff"/><path d="M7 8.5v4" stroke="#fff" stroke-width="1" stroke-linecap="round"/></svg></span> 新建pptx</div>' +
+        var h = '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建md</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon">📄</span> 新建txt</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'docx\',\'Word文档\');FileBase.hideContextMenu()"><span class="icon">📃</span> 新建docx</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'xlsx\',\'Excel表格\');FileBase.hideContextMenu()"><span class="icon">📊</span> 新建xlsx</div>' +
+                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'pptx\',\'PPT演示\');FileBase.hideContextMenu()"><span class="icon">📽️</span> 新建pptx</div>' +
                 '<div class="fb-menu-divider"></div>' +
-                '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.5 7A4.5 4.5 0 003.5 3M2.5 7a4.5 4.5 0 018-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 2.5l2 1.5-2 1M4.5 11.5l-2-1.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 刷新</div>';
+                '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
         return h;
     },
 
@@ -1521,6 +1529,7 @@ var FileBase = {
     showSettings: async function() {
         var self = this;
         var res = await this.api('/api/fb/' + this.currentFbId + '/members', 'GET');
+        var sharedRes = await this.api('/api/fb/' + this.currentFbId + '/shared-nodes', 'GET');
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
         h += '<h3>⚙ 文件库设置</h3><h4>成员管理</h4>';
         if (res.success && res.members) {
@@ -1570,6 +1579,22 @@ var FileBase = {
         h += '</div>';
         h += '<hr style="margin:16px 0"><h4>转让所有权</h4>';
         h += '<div class="fb-add-member"><input type="text" id="fb-transfer-user" placeholder="新所有者用户名"><button onclick="FileBase._transferAct()">转让</button></div>';
+
+        h += '<hr style="margin:16px 0"><h4>🌐 P2P 共享节点</h4>';
+        if (sharedRes.success && sharedRes.nodes && sharedRes.nodes.length > 0) {
+            h += '<table class="fb-member-table"><thead><tr><th>节点名称</th><th>地址</th><th>权限</th><th>操作</th></tr></thead><tbody>';
+            for (var si = 0; si < sharedRes.nodes.length; si++) {
+                var sn = sharedRes.nodes[si];
+                h += '<tr><td>' + escapeHtmlText(sn.node_name || sn.node_id.slice(0, 12)) + '</td>';
+                h += '<td style="font-size:11px;color:#888">' + escapeHtmlText(sn.node_addr) + '</td>';
+                h += '<td>' + (sn.permission === 'manage' ? '管理' : sn.permission === 'edit' ? '编辑' : '查看') + '</td>';
+                h += '<td><button class="fb-btn-remove" onclick="FileBase._revokeShareNode(\'' + self.currentFbId + '\',\'' + sn.node_id.replace(/'/g, "\\'") + '\')">撤销共享</button></td></tr>';
+            }
+            h += '</tbody></table>';
+        } else {
+            h += '<div style="font-size:13px;color:#888;padding:6px 0">尚未共享给其他 P2P 节点</div>';
+        }
+
         h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -1635,6 +1660,18 @@ var FileBase = {
         var res = await this.api('/api/fb/' + this.currentFbId + '/transfer', 'POST', { new_owner_id: tid });
         if (res.success) { this.closeModal(); this.currentFbId = null; await this.renderKbList(); }
         else showToast(res.message, 'error');
+    },
+
+    _revokeShareNode: async function(fbId, nodeId) {
+        if (!(await showConfirm('确定要撤销对该节点的共享吗？'))) return;
+        var res = await this.api('/api/fb/' + fbId + '/shared-nodes/' + encodeURIComponent(nodeId), 'DELETE');
+        if (res.success) {
+            showToast('共享已撤销', 'success');
+            this.closeModal();
+            await this.showSettings();
+        } else {
+            showToast(res.message || '撤销失败', 'error');
+        }
     },
 
     _deleteKbAct: async function() {
@@ -1788,6 +1825,248 @@ var FileBase = {
         if (!(await showConfirm('确定清空回收站吗？此操作不可恢复！'))) return;
         await this.api('/api/fb/trash', 'DELETE');
         await this.renderKbList();
+    },
+
+    // ─────────────────── P2P: 节点发现与在线节点展示 ───────────────────
+
+    _p2pPollingTimer: null,
+
+    initNodePolling: function() {
+        if (this._p2pPollingTimer) return;
+        this.refreshDiscoveredNodes();
+        var self = this;
+        this._p2pPollingTimer = setInterval(function() {
+            self.refreshDiscoveredNodes();
+        }, 10000);
+    },
+
+    stopNodePolling: function() {
+        if (this._p2pPollingTimer) {
+            clearInterval(this._p2pPollingTimer);
+            this._p2pPollingTimer = null;
+        }
+    },
+
+    refreshDiscoveredNodes: async function() {
+        try {
+            var res = await this.api('/api/fb/p2p/discovered-nodes', 'GET');
+            if (res.success) {
+                this._cachedDiscoveredNodes = res.nodes || [];
+                this._renderOnlineNodes();
+            }
+        } catch (e) {
+            // silently fail
+        }
+    },
+
+    _renderOnlineNodes: function() {
+        var container = document.getElementById('fb-online-nodes');
+        if (!container) return;
+        var nodes = this._cachedDiscoveredNodes || [];
+        if (nodes.length === 0) {
+            container.innerHTML = '<span class="fb-p2p-node-offline">◉ 无在线节点</span>';
+            return;
+        }
+        var h = '';
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            var addr = n.addr || (n.host + ':' + n.port);
+            h += '<span class="fb-p2p-node-chip" title="' + escapeHtmlText(addr) + '">';
+            h += '<span class="fb-p2p-dot"></span>';
+            h += escapeHtmlText(n.display_name || n.node_id.slice(0, 8));
+            h += '</span>';
+        }
+        container.innerHTML = h;
+    },
+
+    // ─────────────────── P2P: 节点设置对话框 ───────────────────
+
+    showP2PSettings: function() {
+        var self = this;
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:460px">';
+        h += '<h3>⚙️ P2P 节点设置</h3>';
+        h += '<div id="fb-p2p-settings-body"><div style="text-align:center;padding:20px;color:#999">加载中...</div></div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="btn" onclick="FileBase._saveP2PSettings()">💾 保存</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
+            if (e.target.id === 'fb-modal-overlay') self.closeModal();
+        });
+        this._loadP2PSettingsForm();
+    },
+
+    _loadP2PSettingsForm: async function() {
+        var body = document.getElementById('fb-p2p-settings-body');
+        if (!body) return;
+        try {
+            var res = await this.api('/api/fb/p2p/node', 'GET');
+            if (!res.success) {
+                body.innerHTML = '<div style="text-align:center;padding:20px;color:#999">无法加载节点信息</div>';
+                return;
+            }
+            body.innerHTML =
+                '<div style="margin-bottom:12px">' +
+                '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">节点 ID（只读）</label>' +
+                '<input type="text" value="' + escapeHtmlText(res.node_id) + '" readonly style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:12px;background:#f5f5f5;box-sizing:border-box;color:#888">' +
+                '</div>' +
+                '<div style="margin-bottom:12px">' +
+                '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">显示名称</label>' +
+                '<input type="text" id="fb-p2p-name" value="' + escapeHtmlText(res.display_name) + '" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">' +
+                '</div>' +
+                '<div style="margin-bottom:12px">' +
+                '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">P2P 监听端口</label>' +
+                '<input type="number" id="fb-p2p-port" value="' + res.port + '" min="1024" max="65535" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">' +
+                '</div>' +
+                '<div style="font-size:12px;color:#999;background:#f8f9fa;padding:10px;border-radius:4px">' +
+                '💡 修改名称或端口后，P2P 发现服务会自动重启以应用新配置。端口修改需要重启应用才能生效。' +
+                '</div>';
+        } catch (e) {
+            body.innerHTML = '<div style="text-align:center;padding:20px;color:#999">加载失败: ' + e.message + '</div>';
+        }
+    },
+
+    _saveP2PSettings: async function() {
+        var name = (document.getElementById('fb-p2p-name').value || '').trim();
+        var port = parseInt(document.getElementById('fb-p2p-port').value, 10);
+        if (!name) { showToast('请输入显示名称', 'error'); return; }
+        if (isNaN(port) || port < 1024 || port > 65535) { showToast('端口号范围 1024-65535', 'error'); return; }
+
+        var res = await this.api('/api/fb/p2p/node', 'PUT', {
+            display_name: name,
+            port: port
+        });
+        if (res.success) {
+            showToast('配置已更新', 'success');
+            this.closeModal();
+        } else {
+            showToast(res.message || '保存失败', 'error');
+        }
+    },
+
+    // ─────────────────── P2P: 文件库共享对话框 ───────────────────
+
+    showShareDialog: function(fbId, fbName) {
+        var self = this;
+        var nodes = this._cachedDiscoveredNodes || [];
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:480px">';
+        h += '<h3>🔗 共享文件库</h3>';
+        h += '<p style="font-size:13px;color:#666;margin-bottom:12px">选择要共享的节点和权限：<strong>' + escapeHtmlText(fbName) + '</strong></p>';
+
+        if (nodes.length === 0) {
+            h += '<div style="text-align:center;padding:20px;color:#999;background:#f8f9fa;border-radius:6px">';
+            h += '<div style="font-size:32px;margin-bottom:8px">🌐</div>';
+            h += '<div>未发现其他在线节点</div>';
+            h += '<div style="font-size:11px;color:#bbb;margin-top:4px">请确保其他 DocFlow 节点已在同一局域网启动</div>';
+            h += '</div>';
+        } else {
+            h += '<div style="margin-bottom:10px">';
+            h += '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">选择节点</label>';
+            h += '<div class="fb-share-node-list" style="max-height:220px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:6px">';
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var addr = n.addr || (n.host + ':' + n.port);
+                h += '<label class="fb-share-node-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px;transition:background 0.1s">';
+                h += '<input type="checkbox" class="fb-share-node-chk" data-node-id="' + escapeHtmlText(n.node_id) + '" data-node-name="' + escapeHtmlText(n.display_name || '') + '" data-node-addr="' + escapeHtmlText(addr) + '">';
+                h += '<span class="fb-p2p-dot"></span>';
+                h += '<strong>' + escapeHtmlText(n.display_name || n.node_id.slice(0, 8)) + '</strong>';
+                h += '<span style="color:#999;font-size:11px;margin-left:auto">' + escapeHtmlText(addr) + '</span>';
+                h += '</label>';
+            }
+            h += '</div>';
+            h += '</div>';
+            h += '<div style="margin-bottom:10px">';
+            h += '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">权限级别</label>';
+            h += '<select id="fb-share-perm" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">';
+            h += '<option value="view">查看（可浏览和下载文件）</option>';
+            h += '<option value="edit" selected>编辑（可修改文件）</option>';
+            h += '<option value="manage">管理（可管理文件库）</option>';
+            h += '</select>';
+            h += '</div>';
+            h += '<div style="display:flex;gap:8px;margin-bottom:4px">';
+            h += '<button class="fb-share-all-btn" onclick="FileBase._selectAllShareNodes()">全选</button>';
+            h += '<button class="fb-share-all-btn" onclick="FileBase._deselectAllShareNodes()">取消全选</button>';
+            h += '</div>';
+        }
+
+        h += '<div class="fb-modal-actions">';
+        if (nodes.length > 0) {
+            h += '<button class="btn" onclick="FileBase._doShare(\'' + fbId.replace(/'/g, "\\'") + '\')">🔗 共享</button>';
+            h += '<button class="btn" onclick="FileBase._doShareAll(\'' + fbId.replace(/'/g, "\\'") + '\')" title="共享给所有在线节点">📡 共享给全部</button>';
+        }
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
+            if (e.target.id === 'fb-modal-overlay') self.closeModal();
+        });
+    },
+
+    _selectAllShareNodes: function() {
+        var chks = document.querySelectorAll('.fb-share-node-chk');
+        for (var i = 0; i < chks.length; i++) chks[i].checked = true;
+    },
+
+    _deselectAllShareNodes: function() {
+        var chks = document.querySelectorAll('.fb-share-node-chk');
+        for (var i = 0; i < chks.length; i++) chks[i].checked = false;
+    },
+
+    _doShare: async function(fbId) {
+        var chks = document.querySelectorAll('.fb-share-node-chk:checked');
+        var nodes = [];
+        for (var i = 0; i < chks.length; i++) {
+            nodes.push({
+                node_id: chks[i].getAttribute('data-node-id'),
+                display_name: chks[i].getAttribute('data-node-name'),
+                addr: chks[i].getAttribute('data-node-addr')
+            });
+        }
+        if (nodes.length === 0) {
+            showToast('请至少选择一个节点', 'error');
+            return;
+        }
+        var perm = document.getElementById('fb-share-perm').value;
+        this.closeModal();
+        var res = await this.api('/api/fb/' + fbId + '/share', 'POST', {
+            nodes: nodes,
+            permission: perm
+        });
+        if (res.success) {
+            showToast(res.message || '共享成功', 'success');
+        } else {
+            showToast(res.message || '共享失败', 'error');
+        }
+    },
+
+    _doShareAll: async function(fbId) {
+        var nodes = this._cachedDiscoveredNodes || [];
+        if (nodes.length === 0) {
+            showToast('没有在线节点', 'error');
+            return;
+        }
+        var perm = document.getElementById('fb-share-perm').value;
+        this.closeModal();
+        var shareNodes = [];
+        for (var i = 0; i < nodes.length; i++) {
+            var addr = nodes[i].addr || (nodes[i].host + ':' + nodes[i].port);
+            shareNodes.push({
+                node_id: nodes[i].node_id,
+                display_name: nodes[i].display_name || '',
+                addr: addr
+            });
+        }
+        var res = await this.api('/api/fb/share-batch', 'POST', {
+            fb_id: fbId,
+            permission: perm,
+            all_nodes: shareNodes
+        });
+        if (res.success) {
+            showToast(res.message || '共享成功', 'success');
+        } else {
+            showToast(res.message || '共享失败', 'error');
+        }
     },
 
     getFileIcon: function(ext) {

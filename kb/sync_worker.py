@@ -50,6 +50,7 @@ class SyncWorker:
         self._thread: Optional[threading.Thread] = None
         self._processing_filebases: Set[str] = set()
         self._trigger_queue: Queue = Queue()
+        self._trigger_event = threading.Event()
         self._max_concurrent = 3
         self._semaphore = threading.Semaphore(self._max_concurrent)
 
@@ -79,16 +80,13 @@ class SyncWorker:
         logger.info("Sync worker stopped")
 
     def _run(self):
-        """同步线程主循环"""
+        """同步线程主循环 - 事件驱动模式"""
         self._run_migration_once()
+        self._sync_all_enabled_filebases()
         while self._running:
-            try:
-                self._sync_all_enabled_filebases()
-                self._process_triggered_syncs()
-            except Exception as e:
-                logger.error(f"Sync worker error: {e}", exc_info=True)
-
-            time.sleep(self.interval)
+            self._process_triggered_syncs()
+            self._trigger_event.wait(timeout=1)
+            self._trigger_event.clear()
 
     def _process_triggered_syncs(self):
         """处理手动触发的同步请求"""
@@ -155,20 +153,13 @@ class SyncWorker:
             return []
 
     def _trigger_sync(self, user_id: str, filebase_id: str):
-        """触发同步（加入队列）"""
+        """触发同步（加入队列并通知工作线程）"""
         self._trigger_queue.put((user_id, filebase_id))
+        self._trigger_event.set()
 
     def trigger_sync_now(self, user_id: str, filebase_id: str):
-        """立即触发同步（用于手动触发），直接启动线程，不经过周期性队列"""
-        if filebase_id in self._processing_filebases:
-            logger.debug(f"Filebase {filebase_id} is already syncing, starting another")
-
-        thread = threading.Thread(
-            target=self._sync_filebase,
-            args=(user_id, filebase_id),
-            daemon=True
-        )
-        thread.start()
+        """立即触发同步"""
+        self._trigger_sync(user_id, filebase_id)
 
     def _sync_filebase(self, user_id: str, filebase_id: str):
         """同步单个文件库"""
