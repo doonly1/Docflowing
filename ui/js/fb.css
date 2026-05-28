@@ -102,17 +102,10 @@
     border: 1.5px solid #bbb;
     border-radius: 2px;
     box-sizing: border-box;
+    background: linear-gradient(to right, #999 40%, transparent 40%);
 }
 .fb-tree-toggle-btn:hover::before {
     border-color: #999;
-}
-
-.fb-explorer-body:not(.collapsed) .fb-tree-toggle-btn::before {
-    background: linear-gradient(to right, #999 40%, transparent 40%);
-}
-
-.fb-explorer-body.collapsed .fb-tree-toggle-btn::before {
-    background: linear-gradient(to right, transparent 45%, #bbb 45%, #bbb 47%, transparent 47%);
 }
 
 .fb-explorer-body.collapsed .fb-tree-pane {
@@ -573,7 +566,7 @@ body.fb-resizing {
 
 .fb-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 12px;
 }
 
@@ -991,60 +984,53 @@ body.fb-resizing {
 #fb-wysiwyg-editor .ql-editor a { color: #0066cc; }
 #fb-wysiwyg-editor .ql-editor img { max-width: 100%; }
 
-/* ──────────── P2P: 在线节点栏 ──────────── */
+/* ──────────── P2P: 在线节点指示器 + 下拉菜单 ──────────── */
 
-.fb-p2p-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    background: #f0f2f5;
-    border-radius: 6px;
-    font-size: 12px;
-    margin-bottom: 6px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-}
-
-.fb-p2p-bar-label {
-    color: #666;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.fb-p2p-nodes {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    flex: 1;
-}
-
-.fb-p2p-node-chip {
+.fb-p2p-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    background: #e8f5e9;
-    color: #2e7d32;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 500;
-    white-space: nowrap;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.15s;
+    user-select: none;
 }
 
-.fb-p2p-node-offline {
+.fb-p2p-offline {
     color: #999;
-    font-size: 11px;
+    cursor: default;
 }
 
-.fb-p2p-dot {
+.fb-p2p-offline:hover {
+    background: transparent;
+}
+
+.fb-p2p-online {
+    color: #4caf50;
+}
+
+.fb-p2p-online:hover {
+    background: #e8f5e9;
+}
+
+#fb-p2p-dropdown .fb-menu-item {
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: default;
+}
+
+#fb-p2p-dropdown .fb-p2p-dot {
     display: inline-block;
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: #4caf50;
     flex-shrink: 0;
+    margin-right: 6px;
 }
 
 .fb-p2p-settings-btn {
@@ -1052,7 +1038,7 @@ body.fb-resizing {
     border: none !important;
     background: transparent !important;
     cursor: pointer;
-    font-size: 14px !important;
+    font-size: 15px !important;
     border-radius: 4px;
     line-height: 1;
     transition: background 0.15s;
