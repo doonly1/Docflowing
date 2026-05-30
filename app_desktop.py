@@ -7,11 +7,43 @@ import os
 import sys
 import time
 import threading
+import subprocess
 import urllib.request
 
 from tools.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _run_startup_scripts():
+    """启动时运行工具脚本"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    tools_dir = os.path.join(base_dir, 'tools')
+
+    scripts = [
+        ('fetch_github_hosts.py', False),  # 一次性任务
+        ('WordKeepAlive.py', True),         # 守护进程
+    ]
+
+    for script_name, is_daemon in scripts:
+        script_path = os.path.join(tools_dir, script_name)
+        if not os.path.exists(script_path):
+            continue
+        try:
+            if is_daemon:
+                # 守护进程：静默后台运行
+                subprocess.Popen(
+                    [sys.executable, script_path, '--silent'],
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                # 一次性任务：静默运行
+                subprocess.Popen([sys.executable, script_path, '--silent'], shell=True)
+            logger.info("%s 已启动", script_name)
+        except Exception as e:
+            logger.warning("%s 启动失败: %s", script_name, e)
 
 
 def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
@@ -60,6 +92,9 @@ class JsBridge:
 
 def main():
     port = int(os.environ.get('PORT', 5000))
+
+    # 运行启动脚本
+    _run_startup_scripts()
 
     # 启动 Flask 后台线程
     from server import create_app

@@ -285,7 +285,7 @@ def set_appendix(doc: Document) -> None:
     if not appendix_names:
         appendix_names.append(paras[first_idx].text.split('：', 1)[-1])
         paras[first_idx].style = doc.styles['Apdix']
-        para_fm(paras[first_idx], 0, 0, 28.95, 80, 0, -48, 'L')
+        para_fm(paras[first_idx], 0, 0, 28.95, '5ch', 0, '-3ch', 'L')
 
     count = len(appendix_names)
 
@@ -294,13 +294,10 @@ def set_appendix(doc: Document) -> None:
             for j in range(count):
                 if str(i + 1) + '.' in paras[first_idx + j].text:
                     paras[first_idx + j].style = doc.styles['Apdix 2']
-                    para_f = paras[first_idx + j].paragraph_format
-                    para_f.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-                    para_f.left_indent = Pt(16 * 6)
-                    para_f.first_line_indent = Pt(-16)
+                    para_fm(paras[first_idx + j], None, None, None, '6ch', None, '-1ch', 'L')
         paras[first_idx].style = doc.styles['Apdix 1']
-        para_fm(paras[first_idx], 0, 0, 28.95, 16 * 6, 0, 0, 'L')
-        para_fm(paras[first_idx], 0, 0, 28.95, 16 * 6, 0, -16 * 4, 'L')
+        para_fm(paras[first_idx], 0, 0, 28.95, '6ch', 0, 0, 'L')
+        para_fm(paras[first_idx], 0, 0, 28.95, '6ch', 0, '-4ch', 'L')
 
     for para in paras[first_idx:]:
         if '附' in para.text and '件' in para.text and len(para.text) < 5:
@@ -317,7 +314,7 @@ def set_date(doc: Document) -> None:
     for i, para in enumerate(paras):
         if '年' in para.text and '月' in para.text and '日' in para.text and len(para.text) < 12:
             para.style = doc.styles['dater']
-            para_fm(para, 0, 0, 28.95, 0, 16 * 4, 0, 'R')
+            para_fm(para, 0, 0, 28.95, 0, '4ch', 0, 'R')
 
             paras[i - 1].style = doc.styles['Sign']
             prev_fmt = paras[i - 1].paragraph_format

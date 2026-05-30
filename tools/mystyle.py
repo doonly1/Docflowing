@@ -21,10 +21,10 @@ STYLE_DEFS = [
     ('H2',        5,  'Normal', 'Normal',   '楷体',             16, None, None, None,   None, None, None, None, None), 
     ('H3',        6,  'Normal', 'Normal',   None,               16, True, None, None,   None, None, None, None, None), 
     ('H4',        7,  'Normal', 'Normal',   None,               16, None, None, None,   None, None, None, None, None), 
-    ('Apdix',     8,  'Normal', 'Normal',   None,             None, None, None, None,   None,   80, None,  -48, None),
-    ('Apdix 1',   9,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -64, None),
-    ('Apdix 2',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,   96, None,  -16, None),
-    ('dater',    11,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,   64,    0,  'R'),
+    ('Apdix',     8,  'Normal', 'Normal',   None,             None, None, None, None,   None,  '5ch', None, '-3ch', None),
+    ('Apdix 1',   9,  'Normal', 'Normal',   None,             None, None, None, None,   None,  '6ch', None, '-4ch', None),
+    ('Apdix 2',  10,  'Normal', 'Normal',   None,             None, None, None, None,   None,  '6ch', None, '-1ch', None),
+    ('dater',    11,  'Normal', 'Normal',   None,             None, None, None, None,   None, None,  '4ch',    0,  'R'),
     ('Sign',     12,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'R'),
     ('Fangsong', 13,  'Normal', 'Normal',   None,             None, None, None, None,   None, None, None,    0,  'L'),
     ('SimHei',   14,  'Normal', 'Normal',   '黑体',           None, None, None, None,   None, None, None,    0, None),
@@ -122,7 +122,7 @@ def set_oringin_styles(doc):
     #改变Normal
     style_attr(doc.styles['Normal'], 2)
     run_fm(doc.styles['Normal'], '仿宋', 16, False)
-    para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, 32, 'J')
+    para_fm(doc.styles['Normal'], 0, 0, 28.95, 0, 0, '2ch', 'J')
 
     # #改变Header（页眉）：楷体14号，居中，左右缩进16磅
     # style_attr(doc.styles['Header'], 16)
@@ -195,13 +195,12 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
         para_f.space_after = Pt(spc_af)
     if line_spc is not None:
         para_f.line_spacing = Pt(line_spc) if line_spc > 3 else line_spc
-    if left_ind is not None:
-        para_f.left_indent = Pt(left_ind)
-    if right_ind is not None:
-        para_f.right_indent = Pt(right_ind)
-    if first_l_ind is not None:
-        # 直接写 XML：确保段落级别的 <w:ind w:firstLine> 覆盖任何样式继承值，
-        # 避免 python-docx 1.2.0 中 style-level 属性未及时同步导致的残留缩进
+
+    needs_ind = any(
+        isinstance(v, str) and v.endswith('ch')
+        for v in (left_ind, right_ind, first_l_ind) if v is not None
+    )
+    if needs_ind:
         elem = para_f._element
         pPr = elem.find(qn('w:pPr'))
         if pPr is None:
@@ -211,13 +210,35 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
         if ind is None:
             ind = OxmlElement('w:ind')
             pPr.append(ind)
-        # first_l_ind 单位为 Pt，OOXML 用 twips（1pt=20twips）
-        ind.set(qn('w:firstLine'), str(int(first_l_ind * 20)))
-        # 清除 firstLineChars：OOXML 规定同级别 firstLineChars 优先于 firstLine，
-        # 必须同时清除才能让 firstLine="0" 真正生效（应对继承自 base style 的 firstLineChars）
-        for attr in (qn('w:firstLineChars'), qn('w:hangingChars')):
-            if attr in ind.attrib:
-                del ind.attrib[attr]
+
+    if left_ind is not None:
+        if isinstance(left_ind, str) and left_ind.endswith('ch'):
+            ind.set(qn('w:leftChars'), str(int(float(left_ind[:-2]) * 100)))
+            ind.attrib.pop(qn('w:left'), None)
+        else:
+            para_f.left_indent = Pt(left_ind)
+    if right_ind is not None:
+        if isinstance(right_ind, str) and right_ind.endswith('ch'):
+            ind.set(qn('w:rightChars'), str(int(float(right_ind[:-2]) * 100)))
+            ind.attrib.pop(qn('w:right'), None)
+        else:
+            para_f.right_indent = Pt(right_ind)
+    if first_l_ind is not None:
+        if isinstance(first_l_ind, str) and first_l_ind.endswith('ch'):
+            ch_val = int(float(first_l_ind[:-2]) * 100)
+            if first_l_ind.startswith('-'):
+                ind.set(qn('w:hangingChars'), str(-ch_val))
+                ind.attrib.pop(qn('w:hanging'), None)
+            else:
+                ind.set(qn('w:firstLineChars'), str(ch_val))
+                ind.attrib.pop(qn('w:firstLine'), None)
+        else:
+            if first_l_ind < 0:
+                ind.set(qn('w:hanging'), str(int(-first_l_ind * 20)))
+                ind.attrib.pop(qn('w:hangingChars'), None)
+            else:
+                ind.set(qn('w:firstLine'), str(int(first_l_ind * 20)))
+                ind.attrib.pop(qn('w:firstLineChars'), None)
     if align is not None:
         para_f.alignment = ALIGN_MAP[align]
     para_f.widow_control = False
