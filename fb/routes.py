@@ -972,8 +972,12 @@ def upload_local_files(filebase_id):
         for f in request.files.getlist(key):
             if not f.filename:
                 continue
-            safe_name = os.path.basename(f.filename)
-            file_path = os.path.join(target_dir, safe_name)
+            # 安全处理文件名，保留相对路径但防止 ../ 跳出
+            safe_filename = f.filename
+            safe_filename = safe_filename.replace('..', '')
+            if safe_filename.startswith('/') or safe_filename.startswith('\\'):
+                safe_filename = safe_filename[1:]
+            file_path = os.path.join(target_dir, safe_filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             f.save(file_path)
             stat = os.stat(file_path)
@@ -1123,7 +1127,11 @@ def create_office_file(filebase_id):
     try:
         if ext == '.docx':
             from docx import Document
+            from tools.mystyle import MyStyle
             doc = Document()
+            set_page(doc)
+            clear_styles(doc)
+            add_my_styles(doc)
             doc.save(file_path)
         elif ext == '.xlsx':
             import openpyxl
@@ -1381,6 +1389,30 @@ def download_local_file(filebase_id):
 @login_required
 @_require_fb_permission('view')
 def save_local_file_as(filebase_id):
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        rel_path = data.get('path', '').strip()
+        save_path = data.get('save_path', '').strip()
+        if not rel_path:
+            return jsonify({'success': False, 'message': '未指定源文件路径'})
+        if not save_path:
+            return jsonify({'success': False, 'message': '未指定保存路径'})
+        try:
+            resp = p2p_proxy.remote_download_file(info['owner_addr'], node, filebase_id, rel_path)
+            if not resp:
+                return jsonify({'success': False, 'message': '远程节点不可用'})
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return jsonify({'success': True, 'message': '文件已保存'})
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'保存失败: {str(e)}'}), 500
+
     db = get_db()
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
@@ -1403,7 +1435,6 @@ def save_local_file_as(filebase_id):
         return jsonify({'success': False, 'message': '源文件不存在'})
 
     try:
-        import shutil
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         shutil.copy2(src_file, save_path)
         return jsonify({'success': True, 'message': '文件已保存'})
@@ -1779,6 +1810,64 @@ def batch_download_local(filebase_id):
     memory_file.seek(0)
     return send_file(memory_file, mimetype='application/zip',
                      as_attachment=True, download_name='files.zip')
+
+
+@fb_bp.route('/<fb_id>/local-files/batch-save-as', methods=['POST'])
+@login_required
+@_require_fb_permission('view')
+def batch_save_local_files(filebase_id):
+    data = request.get_json() or {}
+    paths = data.get('paths', [])
+    dest_dir = data.get('dest_dir', '').strip()
+
+    if not paths:
+        return jsonify({'success': False, 'message': '请选择文件'})
+    if not dest_dir:
+        return jsonify({'success': False, 'message': '未指定目标目录'})
+
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            for rel_path in paths:
+                if rel_path.endswith('/') or rel_path.endswith('\\'):
+                    continue
+                fname = os.path.basename(rel_path.replace('\\', '/'))
+                save_path = os.path.join(dest_dir, fname)
+                resp = p2p_proxy.remote_download_file(info['owner_addr'], node, filebase_id, rel_path)
+                if not resp:
+                    continue
+                with open(save_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            return jsonify({'success': True, 'message': '文件已保存'})
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'保存失败: {str(e)}'}), 500
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        for rel_path in paths:
+            abs_path = os.path.normpath(os.path.join(local_path, rel_path))
+            if not abs_path.startswith(os.path.normpath(local_path)):
+                continue
+            fname = os.path.basename(rel_path.replace('\\', '/'))
+            target = os.path.join(dest_dir, fname)
+            if os.path.isfile(abs_path):
+                shutil.copy2(abs_path, target)
+            elif os.path.isdir(abs_path):
+                shutil.copytree(abs_path, target, dirs_exist_ok=True)
+        return jsonify({'success': True, 'message': '文件已保存'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'保存失败: {str(e)}'}), 500
 
 
 @fb_bp.route('/<fb_id>/local-files/replace', methods=['PUT'])

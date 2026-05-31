@@ -190,13 +190,11 @@ body.fb-resizing {
 }
 
 .fb-tree-label:hover {
-    background: #e9456010;
+    background: #eaf3fc;
 }
 
 .fb-tree-label.active {
-    background: #e9456018;
-    color: #e94560;
-    font-weight: 600;
+    background: #dcebf9;
 }
 
 .fb-tree-label .icon {
@@ -362,25 +360,15 @@ body.fb-resizing {
 }
 
 .fb-file-table tbody tr:hover {
-    background: #f6f8fa;
+    background: #eaf3fc;
 }
 
 .fb-file-table tbody tr.selected {
-    background: #e9456010;
+    background: #dcebf9;
 }
 
 .fb-file-table tbody tr.selected:hover {
-    background: #e9456018;
-}
-
-.fb-file-table .col-cb {
-    width: 28px;
-    text-align: center;
-}
-
-.fb-file-table .col-check {
-    width: 28px;
-    text-align: center;
+    background: #d0e2f5;
 }
 
 .fb-file-table .col-icon {
@@ -540,23 +528,6 @@ body.fb-resizing {
     margin: 3px 0;
 }
 
-.fb-upload-drop {
-    display: none;
-    border: 2px dashed #ccc;
-    padding: 24px;
-    text-align: center;
-    color: #999;
-    margin: 8px;
-    border-radius: 6px;
-    font-size: 13px;
-}
-
-.fb-upload-drop.active {
-    display: block;
-    border-color: #e94560;
-    color: #e94560;
-}
-
 .fb-empty {
     padding: 50px;
     text-align: center;
@@ -712,18 +683,39 @@ body.fb-resizing {
 }
 
 .fb-modal .fb-modal-actions button {
-    padding: 6px 16px;
+    padding: 6px 18px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
     border: 1px solid #ddd;
     background: #fff;
     color: #555;
+    transition: all 0.15s;
+    box-sizing: border-box;
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .fb-modal .fb-modal-actions .fb-btn-cancel {
     background: #e2e3e5;
     border-color: #e2e3e5;
+}
+
+.fb-modal .fb-modal-actions .fb-btn-cancel:hover {
+    background: #d6d8db;
+    border-color: #d6d8db;
+}
+
+.fb-modal .fb-modal-actions .fb-btn-primary {
+    background: #e94560;
+    border-color: #e94560;
+    color: #fff;
+}
+
+.fb-modal .fb-modal-actions .fb-btn-primary:hover {
+    background: #d63850;
+    border-color: #d63850;
 }
 
 .fb-member-table {
@@ -1091,3 +1083,57 @@ body.fb-resizing {
     border-color: #e94560;
     color: #e94560;
 }
+
+/* ──────────── Rubber Band 橡皮筋框选 ──────────── */
+
+.fb-rubber-band {
+    position: fixed;
+    z-index: 9999;
+    background: rgba(66, 133, 244, 0.12);
+    border: 1px solid rgba(66, 133, 244, 0.6);
+    pointer-events: none;
+    border-radius: 2px;
+}
+
+/* ──────────── 行内重命名 ──────────── */
+
+.fb-inline-rename-input {
+    width: 100%;
+    padding: 2px 4px;
+    border: 1px solid #e94560;
+    border-radius: 3px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    background: #fff;
+}
+
+/* ──────────── 列宽拖拽调整 ──────────── */
+
+.fb-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    user-select: none;
+}
+.fb-col-resizer:hover {
+    background: rgba(66, 133, 244, 0.4);
+}
+.fb-resizing {
+    user-select: none !important;
+}
+
+/* ──────────── Drag & Drop 拖拽系统 ──────────── */
+
+.fb-drop-target {
+    outline: 2px solid #4285f4 !important;
+    outline-offset: -2px;
+    background: rgba(66, 133, 244, 0.08) !important;
+}
+
+

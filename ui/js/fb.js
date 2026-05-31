@@ -8,6 +8,10 @@ var FileBase = {
     fbCurrentPermission: null,
     fbIsRemote: false,  // 是否为远程文件库（其他节点共享的）
     selectedDocs: {},
+    _lastClickedIndex: null,
+    _openingPath: null,
+    _undoStack: [],
+    _MAX_UNDO: 10,
     currentSort: { field: 'mtime', asc: false },
     currentPath: [],
     fbName: '',
@@ -27,6 +31,59 @@ var FileBase = {
         };
         if (body && method !== 'GET') o.body = JSON.stringify(body);
         return fetch(url, o).then(function(r) { return r.json(); }).catch(function() { return { success: false, message: '请求失败' }; });
+    },
+
+    _pushUndo: function(action) {
+        this._undoStack.push(action);
+        if (this._undoStack.length > this._MAX_UNDO) {
+            this._undoStack.shift();
+        }
+    },
+
+    _performUndo: async function() {
+        var action = this._undoStack.pop();
+        if (!action) { showToast('没有可撤销的操作', 'info'); return; }
+        var self = this;
+        try {
+            switch (action.type) {
+                case 'delete':
+                    for (var i = 0; i < action.items.length; i++) {
+                        await this.api('/api/fb/trash-restore', 'POST', {name: action.items[i].name});
+                    }
+                    break;
+                case 'move':
+                    for (var i = 0; i < action.items.length; i++) {
+                        var item = action.items[i];
+                        var name = item.name;
+                        var newPath = (action.dest ? action.dest + '/' : '') + name;
+                        var sepIdx = item.oldPath.replace(/\\/g, '/').lastIndexOf('/');
+                        var oldParent = sepIdx >= 0 ? item.oldPath.substring(0, sepIdx) : '';
+                        await this.api('/api/fb/' + this.currentFbId + '/local-files/move', 'PUT', {sources: [newPath], dest: oldParent});
+                    }
+                    break;
+                case 'rename':
+                    var newPath = (action.parentDir ? action.parentDir + '/' : '') + action.newName;
+                    await this.api('/api/fb/' + this.currentFbId + '/local-files/rename', 'PUT', {path: newPath, new_name: action.oldName});
+                    break;
+                case 'copy':
+                    var cpPaths = [];
+                    for (var i = 0; i < action.items.length; i++) {
+                        cpPaths.push((action.dest ? action.dest + '/' : '') + action.items[i].name);
+                    }
+                    await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', {paths: cpPaths});
+                    break;
+                case 'newFolder':
+                case 'newFile':
+                    await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', {paths: [action.path]});
+                    break;
+            }
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
+            await this.renderDetail();
+        } catch (e) {
+            showToast('撤销失败: ' + (e.message || ''), 'error');
+            this._undoStack.push(action);
+        }
     },
 
     refreshAuthRole: async function() {
@@ -207,7 +264,7 @@ var FileBase = {
         h += '<input type="text" id="fb-local-name" placeholder="输入文件库名称" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
         h += '</div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button onclick="FileBase._doCreateLocalRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase._doCreateLocalRootFolder()">创建</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -249,7 +306,7 @@ var FileBase = {
         h += '<input type="text" id="fb-net-path" placeholder="如 \\\\server\\share\\folder" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
         h += '</div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button onclick="FileBase._doCreateNetworkRootFolder()" style="background:#e94560;color:#fff;border:1px solid #e94560;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:13px">创建</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase._doCreateNetworkRootFolder()">创建</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -502,7 +559,9 @@ var FileBase = {
             if (this._lsGet('fb_tree_collapsed') === '1') {
                 document.querySelector('.fb-explorer-body').classList.add('collapsed');
             }
+            this._fbBodyEventsBound = false;
             this.initTreeResize();
+            this._initFileBodyEvents();
         }
         this.renderBreadcrumb();
 
@@ -551,7 +610,7 @@ var FileBase = {
         var pathParts = curPathNorm ? ('/' + curPathNorm).replace(/\/+/g, '/') : '/';
 
         var h = '<div class="fb-tree-node">';
-        h += '<div class="fb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="FileBase.goToRoot()">📂 ' + (escapeHtmlText(this.fbName) || '文件库') + '</div>';
+        h += '<div class="fb-tree-label' + (!curPathNorm ? ' active' : '') + '" onclick="FileBase.goToRoot()" oncontextmenu="FileBase.showTreeContextMenu(event, \'\')" data-local-path="">📂 ' + (escapeHtmlText(this.fbName) || '文件库') + '</div>';
         h += '</div>';
 
         h += this._renderTreeNodes(this.fbCategoryTree, 0, pathParts);
@@ -574,7 +633,7 @@ var FileBase = {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
             }
             h += '<div class="fb-tree-node">';
-            h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')">';
+            h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')" oncontextmenu="FileBase.showTreeContextMenu(event, \'' + (n.path || '').replace(/'/g, "\\'") + '\')" data-local-path="' + (n.path || '').replace(/'/g, "\\'") + '">';
             if (hasChildren) {
                 h += '<span class="fb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();FileBase.toggleTreeNode(this)"></span>';
             } else {
@@ -685,7 +744,6 @@ var FileBase = {
 
         var self = this;
         var h = '<table class="fb-file-table"><thead><tr>';
-        h += '<th class="col-check"><input type="checkbox" id="fb-select-all" onchange="FileBase.toggleSelectAll(this)" title="全选/取消"></th>';
         h += '<th class="col-icon"></th>';
         h += '<th class="col-name" onclick="FileBase.setSort(\'name\')">名称<span class="sort-arrow">' + (sf === 'name' ? (sa ? '▲' : '▼') : '') + '</span></th>';
         h += '<th class="col-date" onclick="FileBase.setSort(\'mtime\')">修改时间<span class="sort-arrow">' + (sf === 'mtime' ? (sa ? '▲' : '▼') : '') + '</span></th>';
@@ -696,10 +754,9 @@ var FileBase = {
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
             var catEscPathAttr = cat.path.replace(/'/g, "\\'");
-            h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '">';
-            h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + catEscPathAttr + '" data-type="dir" onclick="event.stopPropagation()"></td>';
+            h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '" data-row-index="' + i + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
-            h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.navigateSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')">' + escapeHtmlText(cat.name) + '</div></td>';
+            h += '<td class="col-name"><div class="fb-file-name">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
             h += '<td class="col-type">文件夹</td>';
             h += '<td class="col-size"></td>';
@@ -716,10 +773,9 @@ var FileBase = {
             var escPath = f.path.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
             var escPathAttr = f.path.replace(/'/g, "\\'");
 
-            h += '<tr class="fb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '">';
-            h += '<td class="col-check"><input type="checkbox" class="fb-item-check" data-path="' + escPathAttr + '" data-type="file" onclick="event.stopPropagation()"></td>';
+            h += '<tr class="fb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '" data-row-index="' + (categories.length + i) + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">' + icon + '</span></td>';
-            h += '<td class="col-name"><div class="fb-file-name" onclick="FileBase.handleFileClick(\'' + escPathAttr + '\')">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
+            h += '<td class="col-name"><div class="fb-file-name">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
             h += '<td class="col-date"><span class="fb-file-date">' + date + '</span></td>';
             h += '<td class="col-type">' + ext + '</td>';
             h += '<td class="col-size"><span class="fb-file-size">' + size + '</span></td>';
@@ -729,21 +785,33 @@ var FileBase = {
         }
         h += '</tbody></table>';
         div.innerHTML = h;
+        this.initColumnResize();
     },
 
-    toggleSelectAll: function(el) {
-        var checks = document.querySelectorAll('.fb-item-check');
-        for (var i = 0; i < checks.length; i++) {
-            checks[i].checked = el.checked;
+    toggleSelectAll: function() {
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row');
+        var selectedRows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        if (selectedRows.length > 0) {
+            for (var i = 0; i < rows.length; i++) {
+                rows[i].classList.remove('selected');
+            }
+        } else {
+            for (var i = 0; i < rows.length; i++) {
+                rows[i].classList.add('selected');
+            }
+            this._lastClickedIndex = rows.length > 0 ? parseInt(rows[rows.length - 1].getAttribute('data-row-index'), 10) : null;
         }
     },
 
     getSelectedPaths: function() {
-        var checks = document.querySelectorAll('.fb-item-check:checked');
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
         var paths = [];
-        for (var i = 0; i < checks.length; i++) {
-            var chk = checks[i];
-            paths.push({ path: chk.getAttribute('data-path'), type: chk.getAttribute('data-type') });
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            paths.push({
+                path: row.getAttribute('data-local-path'),
+                type: row.classList.contains('fb-local-dir') ? 'dir' : 'file'
+            });
         }
         return paths;
     },
@@ -754,35 +822,73 @@ var FileBase = {
             showToast('请至少选择一个文件或文件夹', 'error');
             return;
         }
+
+        var isPyWebView = typeof window.pywebview !== 'undefined' && window.pywebview.api && window.pywebview.api.saveFileAs;
+
         if (items.length === 1 && items[0].type === 'file') {
-            window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path), '_blank');
+            if (isPyWebView) {
+                var fileName = items[0].path.split('/').pop().split('\\').pop();
+                try {
+                    var savePath = await window.pywebview.api.saveFileAs(fileName);
+                    if (!savePath) return;
+                    var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/save-as', 'POST', { path: items[0].path, save_path: savePath });
+                    if (res.success) {
+                        showToast('文件已保存', 'success');
+                    } else {
+                        showToast(res.message || '保存失败', 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败: ' + e.message, 'error');
+                }
+            } else {
+                window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path), '_blank');
+            }
         } else {
-            var paths = [];
-            for (var i = 0; i < items.length; i++) {
-                paths.push(items[i].path);
-            }
-            if (paths.length === 0) {
-                showToast('请至少选择一个文件或文件夹', 'error');
-                return;
-            }
-            var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download';
-            try {
-                var resp = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ paths: paths })
-                });
-                if (!resp.ok) { showToast('下载失败', 'error'); return; }
-                var blob = await resp.blob();
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'files.zip';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(a.href);
-            } catch (e) {
-                showToast('下载失败', 'error');
+            if (isPyWebView) {
+                try {
+                    var destDir = await window.pywebview.api.selectDirectory();
+                    if (!destDir) return;
+                    var paths = [];
+                    for (var i = 0; i < items.length; i++) {
+                        paths.push(items[i].path);
+                    }
+                    var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/batch-save-as', 'POST', { paths: paths, dest_dir: destDir });
+                    if (res.success) {
+                        showToast('文件已保存', 'success');
+                    } else {
+                        showToast(res.message || '保存失败', 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败: ' + e.message, 'error');
+                }
+            } else {
+                var paths = [];
+                for (var i = 0; i < items.length; i++) {
+                    paths.push(items[i].path);
+                }
+                if (paths.length === 0) {
+                    showToast('请至少选择一个文件或文件夹', 'error');
+                    return;
+                }
+                var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download';
+                try {
+                    var resp = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ paths: paths })
+                    });
+                    if (!resp.ok) { showToast('下载失败', 'error'); return; }
+                    var blob = await resp.blob();
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'files.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+                } catch (e) {
+                    showToast('下载失败', 'error');
+                }
             }
         }
     },
@@ -796,6 +902,9 @@ var FileBase = {
         if (!(await showConfirm('确定删除选中的 ' + items.length + ' 个项目吗？（此操作不可恢复）'))) return;
         var paths = [];
         for (var i = 0; i < items.length; i++) paths.push(items[i].path);
+        var undoItems = [];
+        for (var i = 0; i < paths.length; i++) undoItems.push({path: paths[i], name: paths[i].split('/').pop()});
+        this._pushUndo({type: 'delete', items: undoItems});
         var self = this;
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: paths });
         if (res.success) {
@@ -936,11 +1045,13 @@ var FileBase = {
 
     _createFolder: async function(name) {
         var self = this;
+        var fullPath = (this.fbLocalCurrentSubdir ? this.fbLocalCurrentSubdir + '/' : '') + name;
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/dir', 'POST', {
             name: name,
             parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
+            self._pushUndo({type: 'newFolder', path: fullPath});
             self.fbCategoryTree = null;
             self.fbTreeLoaded = false;
             await self.renderDetail();
@@ -960,6 +1071,7 @@ var FileBase = {
             parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
+            self._pushUndo({type: 'newFile', path: res.path});
             self.fbCategoryTree = null;
             self.fbTreeLoaded = false;
             self.openMarkdownEditor(res.path);
@@ -979,6 +1091,7 @@ var FileBase = {
             parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
+            self._pushUndo({type: 'newFile', path: res.path});
             self.fbCategoryTree = null;
             self.fbTreeLoaded = false;
             self.openMarkdownEditor(res.path);
@@ -999,6 +1112,7 @@ var FileBase = {
             parent: this.fbLocalCurrentSubdir || ''
         });
         if (res.success) {
+            self._pushUndo({type: 'newFile', path: res.path});
             self.fbCategoryTree = null;
             self.fbTreeLoaded = false;
             await self.renderDetail();
@@ -1014,6 +1128,7 @@ var FileBase = {
 
         var target = event.target;
         var fileRow = target.closest('.fb-file-row');
+        var selectedRows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
 
         var menu = document.createElement('div');
         menu.className = 'fb-context-menu';
@@ -1021,9 +1136,16 @@ var FileBase = {
         menu.style.zIndex = '4000';
 
         if (fileRow) {
-            var path = fileRow.getAttribute('data-local-path') || '';
-            var isDir = fileRow.classList.contains('fb-local-dir');
-            menu.innerHTML = this._buildFileContextMenu(path, isDir);
+            if (fileRow.classList.contains('selected') && selectedRows.length > 1) {
+                menu.innerHTML = this._buildMultiSelectContextMenu();
+            } else {
+                this._clearSelection();
+                fileRow.classList.add('selected');
+                this._lastClickedIndex = parseInt(fileRow.getAttribute('data-row-index'), 10);
+                var path = fileRow.getAttribute('data-local-path') || '';
+                var isDir = fileRow.classList.contains('fb-local-dir');
+                menu.innerHTML = this._buildFileContextMenu(path, isDir);
+            }
         } else {
             menu.innerHTML = this._buildEmptyContextMenu();
         }
@@ -1039,12 +1161,33 @@ var FileBase = {
     },
 
     hideContextMenu: function() {
-        var menu = document.getElementById('fb-context-menu');
-        if (menu) menu.remove();
+        var existing = document.getElementById('fb-context-menu');
+        if (existing) existing.remove();
         if (this.fbHideContextMenuHandler) {
             document.removeEventListener('click', this.fbHideContextMenuHandler);
             this.fbHideContextMenuHandler = null;
         }
+    },
+
+    showTreeContextMenu: function(event, path) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.hideContextMenu();
+
+        var menu = document.createElement('div');
+        menu.className = 'fb-context-menu';
+        menu.id = 'fb-context-menu';
+        menu.style.zIndex = '4000';
+        menu.innerHTML = this._buildTreeContextMenu(path);
+
+        menu.style.left = Math.min(event.clientX, window.innerWidth - 180) + 'px';
+        menu.style.top = Math.min(event.clientY, window.innerHeight - 220) + 'px';
+        document.body.appendChild(menu);
+
+        this.fbHideContextMenuHandler = function() { FileBase.hideContextMenu(); };
+        setTimeout(function() {
+            document.addEventListener('click', FileBase.fbHideContextMenuHandler);
+        }, 0);
     },
 
     _buildFileContextMenu: function(path, isDir) {
@@ -1056,6 +1199,17 @@ var FileBase = {
         h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
         h += '<div class="fb-menu-divider"></div>';
         h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        h += '<div class="fb-menu-divider"></div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.showProperties(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="5" r=".8" fill="currentColor"/><path d="M6.5 7h1v3h-1z" fill="currentColor"/></svg></span> 属性</div>';
+        return h;
+    },
+
+    _buildMultiSelectContextMenu: function() {
+        var h = '<div class="fb-menu-item" onclick="FileBase.showCopyDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.showMoveDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.downloadAction();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
+        h += '<div class="fb-menu-divider"></div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.batchDelete();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
         return h;
     },
 
@@ -1071,7 +1225,214 @@ var FileBase = {
         return h;
     },
 
-    contextRename: async function(path) {
+    _buildTreeContextMenu: function(path) {
+        var escPath = path.replace(/'/g, "\\'");
+        var h = '<div class="fb-menu-item" onclick="FileBase.treeNewFolder(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.treeRename(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.treeDelete(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        h += '<div class="fb-menu-divider"></div>';
+        h += '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
+        return h;
+    },
+
+    contextRename: function(path) {
+        this.hideContextMenu();
+        this._inlineRename(path);
+    },
+
+    _inlineRename: function(path) {
+        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        if (!row) return;
+        var nameCell = row.querySelector('.col-name .fb-file-name');
+        if (!nameCell) return;
+        var oldName = path.split('/').pop();
+        var originalHTML = nameCell.innerHTML;
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'fb-inline-rename-input';
+        input.value = oldName;
+        input.setAttribute('data-original', oldName);
+
+        nameCell.innerHTML = '';
+        nameCell.appendChild(input);
+        input.focus();
+        input.select();
+
+        var self = this;
+        function finishRename(save) {
+            var val = input.value.trim();
+            if (save && val && val !== input.getAttribute('data-original')) {
+                self.api('/api/fb/' + self.currentFbId + '/local-files/rename', 'PUT', {
+                    path: path,
+                    new_name: val
+                }).then(function(res) {
+                    if (res.success) {
+                        var sepIdx = path.replace(/\\/g, '/').lastIndexOf('/');
+                        var pDir = sepIdx >= 0 ? path.substring(0, sepIdx) : '';
+                        self._pushUndo({type: 'rename', parentDir: pDir, oldName: input.getAttribute('data-original'), newName: val});
+                        self.fbCategoryTree = null;
+                        self.fbTreeLoaded = false;
+                        self.renderDetail();
+                    } else {
+                        showToast(res.message || '重命名失败', 'error');
+                        nameCell.innerHTML = originalHTML;
+                    }
+                });
+            } else {
+                nameCell.innerHTML = originalHTML;
+            }
+        }
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                nameCell.innerHTML = originalHTML;
+            }
+            e.stopPropagation();
+        });
+        input.addEventListener('blur', function(e) {
+            finishRename(true);
+        });
+    },
+
+    contextCopyOne: async function(path) {
+        this.hideContextMenu();
+        var self = this;
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
+        h += '<h3>📋 复制到</h3>';
+        h += '<p style="color:#666;font-size:12px">' + escapeHtmlText(path) + '</p>';
+        h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this.fbCategoryTree, 0);
+        h += '</div>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="fb-btn-primary" onclick="FileBase.doCopyOne()">复制</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        this.fbCopySource = path;
+        this.fbMoveDest = '';
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+    },
+
+    showCopyDialog: function() {
+        this.hideContextMenu();
+        var items = this.getSelectedPaths();
+        if (items.length === 0) {
+            showToast('请至少选择一个文件或文件夹', 'error');
+            return;
+        }
+        var self = this;
+        var label = items.length === 1 ? escapeHtmlText(items[0].path) : ('已选 ' + items.length + ' 项');
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
+        h += '<h3>📋 批量复制到</h3>';
+        h += '<p style="color:#666;font-size:12px">' + label + '</p>';
+        h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
+        h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
+        h += this._renderMoveTree(this.fbCategoryTree, 0);
+        h += '</div>';
+        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="fb-btn-primary" onclick="FileBase.doBatchCopy()">复制</button>';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        this.fbMoveDest = '';
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+    },
+
+    doBatchCopy: async function() {
+        var items = this.getSelectedPaths();
+        var dest = this.fbMoveDest || '';
+        var sources = [];
+        for (var i = 0; i < items.length; i++) sources.push(items[i].path);
+        var undoItems = [];
+        for (var i = 0; i < sources.length; i++) undoItems.push({name: sources[i].split('/').pop()});
+        this._pushUndo({type: 'copy', items: undoItems, dest: dest});
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/copy', 'POST', {
+            sources: sources,
+            dest: dest
+        });
+        this.closeModal();
+        if (res.success) {
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
+            await this.renderDetail();
+        } else {
+            showToast(res.message || '复制失败', 'error');
+        }
+    },
+
+    doCopyOne: async function() {
+        var src = this.fbCopySource;
+        var dest = this.fbMoveDest || '';
+        this._pushUndo({type: 'copy', items: [{name: src.split('/').pop()}], dest: dest});
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/copy', 'POST', {
+            sources: [src],
+            dest: dest
+        });
+        this.closeModal();
+        if (res.success) {
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
+            await this.renderDetail();
+        } else {
+            showToast(res.message || '复制失败', 'error');
+        }
+    },
+
+    contextMoveOne: function(path) {
+        this.hideContextMenu();
+        this._clearSelection();
+        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        if (row) {
+            row.classList.add('selected');
+        }
+        this.showMoveDialog();
+    },
+
+    contextDownloadOne: function(path) {
+        this.hideContextMenu();
+        FileBase.downloadAction();
+    },
+
+    contextDeleteOne: async function(path) {
+        this.hideContextMenu();
+        if (!(await showConfirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）'))) return;
+        this._pushUndo({type: 'delete', items: [{path: path, name: path.split('/').pop()}]});
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: [path] });
+        if (res.success) {
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
+            await this.renderDetail();
+        } else {
+            showToast(res.message || '删除失败', 'error');
+        }
+    },
+
+    treeNewFolder: async function(parentPath) {
+        var name = await showPrompt('新建文件夹名称：', '新建文件夹');
+        if (!name || !name.trim()) return;
+        var fullPath = parentPath ? parentPath + '/' + name.trim() : name.trim();
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/new-folder', 'POST', {
+            path: fullPath
+        });
+        if (res.success) {
+            this._pushUndo({type: 'newFolder', path: fullPath});
+            this.fbCategoryTree = null;
+            this.fbTreeLoaded = false;
+            await this.renderDetail();
+        } else {
+            showToast(res.message || '创建失败', 'error');
+        }
+    },
+
+    treeRename: async function(path) {
         this.hideContextMenu();
         var oldName = path.split('/').pop();
         var newName = await showPrompt('重命名为：', oldName);
@@ -1089,62 +1450,10 @@ var FileBase = {
         }
     },
 
-    contextCopyOne: async function(path) {
+    treeDelete: async function(path) {
         this.hideContextMenu();
-        var self = this;
-        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
-        h += '<h3>📋 复制到</h3>';
-        h += '<p style="color:#666;font-size:12px">' + escapeHtmlText(path) + '</p>';
-        h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
-        h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
-        h += this._renderMoveTree(this.fbCategoryTree, 0);
-        h += '</div>';
-        h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
-        h += '<div class="fb-modal-actions">';
-        h += '<button class="btn" onclick="FileBase.doCopyOne()">复制</button>';
-        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
-        h += '</div></div></div>';
-        document.body.insertAdjacentHTML('beforeend', h);
-        this.fbCopySource = path;
-        this.fbMoveDest = '';
-        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
-    },
-
-    doCopyOne: async function() {
-        var src = this.fbCopySource;
-        var dest = this.fbMoveDest || '';
-        var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/copy', 'POST', {
-            sources: [src],
-            dest: dest
-        });
-        this.closeModal();
-        if (res.success) {
-            this.fbCategoryTree = null;
-            this.fbTreeLoaded = false;
-            await this.renderDetail();
-        } else {
-            showToast(res.message || '复制失败', 'error');
-        }
-    },
-
-    contextMoveOne: function(path) {
-        this.hideContextMenu();
-        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
-        if (row) {
-            var chk = row.querySelector('.fb-item-check');
-            if (chk) chk.checked = true;
-        }
-        this.showMoveDialog();
-    },
-
-    contextDownloadOne: function(path) {
-        this.hideContextMenu();
-        window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(path), '_blank');
-    },
-
-    contextDeleteOne: async function(path) {
-        this.hideContextMenu();
-        if (!(await showConfirm('确定删除 "' + path.split('/').pop() + '" 吗？（此操作不可恢复）'))) return;
+        var name = path.split('/').pop();
+        if (!(await showConfirm('确定删除文件夹 "' + name + '" 吗？（此操作不可恢复）'))) return;
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files', 'DELETE', { paths: [path] });
         if (res.success) {
             this.fbCategoryTree = null;
@@ -1155,6 +1464,39 @@ var FileBase = {
         }
     },
 
+    showProperties: function(path) {
+        this.hideContextMenu();
+        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        if (!row) { showToast('找不到文件信息', 'error'); return; }
+        var isDir = row.classList.contains('fb-local-dir');
+        var name = path.split('/').pop();
+        var nameEl = row.querySelector('.fb-file-name');
+        var dateEl = row.querySelector('.fb-file-date');
+        var sizeEl = row.querySelector('.fb-file-size');
+        var typeEl = row.querySelector('.col-type');
+        var typeText = isDir ? '文件夹' : (typeEl ? typeEl.textContent.trim() : '文件');
+
+        var self = this;
+        var overlay = document.createElement('div');
+        overlay.className = 'fb-modal-overlay';
+        overlay.id = 'fb-modal-overlay';
+        overlay.innerHTML =
+            '<div class="fb-modal">' +
+            '<h3>' + (isDir ? '📁' : '📄') + ' ' + escapeHtmlText(name) + '</h3>' +
+            '<div style="padding:12px 0;line-height:2">' +
+            '<div><strong>名称：</strong>' + escapeHtmlText(name) + '</div>' +
+            '<div><strong>类型：</strong>' + escapeHtmlText(typeText) + '</div>' +
+            (sizeEl && sizeEl.textContent ? '<div><strong>大小：</strong>' + sizeEl.textContent.trim() + '</div>' : '') +
+            (dateEl && dateEl.textContent ? '<div><strong>修改时间：</strong>' + dateEl.textContent.trim() + '</div>' : '') +
+            '<div><strong>路径：</strong>' + escapeHtmlText(path) + '</div>' +
+            '</div>' +
+            '<div class="fb-modal-actions">' +
+            '<button class="fb-btn-primary" onclick="FileBase.closeModal()">确定</button>' +
+            '</div></div>';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) self.closeModal(); });
+    },
+
     showMoveDialog: function() {
         var items = this.getSelectedPaths();
         if (items.length === 0) {
@@ -1163,7 +1505,7 @@ var FileBase = {
         }
         var self = this;
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
-        h += '<h3>📦 移动到</h3>';
+        h += '<h3>移动到</h3>';
         h += '<p style="color:#666;font-size:12px">已选择 ' + items.length + ' 个项目</p>';
         h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
         h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
@@ -1171,7 +1513,7 @@ var FileBase = {
         h += '</div>';
         h += '<div style="color:#666;font-size:12px;margin:4px 0">目标: <span id="fb-move-dest-label">根目录</span></div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button class="btn" onclick="FileBase.doMove()">移动</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase.doMove()">移动</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -1213,6 +1555,10 @@ var FileBase = {
         for (var i = 0; i < items.length; i++) sources.push(items[i].path);
         var dest = this.fbMoveDest || '';
 
+        var undoItems = [];
+        for (var i = 0; i < sources.length; i++) undoItems.push({oldPath: sources[i], name: sources[i].split('/').pop()});
+        this._pushUndo({type: 'move', items: undoItems, dest: dest});
+
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/move', 'PUT', { sources: sources, dest: dest });
         this.closeModal();
         if (res.success) {
@@ -1235,7 +1581,434 @@ var FileBase = {
         var row = event.target.closest('.fb-file-row');
         if (!row) return;
         var path = row.getAttribute('data-local-path');
-        if (path) this.openFile(path);
+        var isDir = row.classList.contains('fb-local-dir');
+        if (isDir) {
+            if (path) this.navigateSubdir(path);
+        } else {
+            if (path) this.openFile(path);
+        }
+    },
+
+    handleRowClick: function(event) {
+        var row = event.target.closest('.fb-file-row');
+        if (!row) return;
+        var rowIndex = parseInt(row.getAttribute('data-row-index'), 10);
+
+        if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            var fileNameEl = event.target.closest('.fb-file-name');
+            if (fileNameEl) {
+                var path = row.getAttribute('data-local-path');
+                if (this._openingPath === path) return;
+                this._openingPath = path;
+                var self = this;
+                setTimeout(function() { self._openingPath = null; }, 500);
+                if (row.classList.contains('fb-local-dir')) {
+                    this.navigateSubdir(path);
+                } else {
+                    this.openFile(path);
+                }
+                return;
+            }
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+            row.classList.toggle('selected');
+        } else if (event.shiftKey && this._lastClickedIndex !== null) {
+            var rows = document.querySelectorAll('#fb-file-body .fb-file-row');
+            var start = Math.min(this._lastClickedIndex, rowIndex);
+            var end = Math.max(this._lastClickedIndex, rowIndex);
+            this._clearSelection();
+            for (var i = start; i <= end; i++) {
+                if (rows[i]) rows[i].classList.add('selected');
+            }
+        } else {
+            if (!row.classList.contains('selected')) {
+                this._clearSelection();
+            }
+            row.classList.add('selected');
+        }
+        this._lastClickedIndex = rowIndex;
+    },
+
+    _clearSelection: function() {
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        for (var i = 0; i < rows.length; i++) {
+            rows[i].classList.remove('selected');
+        }
+    },
+
+    _initFileBodyEvents: function() {
+        if (this._fbBodyEventsBound) return;
+        this._fbBodyEventsBound = true;
+
+        var body = document.getElementById('fb-file-body');
+        if (!body) return;
+
+        body.addEventListener('click', function(e) {
+            if (FileBase._rubberBandJustEnded) {
+                FileBase._rubberBandJustEnded = false;
+                return;
+            }
+            if (e.target.closest('.fb-file-actions') || e.target.closest('a')) return;
+            var row = e.target.closest('.fb-file-row');
+            if (row) {
+                FileBase.handleRowClick(e);
+            } else {
+                FileBase._clearSelection();
+                FileBase._lastClickedIndex = null;
+            }
+        });
+        body.addEventListener('mousedown', function(e) {
+            FileBase._startRubberBand(e);
+        });
+        body.addEventListener('dblclick', function(e) {
+            FileBase.dblClickFile(e);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'a') {
+                var fbBody = document.getElementById('fb-file-body');
+                if (fbBody) {
+                    e.preventDefault();
+                    FileBase.toggleSelectAll();
+                }
+            }
+            if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+                var fbBody = document.getElementById('fb-file-body');
+                if (fbBody) {
+                    e.preventDefault();
+                    FileBase._performUndo();
+                }
+            }
+        });
+        this._initDragDrop();
+    },
+
+    _rubberBandActive: false,
+
+    _startRubberBand: function(e) {
+        if (e.button !== 0) return;
+        if (e.target.closest('.fb-file-row') || e.target.closest('a') || e.target.closest('.fb-file-actions')) return;
+        this._clearSelection();
+        this._lastClickedIndex = null;
+        this._rubberBandStartX = e.clientX;
+        this._rubberBandStartY = e.clientY;
+        this._rubberBandActive = true;
+
+        var band = document.createElement('div');
+        band.className = 'fb-rubber-band';
+        band.style.left = e.clientX + 'px';
+        band.style.top = e.clientY + 'px';
+        band.style.width = '0px';
+        band.style.height = '0px';
+        document.body.appendChild(band);
+        this._rubberBandEl = band;
+
+        var self = this;
+        this._rubberBandMoveHandler = function(ev) { self._moveRubberBand(ev); };
+        this._rubberBandEndHandler = function(ev) { self._endRubberBand(ev); };
+        document.addEventListener('mousemove', this._rubberBandMoveHandler);
+        document.addEventListener('mouseup', this._rubberBandEndHandler);
+    },
+
+    _moveRubberBand: function(e) {
+        if (!this._rubberBandActive || !this._rubberBandEl) return;
+        var x1 = Math.min(this._rubberBandStartX, e.clientX);
+        var y1 = Math.min(this._rubberBandStartY, e.clientY);
+        var x2 = Math.max(this._rubberBandStartX, e.clientX);
+        var y2 = Math.max(this._rubberBandStartY, e.clientY);
+
+        this._rubberBandEl.style.left = x1 + 'px';
+        this._rubberBandEl.style.top = y1 + 'px';
+        this._rubberBandEl.style.width = (x2 - x1) + 'px';
+        this._rubberBandEl.style.height = (y2 - y1) + 'px';
+
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row');
+        for (var i = 0; i < rows.length; i++) {
+            var rect = rows[i].getBoundingClientRect();
+            if (rect.left < x2 && rect.right > x1 && rect.top < y2 && rect.bottom > y1) {
+                if (!rows[i].classList.contains('selected')) {
+                    rows[i].classList.add('selected');
+                }
+            } else {
+                rows[i].classList.remove('selected');
+            }
+        }
+    },
+
+    _endRubberBand: function(e) {
+        if (!this._rubberBandActive) return;
+        this._rubberBandActive = false;
+        this._rubberBandJustEnded = true;
+        var self = this;
+        setTimeout(function() { self._rubberBandJustEnded = false; }, 0);
+        if (this._rubberBandEl) {
+            this._rubberBandEl.remove();
+            this._rubberBandEl = null;
+        }
+        document.removeEventListener('mousemove', this._rubberBandMoveHandler);
+        document.removeEventListener('mouseup', this._rubberBandEndHandler);
+        this._rubberBandMoveHandler = null;
+        this._rubberBandEndHandler = null;
+
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        if (rows.length > 0) {
+            var lastSelected = rows[rows.length - 1];
+            this._lastClickedIndex = parseInt(lastSelected.getAttribute('data-row-index'), 10);
+        }
+    },
+
+    /* ──────────── Drag & Drop 拖拽系统 ──────────── */
+
+    _initDragDrop: function() {
+        var body = document.getElementById('fb-file-body');
+        if (!body) return;
+        var self = this;
+
+        body.addEventListener('dragstart', function(e) { self._onDragStart(e); });
+        body.addEventListener('dragenter', function(e) { self._onDragEnter(e); });
+        body.addEventListener('dragover', function(e) { self._onDragOver(e); });
+        body.addEventListener('dragleave', function(e) { self._onDragLeave(e); });
+        body.addEventListener('drop', function(e) { self._onDrop(e); });
+        body.addEventListener('dragend', function(e) { self._onDragEnd(e); });
+
+        var treeContent = document.getElementById('fb-tree-content');
+        if (treeContent) {
+            treeContent.addEventListener('dragover', function(e) { self._onTreeDragOver(e); });
+            treeContent.addEventListener('dragleave', function(e) { self._onTreeDragLeave(e); });
+            treeContent.addEventListener('drop', function(e) { self._onTreeDrop(e); });
+        }
+    },
+
+    _onDragStart: function(e) {
+        var row = e.target.closest('.fb-file-row');
+        if (!row) { e.preventDefault(); return; }
+        if (!row.classList.contains('selected')) {
+            this._clearSelection();
+            row.classList.add('selected');
+            this._lastClickedIndex = parseInt(row.getAttribute('data-row-index'), 10);
+        }
+        var selected = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        var paths = [];
+        for (var i = 0; i < selected.length; i++) {
+            var p = selected[i].getAttribute('data-local-path');
+            if (p) paths.push(p);
+        }
+        this._draggedPaths = paths;
+        try { e.dataTransfer.setData('text/plain', JSON.stringify(paths)); } catch(ex) {}
+        e.dataTransfer.effectAllowed = 'all';
+    },
+
+    _onDragEnter: function(e) {
+    },
+
+    _hasExternalFiles: function(e) {
+        return e.dataTransfer && e.dataTransfer.types &&
+            Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') >= 0;
+    },
+
+    _onDragOver: function(e) {
+        var folderRow = e.target.closest('.fb-file-row.fb-local-dir');
+        if (folderRow) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+            folderRow.classList.add('fb-drop-target');
+            return;
+        }
+        if (this._hasExternalFiles(e)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    },
+
+    _onDragLeave: function(e) {
+        var target = e.target.closest('.fb-file-row');
+        if (target) target.classList.remove('fb-drop-target');
+    },
+
+    _onDrop: function(e) {
+        e.preventDefault();
+        this._clearDragHighlights();
+
+        if (this._hasExternalFiles(e)) {
+            this._uploadDroppedFiles(e.dataTransfer);
+            this._draggedPaths = null;
+            return;
+        }
+        var sources = this._draggedPaths;
+        this._draggedPaths = null;
+        if (!sources || sources.length === 0) return;
+        var targetRow = e.target.closest('.fb-file-row.fb-local-dir');
+        if (!targetRow) return;
+        if (targetRow.classList.contains('selected')) return;
+        var destPath = targetRow.getAttribute('data-local-path') || '';
+        this._doMoveOrCopy(sources, destPath, !!e.ctrlKey);
+    },
+
+    _onDragEnd: function(e) {
+        this._clearDragHighlights();
+        this._draggedPaths = null;
+    },
+
+    _clearDragHighlights: function() {
+        var els = document.querySelectorAll('.fb-drop-target, .fb-dragging');
+        for (var i = 0; i < els.length; i++) els[i].classList.remove('fb-drop-target', 'fb-dragging');
+    },
+
+    /* ── Tree panel drag targets ── */
+
+    _onTreeDragOver: function(e) {
+        var label = e.target.closest('.fb-tree-label');
+        if (!label) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+        label.classList.add('fb-drop-target');
+
+        var treeNode = label.parentElement;
+        if (!label.classList.contains('active')) {
+            var sub = treeNode ? treeNode.querySelector('.fb-tree-sub') : null;
+            if (sub && sub.style.display === 'none' && !this._treeExpandTimer) {
+                var self = this;
+                this._treeExpandTimer = setTimeout(function() {
+                    sub.style.display = '';
+                    self._treeExpandTimer = null;
+                }, 500);
+            }
+        }
+    },
+
+    _onTreeDragLeave: function(e) {
+        var label = e.target.closest('.fb-tree-label');
+        if (label) label.classList.remove('fb-drop-target');
+        if (this._treeExpandTimer) {
+            clearTimeout(this._treeExpandTimer);
+            this._treeExpandTimer = null;
+        }
+    },
+
+    _onTreeDrop: function(e) {
+        e.preventDefault();
+        this._hideUploadOverlay();
+        this._clearDragHighlights();
+        var sources = this._draggedPaths;
+        this._draggedPaths = null;
+        if (!sources || sources.length === 0) return;
+        var label = e.target.closest('.fb-tree-label');
+        if (!label) return;
+        var destPath = label.getAttribute('data-local-path') || '';
+        this._doMoveOrCopy(sources, destPath, !!e.ctrlKey);
+    },
+
+    /* ── Dropped file upload ── */
+
+    _uploadDroppedFiles: function(dataTransfer) {
+        var self = this;
+        var allFiles = [];
+        var totalProcessed = 0;
+
+        function traverseEntries(entries, parentPath, callback) {
+            var count = entries.length;
+            var done = 0;
+            if (count === 0) { callback(); return; }
+
+            entries.forEach(function(entry) {
+                if (entry.isFile) {
+                    entry.file(function(file) {
+                        allFiles.push({ file: file, relativePath: parentPath + file.name });
+                        done++;
+                        if (done === count) callback();
+                    }, function() {
+                        done++;
+                        if (done === count) callback();
+                    });
+                } else if (entry.isDirectory) {
+                    var reader = entry.createReader();
+                    reader.readEntries(function(entries) {
+                        var newParentPath = parentPath + entry.name + '/';
+                        traverseEntries(entries, newParentPath, function() {
+                            done++;
+                            if (done === count) callback();
+                        });
+                    }, function() {
+                        done++;
+                        if (done === count) callback();
+                    });
+                } else {
+                    done++;
+                    if (done === count) callback();
+                }
+            });
+        }
+
+        if (dataTransfer.items && dataTransfer.items.length > 0) {
+            var entries = [];
+            for (var i = 0; i < dataTransfer.items.length; i++) {
+                var item = dataTransfer.items[i];
+                if (item.kind === 'file') {
+                    var entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                    if (entry) entries.push(entry);
+                }
+            }
+
+            if (entries.length > 0) {
+                traverseEntries(entries, '', function() {
+                    self._sendFilesToServer(allFiles);
+                });
+                return;
+            }
+        }
+
+        // fallback: no items, use files directly
+        if (dataTransfer.files && dataTransfer.files.length > 0) {
+            var fileList = [];
+            for (var j = 0; j < dataTransfer.files.length; j++) {
+                fileList.push({ file: dataTransfer.files[j], relativePath: dataTransfer.files[j].name });
+            }
+            self._sendFilesToServer(fileList);
+        }
+    },
+
+    _sendFilesToServer: function(fileEntries) {
+        if (fileEntries.length === 0) return;
+        var formData = new FormData();
+        for (var i = 0; i < fileEntries.length; i++) {
+            var entry = fileEntries[i];
+            if (entry.relativePath) {
+                formData.append('files', entry.file, entry.relativePath);
+            } else {
+                formData.append('files', entry.file);
+            }
+        }
+        var subdir = this.fbLocalCurrentSubdir || '';
+        var url = '/api/fb/' + this.currentFbId + '/local-files?subdir=' + encodeURIComponent(subdir);
+        var self = this;
+        fetch(url, { method: 'POST', body: formData }).then(function(r) { return r.json(); }).then(function(res) {
+            if (res.success) {
+                showToast('上传成功 ' + (res.uploaded || []).length + ' 个文件');
+                self.fbCategoryTree = null;
+                self.fbTreeLoaded = false;
+                self.renderDetail();
+            } else {
+                showToast(res.message || '上传失败', 'error');
+            }
+        });
+    },
+
+    _doMoveOrCopy: function(sources, dest, isCopy) {
+        var self = this;
+        var action = isCopy ? 'copy' : 'move';
+        var httpMethod = isCopy ? 'POST' : 'PUT';
+        var apiUrl = '/api/fb/' + this.currentFbId + '/local-files/' + action;
+        this.api(apiUrl, httpMethod, { sources: sources, dest: dest }).then(function(res) {
+            if (res.success) {
+                showToast(isCopy ? '复制成功' : '移动成功');
+                self.fbCategoryTree = null;
+                self.fbTreeLoaded = false;
+                self.renderDetail();
+            } else {
+                showToast(res.message || (isCopy ? '复制' : '移动') + '失败', 'error');
+            }
+        });
     },
 
     openFile: function(relPath) {
@@ -1518,6 +2291,46 @@ var FileBase = {
                 handle.classList.remove('active');
             }
         });
+    },
+
+    initColumnResize: function() {
+        var ths = document.querySelectorAll('#fb-file-content .fb-file-table thead th');
+        for (var i = 0; i < ths.length - 1; i++) {
+            var th = ths[i];
+            if (th.querySelector('.fb-col-resizer')) continue;
+            var resizer = document.createElement('div');
+            resizer.className = 'fb-col-resizer';
+            resizer.setAttribute('data-col-index', i);
+            th.style.position = 'relative';
+            th.appendChild(resizer);
+
+            resizer.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var thEl = this.parentElement;
+                var startX = e.clientX;
+                var startW = thEl.offsetWidth;
+                document.body.classList.add('fb-resizing');
+                document.body.style.cursor = 'col-resize';
+
+                function onMove(ev) {
+                    if (!startW) return;
+                    var dx = ev.clientX - startX;
+                    var newW = Math.max(30, startW + dx);
+                    thEl.style.width = newW + 'px';
+                    thEl.style.minWidth = newW + 'px';
+                }
+                function onUp() {
+                    startW = null;
+                    document.body.classList.remove('fb-resizing');
+                    document.body.style.cursor = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
     },
 
     _displayLocalPath: function() {
@@ -1821,7 +2634,7 @@ var FileBase = {
         h += '<h3>⚙️ P2P 节点设置</h3>';
         h += '<div id="fb-p2p-settings-body"><div style="text-align:center;padding:20px;color:#999">加载中...</div></div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button class="btn" onclick="FileBase._saveP2PSettings()">💾 保存</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase._saveP2PSettings()">💾 保存</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
@@ -1926,8 +2739,8 @@ var FileBase = {
 
         h += '<div class="fb-modal-actions">';
         if (nodes.length > 0) {
-            h += '<button class="btn" onclick="FileBase._doShare(\'' + fbId.replace(/'/g, "\\'") + '\')">🔗 共享</button>';
-            h += '<button class="btn" onclick="FileBase._doShareAll(\'' + fbId.replace(/'/g, "\\'") + '\')" title="共享给所有在线节点">📡 共享给全部</button>';
+            h += '<button class="fb-btn-primary" onclick="FileBase._doShare(\'' + fbId.replace(/'/g, "\\'") + '\')">🔗 共享</button>';
+            h += '<button class="fb-btn-primary" onclick="FileBase._doShareAll(\'' + fbId.replace(/'/g, "\\'") + '\')" title="共享给所有在线节点">📡 共享给全部</button>';
         }
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
