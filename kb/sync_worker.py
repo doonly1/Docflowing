@@ -10,12 +10,15 @@ FB 文件库同步 - 后台同步线程（优化版）
 - 减少主循环阻塞等待
 """
 
+import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
-from typing import Dict, Set, Optional
-from queue import Queue, Empty
+from typing import Dict, Optional, Set
+from queue import Empty, Queue
 
 from .sync_converters import can_convert, convert_file
 from .sync_state import get_sync_state_manager
@@ -58,6 +61,9 @@ class SyncWorker:
         # 标记已执行过一次迁移的文件库，避免每轮主循环重复检查
         self._migrated_filebases: Set[str] = set()
 
+        # 文件库扫描统计缓存（供 get_sync_status 直接读取，避免 os.walk）
+        self._filebase_stats: Dict[str, Dict] = {}
+
     def start(self):
         """启动同步线程"""
         if self._running:
@@ -82,7 +88,6 @@ class SyncWorker:
     def _run(self):
         """同步线程主循环 - 事件驱动模式"""
         self._run_migration_once()
-        self._sync_all_enabled_filebases()
         while self._running:
             self._process_triggered_syncs()
             self._trigger_event.wait(timeout=1)
@@ -180,6 +185,11 @@ class SyncWorker:
                 return
 
             current_files = self._scan_filebase(source_dir)
+
+            self._filebase_stats[filebase_id] = {
+                'total_files': len(current_files),
+                'syncable_files': sum(1 for f in current_files.values() if f['syncable'])
+            }
 
             state = self._state_manager.load_state(user_id, filebase_id)
 
@@ -309,17 +319,45 @@ class SyncWorker:
 
         heavy_updates_lock = threading.Lock()
         heavy_updates = []
+        heavy_index_updates = []
 
         deadline = time.time() + 600
 
         def _sync_heavy(relative_path, file_info):
             try:
-                result = self._convert_single(
-                    user_id, filebase_id, relative_path, file_info, state
+                source_path = file_info['path']
+                source_mtime = file_info['mtime']
+                script_path = os.path.join(os.path.dirname(__file__), 'sync_subprocess.py')
+                proc = subprocess.run(
+                    [sys.executable, script_path, source_path, relative_path, str(source_mtime)],
+                    capture_output=True, text=True, timeout=600
                 )
-                if result:
+                if proc.returncode == 0 and proc.stdout:
+                    data = json.loads(proc.stdout.strip())
+                    _, _, status, error, target_mtime, md_content = data
+
+                    if status == 'synced' and md_content:
+                        kb_relative_path = f"imported/{filebase_id}/{relative_path}"
+                        if not kb_relative_path.lower().endswith('.md'):
+                            kb_relative_path += '.md'
+                        from .routes import _extract_title_from_md
+                        title = _extract_title_from_md(md_content) or os.path.splitext(os.path.basename(source_path))[0]
+                        with heavy_updates_lock:
+                            heavy_index_updates.append((kb_relative_path, title, md_content))
+                            heavy_updates.append((relative_path, source_mtime, 'synced', None, time.time()))
+                    else:
+                        with heavy_updates_lock:
+                            heavy_updates.append((relative_path, source_mtime, 'failed', error or 'conversion_failed', None))
+                else:
                     with heavy_updates_lock:
-                        heavy_updates.append(result)
+                        heavy_updates.append((relative_path, source_mtime, 'failed', proc.stderr or 'subprocess_error', None))
+            except subprocess.TimeoutExpired:
+                with heavy_updates_lock:
+                    heavy_updates.append((relative_path, file_info['mtime'], 'failed', 'timeout', None))
+            except Exception as e:
+                logger.error(f"Error syncing heavy file {relative_path}: {e}")
+                with heavy_updates_lock:
+                    heavy_updates.append((relative_path, file_info['mtime'], 'failed', str(e), None))
             finally:
                 self._semaphore.release()
 
@@ -344,6 +382,11 @@ class SyncWorker:
             if remaining <= 0:
                 break
             self._semaphore.acquire(timeout=min(remaining, 60))
+
+        if heavy_index_updates:
+            from .routes import batch_update_search_index
+            batch_update_search_index(user_id, heavy_index_updates)
+            logger.debug(f"Filebase {filebase_id}: batch updated {len(heavy_index_updates)} search index entries")
 
         if heavy_updates:
             self._state_manager.batch_update_file_states(
@@ -417,6 +460,11 @@ class SyncWorker:
             'last_sync': state.last_sync,
             'is_syncing': filebase_id in self._processing_filebases
         }
+
+    def get_filebase_stats(self, filebase_id: str) -> Optional[Dict]:
+        """获取文件库扫描统计缓存（total_files, syncable_files），
+        由 _scan_filebase 在同步时填充，供 API 层直接读取避免 os.walk"""
+        return self._filebase_stats.get(filebase_id)
 
     def _is_sync_enabled(self, filebase_id: str) -> bool:
         """检查文件库是否启用了同步"""

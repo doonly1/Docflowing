@@ -1171,7 +1171,7 @@
 
         document.addEventListener('DOMContentLoaded', async function() {
             await initApp();
-            _restoreLastView();
+            setTimeout(function() { _restoreLastView(); }, 300);
         });
 
         function _restoreLastView() {

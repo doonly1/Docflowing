@@ -163,6 +163,37 @@ def update_search_index(usr_id, file_path, title, content):
     conn.commit()
 
 
+def batch_update_search_index(usr_id, updates):
+    """批量更新 FTS 索引，所有操作一次提交
+
+    updates: [(file_path, title, content), ...]
+    """
+    conn = get_db(usr_id)
+    now = time.time()
+    for file_path, title, content in updates:
+        conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))
+        conn.execute(
+            "INSERT INTO wiki_fts (usr_id, title, content, path) VALUES (?, ?, ?, ?)",
+            (usr_id, title, content, file_path)
+        )
+        existing = conn.execute(
+            "SELECT path FROM wiki_files WHERE usr_id = ? AND path = ?",
+            (usr_id, file_path)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE wiki_files SET title = ?, updated_at = ? WHERE usr_id = ? AND path = ?",
+                (title, now, usr_id, file_path)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO wiki_files (usr_id, path, title, created_at, updated_at, file_size) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (usr_id, file_path, title, now, now, len(content))
+            )
+    conn.commit()
+
+
 def remove_from_index(usr_id, file_path):
     conn = get_db(usr_id)
     conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))

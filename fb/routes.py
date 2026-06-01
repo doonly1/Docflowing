@@ -297,10 +297,22 @@ def copy_folder():
     })
 
 
+# list_fb 的 TTL 缓存
+_list_fb_cache = {}
+_list_fb_cache_time = 0
+_LIST_FB_CACHE_TTL = 5  # 秒
+
+
 @fb_bp.route('/list', methods=['GET'])
 @login_required
 def list_fb():
     user_id = g.user_id
+
+    cache_key = f"list_fb:{user_id}"
+    now = time.time()
+    if cache_key in _list_fb_cache and now - _list_fb_cache_time < _LIST_FB_CACHE_TTL:
+        return jsonify(_list_fb_cache[cache_key])
+
     is_admin = (get_user_role(user_id) == 'admin')
     db = get_db()
     ws = _get_user_workspace(user_id)
@@ -423,7 +435,10 @@ def list_fb():
             'local_path': ''
         })
 
-    return jsonify({'success': True, 'kbs': kbs})
+    result = {'success': True, 'kbs': kbs}
+    _list_fb_cache[cache_key] = result
+    _list_fb_cache_time = now
+    return jsonify(result)
 
 
 @fb_bp.route('/<fb_id>', methods=['PUT'])
@@ -1127,7 +1142,7 @@ def create_office_file(filebase_id):
     try:
         if ext == '.docx':
             from docx import Document
-            from tools.mystyle import MyStyle
+            from tools.mystyle import clear_styles, add_my_styles, set_page
             doc = Document()
             set_page(doc)
             clear_styles(doc)
@@ -1512,27 +1527,24 @@ def get_sync_status(filebase_id):
         return jsonify({'success': False, 'message': '文件库不存在'}), 404
 
     try:
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+
         from kb.sync_state import get_sync_state_manager
         state_manager = get_sync_state_manager()
         state = state_manager.load_state(kb_row['owner_id'], filebase_id)
 
-        total_files = 0
-        if os.path.exists(kb_row['local_path']):
-            for root, dirs, files in os.walk(kb_row['local_path']):
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
-                files = [f for f in files if not f.startswith('.') and not f.startswith('~')]
-                total_files += len(files)
+        stats = worker.get_filebase_stats(filebase_id)
+        if stats:
+            total_files = stats['total_files']
+            syncable_count = stats['syncable_files']
+        elif state.total_files > 0:
+            total_files = state.total_files
+            syncable_count = state.syncable_files
+        else:
+            total_files = 0
+            syncable_count = 0
 
-        from kb.sync_converters import can_convert
-        syncable_count = 0
-        if os.path.exists(kb_row['local_path']):
-            for root, dirs, files in os.walk(kb_row['local_path']):
-                for f in files:
-                    if can_convert(os.path.join(root, f)):
-                        syncable_count += 1
-
-        from kb.sync_worker import get_sync_worker
-        worker = get_sync_worker()
         is_syncing = filebase_id in worker._processing_filebases
 
         return jsonify({

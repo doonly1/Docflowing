@@ -14,5 +14,5 @@ pywebview>=5.0.0
 
 
 # Windows 可选依赖（提供 Word COM 支持，其他平台不需要）
-# pywin32>=305
-# docx2pdf>=0.1.8
+pywin32>=305
+docx2pdf>=0.1.8

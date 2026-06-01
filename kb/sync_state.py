@@ -179,7 +179,7 @@ class SyncStateManager:
 
         try:
             db = self._get_db()
-            state_json = json.dumps(state.to_dict(), ensure_ascii=False, indent=2)
+            state_json = json.dumps(state.to_dict(), ensure_ascii=False)
             db.execute(
                 """
                 INSERT INTO filebase_sync_states (filebase_id, user_id, state_json, updated_at)
