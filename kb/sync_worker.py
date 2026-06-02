@@ -321,7 +321,7 @@ class SyncWorker:
         heavy_updates = []
         heavy_index_updates = []
 
-        deadline = time.time() + 600
+        deadline = time.time() + 300
 
         def _sync_heavy(relative_path, file_info):
             try:
@@ -330,7 +330,7 @@ class SyncWorker:
                 script_path = os.path.join(os.path.dirname(__file__), 'sync_subprocess.py')
                 proc = subprocess.run(
                     [sys.executable, script_path, source_path, relative_path, str(source_mtime)],
-                    capture_output=True, text=True, timeout=600
+                    capture_output=True, text=True, timeout=120
                 )
                 if proc.returncode == 0 and proc.stdout:
                     data = json.loads(proc.stdout.strip())

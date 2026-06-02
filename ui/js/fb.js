@@ -175,7 +175,7 @@ var FileBase = {
             h += '<div class="fb-file-pane" style="width:100%">';
             h += '<div class="fb-file-toolbar">';
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
-            h += '<button onclick="FileBase.search()">🔍 搜索</button>';
+            h += '<button onclick="FileBase.search()">🔍</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
             h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
             h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px">🗑️</button>';
@@ -200,7 +200,7 @@ var FileBase = {
             var kbs = res.kbs || [];
 
             if (kbs.length === 0) {
-                grid.innerHTML = '<div class="fb-empty">暂无文件库，点击上方按钮创建</div>';
+                grid.innerHTML = '<div class="fb-empty">暂无文件库，右键区域创建</div>';
                 return;
             }
 
@@ -1303,7 +1303,7 @@ var FileBase = {
         this.hideContextMenu();
         var self = this;
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
-        h += '<h3>📋 复制到</h3>';
+        h += '<h3>复制到</h3>';
         h += '<p style="color:#666;font-size:12px">' + escapeHtmlText(path) + '</p>';
         h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
         h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
@@ -1330,7 +1330,7 @@ var FileBase = {
         var self = this;
         var label = items.length === 1 ? escapeHtmlText(items[0].path) : ('已选 ' + items.length + ' 项');
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal">';
-        h += '<h3>📋 批量复制到</h3>';
+        h += '<h3>批量复制到</h3>';
         h += '<p style="color:#666;font-size:12px">' + label + '</p>';
         h += '<div class="fb-move-tree" style="max-height:300px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px;padding:8px;margin:8px 0">';
         h += '<div class="fb-tree-node"><div class="fb-tree-label active" onclick="FileBase._selectMoveDest(\'\', this)" data-dest="">📂 / (根目录)</div></div>';
@@ -2152,8 +2152,8 @@ var FileBase = {
             '<div class="fb-md-editor-header">' +
             '<span class="fb-md-editor-title">📝 ' + escapeHtmlText(fileName) + '</span>' +
             '<div class="fb-md-editor-actions">' +
-            '<button class="fb-md-btn-save" onclick="FileBase._saveMdContent()">💾 保存</button>' +
-            '<button class="fb-md-btn-close" onclick="FileBase._closeMdEditor()">✖ 关闭</button>' +
+            '<button class="fb-md-btn-save" onclick="FileBase._saveMdContent()">保存</button>' +
+            '<button class="fb-md-btn-close" onclick="FileBase._closeMdEditor()">关闭</button>' +
             '</div></div>' +
             '<div id="fb-wysiwyg-editor"><div style="padding:20px;color:#999;">正在加载编辑器...</div></div>' +
             '</div>';
@@ -2426,7 +2426,7 @@ var FileBase = {
         if (!q) return;
 
         var res = await this.api('/api/fb/search?q=' + encodeURIComponent(q), 'GET');
-        var h = '<h3>🔍 搜索: ' + escapeHtmlText(q) + '</h3>';
+        var h = '<h3>🔍: ' + escapeHtmlText(q) + '</h3>';
         h += '<button onclick="FileBase.init()" style="margin-bottom:8px">← 返回</button>';
         if (res.success && res.results && res.results.length > 0) {
             h += '<table class="fb-file-table"><thead><tr><th>文件库</th><th>文件名</th><th>匹配</th><th>操作</th></tr></thead><tbody>';
@@ -2634,7 +2634,7 @@ var FileBase = {
         h += '<h3>⚙️ P2P 节点设置</h3>';
         h += '<div id="fb-p2p-settings-body"><div style="text-align:center;padding:20px;color:#999">加载中...</div></div>';
         h += '<div class="fb-modal-actions">';
-        h += '<button class="fb-btn-primary" onclick="FileBase._saveP2PSettings()">💾 保存</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase._saveP2PSettings()">保存</button>';
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);

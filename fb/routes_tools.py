@@ -1,0 +1,165 @@
+"""文件库工具执行和文档转换"""
+
+import os
+import sys
+import subprocess
+import json
+from flask import Blueprint, request, jsonify, Response, stream_with_context, g
+
+from server.auth import login_required
+from fb.database import get_db
+from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
+from tools.tool_defs import TOOL_SCRIPTS
+
+fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
+
+
+@fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
+@login_required
+@_require_fb_permission('edit')
+@_ensure_local_fb_route
+def run_tool_on_fb(filebase_id):
+    """在文件库上执行工具"""
+    if getattr(g, 'is_remote_fb', False):
+        from p2p import proxy as p2p_proxy
+        node = _get_node_identity()
+        info = g.remote_fb_info
+        data = request.get_json() or {}
+        resp = p2p_proxy.remote_run_tool(info['owner_addr'], node, filebase_id, data.get('tool'), data.get('files', []), data.get('subdir', ''))
+        if resp:
+            return Response(resp.iter_content(chunk_size=4096), mimetype='text/event-stream', content_type='text/event-stream')
+        return jsonify({'success': False, 'message': '远程节点不可用'})
+
+    data = request.get_json()
+    tool = data.get('tool')
+    subdir = data.get('subdir', '').strip()
+    files = data.get('files')
+
+    if not tool:
+        return jsonify({'success': False, 'message': '未指定工具'})
+
+    if tool not in TOOL_SCRIPTS:
+        return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
+
+    script_path = TOOL_SCRIPTS[tool]
+    if not os.path.exists(script_path):
+        return jsonify({'success': False, 'message': f'脚本不存在: {tool}'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    target_path = os.path.normpath(os.path.join(local_path, subdir)) if subdir else local_path
+
+    if not target_path.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '不允许访问的路径'})
+
+    if not os.path.isdir(target_path):
+        return jsonify({'success': False, 'message': f'目录不存在: {subdir or "根目录"}'})
+
+    if not files:
+        extensions = TOOL_EXTENSIONS.get(tool, ('.docx',))
+        files = []
+        for f in os.listdir(target_path):
+            full = os.path.join(target_path, f)
+            if os.path.isfile(full) and f.lower().endswith(extensions):
+                files.append(f)
+
+    _user_id = g.user_id
+
+    def generate():
+        try:
+            env = os.environ.copy()
+            env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
+            env['USER_ID'] = _user_id
+
+            cmd_args = [sys.executable, "-u", script_path]
+            for f in files:
+                full_path = os.path.join(target_path, f)
+                cmd_args.append(full_path)
+
+            process = subprocess.Popen(
+                cmd_args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=target_path,
+                env=env
+            )
+
+            output_lines = []
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    content = line.rstrip()
+                    output_lines.append(content)
+                    yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
+
+            process.stdout.close()
+            process.wait()
+
+            success = process.returncode == 0
+            if not success:
+                error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
+                yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
+            else:
+                yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+
+        except Exception as e:
+            yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@fb_bp.route('/<fb_id>/convert-doc', methods=['POST'])
+@login_required
+@_require_fb_permission('edit')
+def convert_doc_files(filebase_id):
+    """扫描文件库中的 .doc 文件并转换为 .docx"""
+    db = get_db()
+    row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not row:
+        return jsonify({'success': False, 'message': '文件库不存在'}), 404
+
+    local_path = row['local_path']
+    if not local_path or not os.path.exists(local_path):
+        return jsonify({'success': False, 'message': '文件库路径不存在'}), 400
+
+    from tools.doc_process import doc_to_docx
+    import logging
+    logger = logging.getLogger(__name__)
+
+    doc_dirs = set()
+    for root, dirs, files in os.walk(local_path):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for f in files:
+            if f.lower().endswith('.doc') and not f.startswith('~$'):
+                doc_dirs.add(root)
+
+    if not doc_dirs:
+        return jsonify({'success': True, 'message': '没有需要转换的 .doc 文件', 'converted': 0, 'failed': 0})
+
+    total_ok = 0
+    total_err = 0
+    errors = []
+
+    for workdir in sorted(doc_dirs):
+        err_msg = doc_to_docx(workdir)
+        if err_msg:
+            total_err += 1
+            errors.append(err_msg)
+            logger.warning(f"doc 转换失败 [{workdir}]: {err_msg}")
+        else:
+            count = sum(1 for f in os.listdir(workdir)
+                        if f.lower().endswith('.doc') and not f.startswith('~$'))
+            total_ok += count
+
+    return jsonify({
+        'success': True,
+        'message': f'转换完成: {total_ok} 成功, {total_err} 个目录有失败',
+        'converted': total_ok,
+        'failed_dirs': total_err,
+        'errors': errors if errors else None
+    })
