@@ -1149,4 +1149,31 @@ body.fb-resizing {
     background: rgba(66, 133, 244, 0.08) !important;
 }
 
+/* ──────────── 右键菜单子菜单 ──────────── */
+
+.fb-menu-item-has-sub {
+    position: relative;
+}
+.fb-menu-item-has-sub > .fb-context-submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: -3px;
+    min-width: 130px;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    padding: 3px 0;
+    border: 1px solid rgba(0,0,0,0.08);
+    z-index: 3100;
+}
+.fb-menu-item-has-sub:hover > .fb-context-submenu {
+    display: block;
+}
+.fb-menu-item-has-sub > .fb-menu-arrow {
+    margin-left: auto;
+    font-size: 10px;
+    color: #999;
+}
+
 

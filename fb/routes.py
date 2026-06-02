@@ -65,13 +65,17 @@ fb_bp.add_url_rule('/<fb_id>/local-files/open-with-app', 'open_with_app', open_w
 
 from fb.routes_files_edit import (
     replace_local_file, move_local_items, delete_local_items,
-    rename_local_item, copy_local_items
+    rename_local_item, copy_local_items,
+    list_file_trash, restore_file_trash, delete_file_trash_item
 )
 fb_bp.add_url_rule('/<fb_id>/local-files/replace', 'replace_local_file', replace_local_file, methods=['PUT'])
 fb_bp.add_url_rule('/<fb_id>/local-files/move', 'move_local_items', move_local_items, methods=['PUT'])
 fb_bp.add_url_rule('/<fb_id>/local-files', 'delete_local_items', delete_local_items, methods=['DELETE'])
 fb_bp.add_url_rule('/<fb_id>/local-files/rename', 'rename_local_item', rename_local_item, methods=['PUT'])
 fb_bp.add_url_rule('/<fb_id>/local-files/copy', 'copy_local_items', copy_local_items, methods=['POST'])
+fb_bp.add_url_rule('/<fb_id>/local-files/trash-items', 'list_file_trash', list_file_trash, methods=['GET'])
+fb_bp.add_url_rule('/<fb_id>/local-files/trash-restore', 'restore_file_trash', restore_file_trash, methods=['POST'])
+fb_bp.add_url_rule('/<fb_id>/local-files/trash-item', 'delete_file_trash_item', delete_file_trash_item, methods=['DELETE'])
 
 from fb.routes_sync import toggle_sync, sync_now, get_sync_status
 fb_bp.add_url_rule('/<fb_id>/sync', 'toggle_sync', toggle_sync, methods=['POST'])

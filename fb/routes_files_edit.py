@@ -2,12 +2,15 @@
 
 import os
 import shutil
+import time
+import json
 from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
 from fb.routes_files import _trigger_fb_sync
+from fb.routes_base import _get_trash_dir
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -157,6 +160,7 @@ def delete_local_items(filebase_id):
 
     deleted = 0
     errors = []
+    trash_dir = os.path.join(_get_trash_dir(), '_files_', filebase_id)
     for rel in paths:
         if not rel:
             continue
@@ -165,13 +169,18 @@ def delete_local_items(filebase_id):
             errors.append(f'{rel}: 路径非法')
             continue
         try:
-            if os.path.isdir(target):
-                shutil.rmtree(target)
-            elif os.path.isfile(target):
-                os.remove(target)
-            else:
+            if not os.path.exists(target):
                 errors.append(f'{rel}: 文件不存在')
                 continue
+            os.makedirs(trash_dir, exist_ok=True)
+            ts = str(int(time.time() * 1000000))
+            basename = os.path.basename(rel)
+            trash_name = basename + '_' + ts
+            trash_target = os.path.join(trash_dir, trash_name)
+            shutil.move(target, trash_target)
+            meta = {'original_path': rel, 'is_dir': os.path.isdir(trash_target), 'timestamp': ts}
+            with open(trash_target + '.meta.json', 'w', encoding='utf-8') as f:
+                json.dump(meta, f)
             deleted += 1
         except Exception as e:
             errors.append(f'{rel}: {str(e)}')
@@ -299,3 +308,159 @@ def copy_local_items(filebase_id):
 
     _trigger_fb_sync(filebase_id)
     return jsonify({'success': True, 'copied': copied, 'errors': errors})
+
+
+@fb_bp.route('/<fb_id>/local-files/trash-items', methods=['GET'])
+@login_required
+@_require_fb_permission('edit')
+@_ensure_local_fb_route
+def list_file_trash(filebase_id):
+    """列出文件库内的回收站项目"""
+    if getattr(g, 'is_remote_fb', False):
+        return jsonify({'success': False, 'message': '远程文件库不支持回收站'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    trash_dir = os.path.join(_get_trash_dir(), '_files_', filebase_id)
+    if not os.path.isdir(trash_dir):
+        return jsonify({'success': True, 'items': []})
+
+    items = []
+    for entry in os.listdir(trash_dir):
+        if entry.endswith('.meta.json'):
+            continue
+        meta_path = os.path.join(trash_dir, entry + '.meta.json')
+        meta = {}
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+            except Exception:
+                pass
+        entry_path = os.path.join(trash_dir, entry)
+        stat = os.stat(entry_path)
+        size = 0
+        if os.path.isfile(entry_path):
+            size = stat.st_size
+        elif os.path.isdir(entry_path):
+            try:
+                size = sum(os.path.getsize(os.path.join(r, f)) for r, ds, fs in os.walk(entry_path) for f in fs)
+            except Exception:
+                pass
+        items.append({
+            'name': entry,
+            'original_path': meta.get('original_path', ''),
+            'is_dir': meta.get('is_dir', os.path.isdir(entry_path)),
+            'mtime': stat.st_mtime,
+            'size': size
+        })
+    items.sort(key=lambda x: x['mtime'], reverse=True)
+    return jsonify({'success': True, 'items': items})
+
+
+@fb_bp.route('/<fb_id>/local-files/trash-restore', methods=['POST'])
+@login_required
+@_require_fb_permission('edit')
+@_ensure_local_fb_route
+def restore_file_trash(filebase_id):
+    """从回收站恢复文件"""
+    if getattr(g, 'is_remote_fb', False):
+        return jsonify({'success': False, 'message': '远程文件库不支持回收站'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    local_path = kb_row['local_path']
+    data = request.get_json() or {}
+    trash_name = (data.get('name') or '').strip()
+    if not trash_name:
+        return jsonify({'success': False, 'message': '未指定项目'})
+
+    trash_dir = os.path.join(_get_trash_dir(), '_files_', filebase_id)
+    src = os.path.join(trash_dir, trash_name)
+    if not os.path.exists(src):
+        return jsonify({'success': False, 'message': '项目不存在'})
+
+    meta_path = src + '.meta.json'
+    original_path = trash_name.split('_', 1)[0] if '_' in trash_name else trash_name
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            if meta.get('original_path'):
+                original_path = meta['original_path']
+        except Exception:
+            pass
+
+    dst = os.path.normpath(os.path.join(local_path, original_path))
+    if not dst.startswith(os.path.normpath(local_path)):
+        return jsonify({'success': False, 'message': '路径非法'})
+
+    dst_parent = os.path.dirname(dst)
+    os.makedirs(dst_parent, exist_ok=True)
+
+    if os.path.exists(dst):
+        base, ext = os.path.splitext(os.path.basename(original_path))
+        counter = 1
+        while True:
+            new_name = f'{base}_{counter}{ext}'
+            new_dst = os.path.join(dst_parent, new_name)
+            if not os.path.exists(new_dst):
+                dst = new_dst
+                break
+            counter += 1
+
+    try:
+        shutil.move(src, dst)
+        if os.path.isfile(meta_path):
+            os.remove(meta_path)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+    _trigger_fb_sync(filebase_id)
+    return jsonify({'success': True})
+
+
+@fb_bp.route('/<fb_id>/local-files/trash-item', methods=['DELETE'])
+@login_required
+@_require_fb_permission('edit')
+@_ensure_local_fb_route
+def delete_file_trash_item(filebase_id):
+    """永久删除回收站中的项目"""
+    if getattr(g, 'is_remote_fb', False):
+        return jsonify({'success': False, 'message': '远程文件库不支持回收站'})
+
+    db = get_db()
+    kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    if not kb_row:
+        return jsonify({'success': False, 'message': '文件库不存在'})
+
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '未指定项目'})
+
+    trash_dir = os.path.join(_get_trash_dir(), '_files_', filebase_id)
+    target = os.path.join(trash_dir, name)
+    if not os.path.exists(target):
+        return jsonify({'success': False, 'message': '项目不存在'})
+
+    if not target.startswith(os.path.normpath(trash_dir)):
+        return jsonify({'success': False, 'message': '路径非法'})
+
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+        meta_path = target + '.meta.json'
+        if os.path.isfile(meta_path):
+            os.remove(meta_path)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+    return jsonify({'success': True})
