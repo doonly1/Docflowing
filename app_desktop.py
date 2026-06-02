@@ -21,7 +21,7 @@ def _run_startup_scripts():
     tools_dir = os.path.join(base_dir, 'tools')
 
     scripts = [
-        ('fetch_github_hosts.py', False),  # 一次性任务
+        # ('fetch_github_hosts.py', False),  # 一次性任务（已禁用）
         ('WordKeepAlive.py', True),         # 守护进程
     ]
 

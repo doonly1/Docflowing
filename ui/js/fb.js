@@ -1221,7 +1221,7 @@ var FileBase = {
     },
 
     _buildMultiSelectContextMenu: function() {
-        var h = '<div class="fb-menu-item" onclick="FileBase.showCopyDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
+        var h = '<div class="fb-menu-item" onclick="FileBase.contextCopyMulti();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
         h += '<div class="fb-menu-item" onclick="FileBase.showMoveDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
         h += '<div class="fb-menu-item" onclick="FileBase.downloadAction();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
         h += '<div class="fb-menu-divider"></div>';
@@ -1331,21 +1331,35 @@ var FileBase = {
 
     contextCopyOne: function(path) {
         this.hideContextMenu();
-        this.fbClipboard = path;
+        this.fbClipboard = [path];
         showToast('已复制');
+    },
+
+    contextCopyMulti: function() {
+        this.hideContextMenu();
+        var items = this.getSelectedPaths();
+        if (items.length === 0) {
+            showToast('请至少选择一个文件或文件夹', 'error');
+            return;
+        }
+        this.fbClipboard = items.map(function(item) { return item.path; });
+        showToast('已复制 ' + items.length + ' 项');
     },
 
     contextPaste: async function() {
         this.hideContextMenu();
-        var src = this.fbClipboard;
-        if (!src) {
+        var items = this.fbClipboard;
+        if (!items || items.length === 0) {
             showToast('没有可粘贴的内容', 'error');
             return;
         }
+        if (typeof items === 'string') items = [items];
         var dest = this.fbLocalCurrentSubdir || '';
-        this._pushUndo({type: 'copy', items: [{name: src.split('/').pop()}], dest: dest});
+        var undoItems = [];
+        for (var i = 0; i < items.length; i++) undoItems.push({name: items[i].split('/').pop()});
+        this._pushUndo({type: 'copy', items: undoItems, dest: dest});
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/copy', 'POST', {
-            sources: [src],
+            sources: items,
             dest: dest
         });
         if (res.success) {
