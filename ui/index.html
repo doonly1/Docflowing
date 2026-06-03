@@ -15,11 +15,52 @@
 
         body {
             font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-            background: #f0f2f5;
+            background: #f2f2f2;
             min-height: 100vh;
             display: flex;
             padding: 0;
             margin: 0;
+        }
+
+        /* ──────── 全局标题栏（贯穿两端） ──────── */
+        .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            background: #f2f2f2;
+            display: flex;
+            align-items: center;
+            z-index: 300;
+            -webkit-app-region: drag;
+        }
+        .app-header .header-left {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            padding: 0;
+            width: 56px;
+            justify-content: center;
+            -webkit-app-region: no-drag;
+        }
+        .app-header .header-center {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            overflow-x: auto;
+            overflow-y: hidden;
+            gap: 0;
+            -webkit-app-region: drag;
+        }
+        .app-header .header-center::-webkit-scrollbar {
+            height: 0;
+        }
+        .app-header .header-right {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            -webkit-app-region: no-drag;
         }
 
         .container {
@@ -34,15 +75,15 @@
             height: 100vh;
             position: sticky;
             top: 0;
-            background: #fff;
+            padding-top: 40px;
+            background: #f2f2f2;
             display: flex;
             flex-direction: column;
-            padding: 0;
+            padding: 40px 0 0 0;
             overflow-y: auto;
             overflow-x: hidden;
             z-index: 100;
             transition: width 0.2s ease;
-            border-right: 1px solid #e8e8e8;
         }
 
         .sidebar-brand {
@@ -52,16 +93,14 @@
             align-items: center;
             justify-content: center;
             gap: 4px;
-            color: #555;
-            border-bottom: 1px solid #f0f0f0;
+            color: #666;
             flex-shrink: 0;
             cursor: pointer;
-            transition: background 0.15s;
             position: relative;
         }
 
         .sidebar-brand:hover {
-            background: #f5f5f5;
+            background: #e5e5e5;
         }
 
         .sidebar-section {
@@ -79,23 +118,18 @@
             width: 56px;
             height: 48px;
             font-size: 18px;
-            color: #999;
+            color: #666;
             cursor: pointer;
-            transition: all 0.15s;
-            border-left: 3px solid transparent;
             user-select: none;
             position: relative;
         }
 
         .sidebar-nav-item:hover {
-            background: #f0f2f5;
-            color: #555;
+            background: #e5e5e5;
         }
 
         .sidebar-nav-item.active {
-            background: #fff0f3;
-            color: #e94560;
-            border-left-color: #e94560;
+            /* 选中状态无任何视觉变化 */
         }
 
         .sidebar-nav-item::after {
@@ -133,13 +167,13 @@
             position: fixed;
             left: 64px;
             bottom: 12px;
-            background: #fff;
+            background: #f2f2f2;
             border-radius: 8px;
             padding: 4px 0;
             z-index: 250;
             min-width: 130px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-            border: 1px solid #e8e8e8;
+            border: 1px solid #e0e0e0;
         }
 
         .sidebar-popup-item {
@@ -155,7 +189,7 @@
         }
 
         .sidebar-popup-item:hover {
-            background: #f0f2f5;
+            background: #e5e5e5;
             color: #333 !important;
         }
 
@@ -175,13 +209,14 @@
             flex-direction: column;
             overflow: hidden;
             min-width: 0;
+            padding-top: 40px;
         }
 
         .main-content {
             flex: 1;
             overflow-y: auto;
             padding: 16px;
-            background: #f0f2f5;
+            background: #f2f2f2;
         }
 
         @media (max-width: 768px) {
@@ -197,6 +232,151 @@
             .main-content {
                 padding: 10px;
             }
+        }
+
+        /* ──────── 折叠按钮（左上角） ──────── */
+        .tab-collapse-btn {
+            width: 20px;
+            height: 20px;
+            border: none !important;
+            outline: none !important;
+            cursor: pointer;
+            padding: 0;
+            flex-shrink: 0;
+            background: transparent !important;
+            border-radius: 0 !important;
+            position: relative;
+        }
+        .tab-collapse-btn::before {
+            content: '';
+            position: absolute;
+            left: 3px;
+            top: 3px;
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #999;
+            border-radius: 2px;
+            box-sizing: border-box;
+            background: linear-gradient(to right, #777 40%, transparent 40%);
+        }
+        .tab-collapse-btn:hover::before {
+            border-color: #777;
+        }
+
+        /* ──────── 窗口控制按钮（参考图风格） ──────── */
+        .tab-win-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            color: #888;
+            font-size: 12px;
+            transition: background 0.15s, color 0.15s;
+            flex-shrink: 0;
+        }
+        .tab-win-btn:hover {
+            background: #e5e5e5;
+            color: #555;
+        }
+        .tab-win-close:hover {
+            background: #e94560;
+            color: #fff;
+        }
+
+        /* ──────── 标签样式（参考图风格） ──────── */
+        .tab-add-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 18px;
+            color: #999;
+            flex-shrink: 0;
+            margin-right: 4px;
+            -webkit-app-region: no-drag;
+        }
+        .tab-add-btn:hover {
+            background: #ddd;
+            color: #666;
+        }
+        .tab-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #888;
+            white-space: nowrap;
+            user-select: none;
+            min-width: 0;
+            flex-shrink: 0;
+            margin-right: 4px;
+            position: relative;
+            -webkit-app-region: no-drag;
+        }
+        .tab-item:hover {
+            background: #ddd;
+            color: #555;
+        }
+        .tab-item.active {
+            background: #fff;
+            color: #333;
+        }
+        .tab-item .tab-close {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            font-size: 12px;
+            line-height: 1;
+            color: #aaa;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .tab-item .tab-close:hover {
+            background: rgba(0,0,0,0.1);
+            color: #666;
+        }
+        .tab-item .tab-icon {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+        .tab-item .tab-icon svg {
+            width: 14px;
+            height: 14px;
+            vertical-align: middle;
+        }
+
+        /* ──────── 侧边栏折叠 ──────── */
+        .sidebar-collapsed .sidebar {
+            width: 0;
+            min-width: 0;
+            overflow: hidden;
+            border-right: none;
+        }
+        .sidebar-collapsed .sidebar-brand,
+        .sidebar-collapsed .sidebar-section,
+        .sidebar-collapsed .sidebar-bottom {
+            display: none;
+        }
+        .sidebar-collapsed .sidebar-popup {
+            display: none !important;
         }
 
         .card {
@@ -786,19 +966,23 @@
     <noscript><link rel="stylesheet" href="js/fb.css?v=2"><link rel="stylesheet" href="js/kb.css"></noscript>
 </head>
 <body>
+    <!-- 全局标题栏（贯穿窗口两端） -->
+    <div class="app-header" id="app-header">
+        <div class="header-left" id="header-left"></div>
+        <div class="header-center" id="header-center"></div>
+        <div class="header-right" id="header-right"></div>
+    </div>
+
     <!-- 关于弹窗 overlay -->
     <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
 
     <nav class="sidebar">
         <div class="sidebar-section">
-            <div class="sidebar-nav-item active" data-view="home" data-label="主页" onclick="navigateTo('home')">
+            <div class="sidebar-nav-item" data-view="home" data-label="主页" onclick="tabManager.openOrCreateTab('home')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             </div>
-            <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="navigateTo('fb')">
+            <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="tabManager.openOrCreateTab('fb')" onauxclick="if(event.button===1)tabManager.openOrCreateTab('fb',true)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            </div>
-            <div class="sidebar-nav-item" data-view="kb" data-label="知识库" onclick="navigateTo('kb')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
             </div>
         </div>
         <div class="sidebar-spacer"></div>
@@ -824,89 +1008,7 @@
     </nav>
 
     <main class="main-area">
-        <div class="main-content">
-            <div class="container" id="home-view">
-
-        <div class="card">
-            <h2>选择功能</h2>
-            <div class="tools-grid">
-                <div class="tool-item" onclick="selectTool('to_docx')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2b5797" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></div>
-                    <div class="name">批量提取</div>
-                    <div class="desc">PDF/TXT → DOCX</div>
-                </div>
-                <div class="tool-item" onclick="selectTool('to_index')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#217346" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg></div>
-                    <div class="name">构建索引</div>
-                    <div class="desc">目录 → Excel索引表</div>
-                </div>
-                <div class="tool-item" onclick="selectTool('to_compare')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d24726" stroke-width="1.5"><rect x="2" y="4" width="9" height="16" rx="1"/><rect x="13" y="4" width="9" height="16" rx="1"/><line x1="7" y1="9" x2="7" y2="16"/><line x1="18" y1="8" x2="18" y2="14"/></svg></div>
-                    <div class="name">文档比较</div>
-                    <div class="desc">对比"原稿"和"终稿"</div>
-                </div>
-                <div class="tool-item" onclick="selectTool('to_pdf')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b30b00" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="7" font-weight="bold" fill="#b30b00">PDF</text></svg></div>
-                    <div class="name">批量转化</div>
-                    <div class="desc">DOCX → PDF</div>
-                </div>
-                <div class="tool-item" onclick="selectTool('to_pageNum')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#563d7c" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="8" font-weight="bold" fill="#563d7c">#</text></svg></div>
-                    <div class="name">添加页码</div>
-                    <div class="desc">批量添加页码</div>
-                </div>
-                <div class="tool-item" onclick="selectTool('to_redhead')">
-                    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e94560" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/><circle cx="12" cy="12" r="4" fill="#e94560" fill-opacity="0.2"/></svg></div>
-                    <div class="name">文件套红</div>
-                    <div class="desc">生成红头文件</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card" id="toolPanel" style="display: none;">
-            <h2 id="toolTitle">功能名称</h2>
-
-            <!-- 目录选择 / 上传区域 -->
-            <div class="form-group" id="folderSelectGroup">
-                <div style="display: flex; gap: 8px;">
-                    <input type="text" id="workdir" placeholder="选择本机目录或从文件库选择" readonly style="flex:1;">
-                    <button type="button" class="btn" id="selectFolderBtn" style="width: auto; padding: 8px 12px;" onclick="selectFolder()">本机选择</button>
-                    <button type="button" class="btn" id="selectFromKbBtn" style="width: auto; padding: 8px 12px;" onclick="showKbSelector()">文件库</button>
-                </div>
-            </div>
-
-
-
-            <!-- 文件选择列表（统一双列面板） -->
-            <div id="filePanel" style="display: none;">
-                <div style="margin-bottom: 5px;">
-                    <label id="fileLabel" style="margin:0;">👇目录文件：</label>
-                </div>
-                <div class="file-row">
-                    <div id="leftList" class="file-list" style="flex:1;"></div>
-                    <div id="rightList" class="file-list" style="flex:1;"></div>
-                </div>
-            </div>
-
-            <!-- 按钮区域 -->
-            <div style="display: flex; gap: 8px; align-items: center;">
-                <button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📂 查看</button>
-                <button class="btn" id="openDirBtn" onclick="openWorkdir()" style="width: auto; padding: 10px 16px; white-space: nowrap;">📁 打开</button>
-                <button class="btn" onclick="runTool()" style="flex: 1;">执行</button>
-            </div>
-
-            <!-- 文件列表展示（紧凑） -->
-            <div id="fileListPanel" style="display: none; margin-top: 8px;">
-                <div id="fileList" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
-            </div>
-
-            <p class="intro" id="toolIntro" style="margin-top: 10px;"></p>
-        </div>
-
-        <div id="result"></div>
-            </div>
-            <div id="content-view" style="display: none; height: 100%; min-height: 400px;"></div>
-        </div>
+        <div class="main-content" id="main-content"></div>
     </main>
 
     <!-- 配置弹窗 -->

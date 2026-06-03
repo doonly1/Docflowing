@@ -193,6 +193,7 @@ var FileBase = {
             h += '<button onclick="FileBase.search()">🔍</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
+            h += '<button onclick="navigateTo(\'tools\')" title="文档处理工具">🔧 工具</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
             h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
             h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px">🗑️</button>';
@@ -562,6 +563,7 @@ var FileBase = {
             h += '</div>';
             h += '</div>';
             h += '<button onclick="FileBase.downloadAction()">下载</button>';
+            h += '<button onclick="navigateTo(\'tools\')" title="文档处理工具">🔧 工具</button>';
             h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px;cursor:pointer;color:#888;transition:color 0.15s" onmouseover="this.style.color=\'#e94560\'" onmouseout="this.style.color=\'#888\'">🗑️</button>';
             h += '<input type="file" id="fb-file-upload-input" multiple style="display:none" onchange="FileBase.handleFileUpload(this)">';
             h += '<input type="file" id="fb-folder-upload-input" webkitdirectory style="display:none" onchange="FileBase.handleFolderUpload(this)">';
@@ -811,14 +813,14 @@ var FileBase = {
         console.log('[FB Locate] targetPath from localStorage:', targetPath);
         if (targetPath) {
             self._lsDel('docflow_target_file_path');
-            // 归一化目标路径：转小写、统一为正斜杠、去掉两端空白
-            var normTarget = targetPath.trim().toLowerCase().replace(/\\/g, '/');
+            // 归一化目标路径：转小写、统一为正斜杠、去掉两端空白和尾部斜杠
+            var normTarget = targetPath.trim().toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
             console.log('[FB Locate] normalized target:', normTarget);
             var rows = div.querySelectorAll('.fb-file-row');
             var found = false;
             for (var ri = 0; ri < rows.length; ri++) {
                 var rowPath = rows[ri].getAttribute('data-local-path') || '';
-                var normRow = rowPath.trim().toLowerCase().replace(/\\/g, '/');
+                var normRow = rowPath.trim().toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
                 console.log('[FB Locate] row[' + ri + '] data-local-path:', rowPath, '| normalized:', normRow);
                 if (normRow === normTarget) {
                     rows[ri].classList.add('selected');

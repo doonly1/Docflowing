@@ -583,9 +583,11 @@
         }
 
         // ==================== 拖拽支持 ====================
-        const workdirInput = document.getElementById('workdir');
-        workdirInput.addEventListener('dragover', function(e) { e.preventDefault(); });
-        workdirInput.addEventListener('drop', function(e) { e.preventDefault(); });
+        var workdirInput = document.getElementById('workdir');
+        if (workdirInput) {
+            workdirInput.addEventListener('dragover', function(e) { e.preventDefault(); });
+            workdirInput.addEventListener('drop', function(e) { e.preventDefault(); });
+        }
 
         // ==================== 配置管理 ====================
         let userConfig = null;
@@ -1154,7 +1156,7 @@
                 var toolEl = document.querySelector('.tool-item[onclick*="' + currentTool + '"]');
                 if (toolEl) toolEl.classList.add('active');
                 var toolInfo = tools[currentTool];
-                if (toolInfo) {
+                if (toolInfo && document.getElementById('toolTitle')) {
                     document.getElementById('toolTitle').textContent = toolInfo.name;
                     var introEl = document.getElementById('toolIntro');
                     introEl.textContent = toolInfo.intro;
@@ -1171,58 +1173,14 @@
 
         document.addEventListener('DOMContentLoaded', async function() {
             await initApp();
-            setTimeout(function() { _restoreLastView(); }, 300);
+            setTimeout(function() {
+                if (typeof tabManager !== 'undefined') {
+                    tabManager.init();
+                }
+            }, 300);
         });
 
-        function _restoreLastView() {
-            var savedView = localStorage.getItem('docflow_current_view');
-            if (savedView === 'fb') {
-                _loadScript('js/fb.js', function() {
-                    var savedKbId = localStorage.getItem('docflow_current_fb_id');
-                    if (savedKbId && typeof FileBase !== 'undefined') {
-                        FileBase.currentFbId = savedKbId;
-                        FileBase.fbCurrentPermission = localStorage.getItem('docflow_current_fb_permission') || 'view';
-                        FileBase.fbName = localStorage.getItem('docflow_current_fb_name') || '';
-                        FileBase.fbLocalPath = localStorage.getItem('docflow_current_fb_local_path') || '';
-                        FileBase.fbDisplayPath = localStorage.getItem('docflow_current_fb_display_path') || '';
-                        FileBase.fbCanEdit = FileBase.fbCurrentPermission === 'edit' || FileBase.fbCurrentPermission === 'manage';
-                        FileBase.fbCanManage = FileBase.fbCurrentPermission === 'manage';
-                        var savedSubdir = localStorage.getItem('docflow_current_subdir');
-                        if (savedSubdir) {
-                            FileBase.fbLocalCurrentSubdir = savedSubdir;
-                            var parts = savedSubdir.replace(/\\/g, '/').split('/');
-                            FileBase.currentPath = [
-                                { id: savedKbId, name: FileBase.fbName || '未知文件库', type: 'kb' }
-                            ];
-                            for (var i = 0; i < parts.length; i++) {
-                                if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
-                            }
-                        }
-                    }
-                    var navItems = document.querySelectorAll('.sidebar-nav-item');
-                    for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
-                    var navItem = document.querySelector('.sidebar-nav-item[data-view="fb"]');
-                    if (navItem) navItem.classList.add('active');
-                    var homeView = document.getElementById('home-view');
-                    var kbView = document.getElementById('content-view');
-                    if (homeView) homeView.style.display = 'none';
-                    if (kbView) kbView.style.display = '';
-                    if (typeof FileBase !== 'undefined') FileBase.init();
-                });
-            } else if (savedView === 'kb') {
-                var navItems = document.querySelectorAll('.sidebar-nav-item');
-                for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
-                var navItem = document.querySelector('.sidebar-nav-item[data-view="kb"]');
-                if (navItem) navItem.classList.add('active');
-                var homeView = document.getElementById('home-view');
-                var kbView = document.getElementById('content-view');
-                if (homeView) homeView.style.display = 'none';
-                if (kbView) kbView.style.display = '';
-                if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init();
-            }
-        }
-
-function toggleSidebarMenu(e) {
+        function toggleSidebarMenu(e) {
     if (e) e.stopPropagation();
     var popup = document.getElementById('sidebar-popup');
     if (!popup) return;
@@ -1262,70 +1220,398 @@ document.addEventListener('click', function(e) {
 });
 
 function navigateTo(view) {
-    var prevView = localStorage.getItem('docflow_current_view');
-    localStorage.setItem('docflow_current_view', view);
+    if (view === 'config') {
+        if (typeof openConfig !== 'undefined') openConfig();
+    } else if (view === 'about') {
+        if (typeof showAbout !== 'undefined') showAbout();
+    } else if (view === 'tools') {
+        if (typeof tabManager !== 'undefined') tabManager.createTab('tools', true);
+    } else {
+        if (typeof tabManager !== 'undefined') tabManager.openOrCreateTab(view);
+    }
+}
 
-    var navItems = document.querySelectorAll('.sidebar-nav-item');
-    for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
-    var navItem = document.querySelector('.sidebar-nav-item[data-view="' + view + '"]');
-    if (navItem) navItem.classList.add('active');
+// ==================== 侧边栏折叠 ====================
+function toggleSidebarCollapse() {
+    document.body.classList.toggle('sidebar-collapsed');
+    // 重新渲染标签栏以更新折叠按钮图标
+    if (typeof tabManager !== 'undefined') tabManager._renderBar();
+    localStorage.setItem('docflow_sidebar_collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0');
+}
 
-    var kbView = document.getElementById('content-view');
-    var homeView = document.getElementById('home-view');
+// ==================== 窗口控制（桌面版 pywebview） ====================
+function windowMinimize() {
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.windowMinimize) {
+            window.pywebview.api.windowMinimize();
+        }
+    } catch(e) { /* 浏览器中忽略 */ }
+}
+function windowMaximizeRestore() {
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.windowMaximize) {
+            window.pywebview.api.windowMaximize();
+        }
+    } catch(e) { /* 浏览器中忽略 */ }
+}
+function windowClose() {
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.windowClose) {
+            window.pywebview.api.windowClose();
+        } else {
+            window.close();
+        }
+    } catch(e) { /* 浏览器中忽略 */ }
+}
 
-    if (view === 'home') {
-        localStorage.removeItem('docflow_current_fb_id');
-        localStorage.removeItem('docflow_current_fb_name');
-        localStorage.removeItem('docflow_current_fb_local_path');
-        localStorage.removeItem('docflow_current_fb_display_path');
-        localStorage.removeItem('docflow_current_fb_permission');
-        if (kbView) kbView.style.display = 'none';
-        if (homeView) homeView.style.display = '';
-        if (typeof FileBase !== 'undefined') FileBase.currentFbId = null;
-    } else if (view === 'fb') {
-        if (homeView) homeView.style.display = 'none';
-        if (kbView) kbView.style.display = '';
-        // 捕获进入 fb 分支前的旧视图，以判断是从外部切换还是已在文件库内
+// ==================== Tab Manager - 浏览器风格多标签页 ====================
+window.tabManager = {
+    tabs: [],
+    nextId: 1,
+    activeTabId: null,
+
+    init: function() {
+        // 恢复侧边栏状态
+        if (localStorage.getItem('docflow_sidebar_collapsed') === '1') {
+            document.body.classList.add('sidebar-collapsed');
+        }
+        // 应用启动时创建 home 标签（KB 会话）
+        this.createTab('home');
+        // 更新 sidebar 高亮
+        this._updateSidebar('home');
+    },
+
+    _getTabIcon: function(type) {
+        switch (type) {
+            case 'home':
+                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>';
+            case 'fb':
+                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>';
+            case 'tools':
+                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>';
+            default:
+                return '';
+        }
+    },
+
+    _getTabTitle: function(tab) {
+        switch (tab.type) {
+            case 'home': return '首页';
+            case 'fb': return tab.state.fbName || '文件库';
+            case 'tools': return tab.state.toolName || '工具';
+            default: return tab.type;
+        }
+    },
+
+    _updateSidebar: function(type) {
+        var navItems = document.querySelectorAll('.sidebar-nav-item');
+        for (var i = 0; i < navItems.length; i++) navItems[i].classList.remove('active');
+        var navItem = document.querySelector('.sidebar-nav-item[data-view="' + type + '"]');
+        if (navItem) navItem.classList.add('active');
+    },
+
+    createTab: function(type, forceNew) {
+        // home 标签始终只有唯一一个
+        if (type === 'home') {
+            var existing = this._findByType('home');
+            if (existing) { this.switchTab(existing.id); return existing; }
+        }
+
+        // 非 home 标签：forceNew=false 时复用同类型无标识标签
+        if (!forceNew && type !== 'home') {
+            for (var i = 0; i < this.tabs.length; i++) {
+                if (this.tabs[i].type === type && !this.tabs[i]._identified) {
+                    this.switchTab(this.tabs[i].id);
+                    return this.tabs[i];
+                }
+            }
+        }
+
+        var id = 't' + (this.nextId++);
+        var tab = { id: id, type: type, state: {}, _identified: false };
+        this.tabs.push(tab);
+        this.switchTab(id);
+        this._renderBar();
+        return tab;
+    },
+
+    openOrCreateTab: function(type, forceNew) {
+        if (type === 'home') { this.createTab('home'); return; }
+        if (forceNew) { this.createTab(type, true); return; }
+        // 复用同类型无标识标签
+        for (var i = 0; i < this.tabs.length; i++) {
+            if (this.tabs[i].type === type && !this.tabs[i]._identified) {
+                this.switchTab(this.tabs[i].id);
+                return;
+            }
+        }
+        this.createTab(type, false);
+    },
+
+    switchTab: function(id) {
+        // 保存当前标签状态
+        if (this.activeTabId) this._saveTabState(this.activeTabId);
+
+        this.activeTabId = id;
+        this._renderBar();
+        this._renderContent(id);
+    },
+
+    closeTab: function(id) {
+        var idx = -1;
+        for (var i = 0; i < this.tabs.length; i++) {
+            if (this.tabs[i].id === id) { idx = i; break; }
+        }
+        if (idx === -1 || this.tabs[idx].type === 'home') return;
+
+        this.tabs.splice(idx, 1);
+
+        if (this.activeTabId === id) {
+            if (this.tabs.length > 0) {
+                var newIdx = Math.min(idx, this.tabs.length - 1);
+                this.switchTab(this.tabs[newIdx].id);
+            }
+        } else {
+            this._renderBar();
+        }
+    },
+
+    _findByType: function(type) {
+        for (var i = 0; i < this.tabs.length; i++) {
+            if (this.tabs[i].type === type) return this.tabs[i];
+        }
+        return null;
+    },
+
+    _saveTabState: function(id) {
+        var tab = this._findById(id);
+        if (!tab) return;
+        switch (tab.type) {
+            case 'home':
+                tab.state = {
+                    sessionId: typeof WikiKnowledge !== 'undefined' ? WikiKnowledge.sessionId : null
+                };
+                break;
+            case 'fb':
+                if (typeof FileBase !== 'undefined') {
+                    tab.state = {
+                        fbId: FileBase.currentFbId,
+                        fbName: FileBase.fbName || '',
+                        fbLocalPath: FileBase.fbLocalPath || '',
+                        fbDisplayPath: FileBase.fbDisplayPath || '',
+                        fbPermission: FileBase.fbCurrentPermission || '',
+                        fbSubdir: FileBase.fbLocalCurrentSubdir || '',
+                        fbCurrentPath: FileBase.currentPath ? JSON.parse(JSON.stringify(FileBase.currentPath)) : []
+                    };
+                }
+                break;
+            case 'tools':
+                var workdirEl = document.getElementById('workdir');
+                var selDir = getSelectedDirectory();
+                tab.state = {
+                    currentTool: currentTool || 'to_docx',
+                    workdirValue: workdirEl ? workdirEl.value : '',
+                    fbId: workdirEl ? workdirEl.getAttribute('data-fb-id') : null,
+                    fbSubdir: workdirEl ? workdirEl.getAttribute('data-fb-subdir') : '',
+                    selectedFiles: getCheckedFiles()
+                };
+                break;
+        }
+    },
+
+    _findById: function(id) {
+        for (var i = 0; i < this.tabs.length; i++) {
+            if (this.tabs[i].id === id) return this.tabs[i];
+        }
+        return null;
+    },
+
+    _renderBar: function() {
+        var left = document.getElementById('header-left');
+        var center = document.getElementById('header-center');
+        var right = document.getElementById('header-right');
+        if (!left || !center || !right) return;
+
+        left.innerHTML = '<button class="tab-collapse-btn" onclick="toggleSidebarCollapse()" title="折叠/展开侧边栏"></button>';
+
+        var centerHtml = '<button class="tab-add-btn" onclick="tabManager.createTab(\'home\')" title="新建标签页">+</button>';
+        for (var i = 0; i < this.tabs.length; i++) {
+            var t = this.tabs[i];
+            var isActive = t.id === this.activeTabId;
+            var cls = 'tab-item' + (isActive ? ' active' : '');
+            var closeBtn = t.type !== 'home'
+                ? '<span class="tab-close" onclick="event.stopPropagation();tabManager.closeTab(\'' + t.id + '\')">✕</span>'
+                : '';
+            centerHtml += '<div class="' + cls + '" onclick="tabManager.switchTab(\'' + t.id + '\')" title="' + this._getTabTitle(t) + '">' +
+                this._getTabIcon(t.type) +
+                '<span>' + this._getTabTitle(t) + '</span>' +
+                closeBtn +
+                '</div>';
+        }
+        center.innerHTML = centerHtml;
+
+        right.innerHTML =
+            '<button class="tab-win-btn" onclick="windowMinimize()" title="最小化">' +
+            '<svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +
+            '<button class="tab-win-btn" onclick="windowMaximizeRestore()" title="最大化">' +
+            '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
+            '<button class="tab-win-btn tab-win-close" onclick="windowClose()" title="关闭">' +
+            '<svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="2" x2="10" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="2" x2="2" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
+    },
+
+    _renderContent: function(id) {
+        var tab = this._findById(id);
+        if (!tab) return;
+
+        var mc = document.getElementById('main-content');
+        if (!mc) return;
+        mc.innerHTML = '';
+
+        this._updateSidebar(tab.type === 'home' ? 'home' : tab.type);
+
+        switch (tab.type) {
+            case 'home': this._renderHome(tab, mc); break;
+            case 'fb': this._renderFb(tab, mc); break;
+            case 'tools': this._renderTools(tab, mc); break;
+        }
+    },
+
+    _renderHome: function(tab, container) {
+        // 渲染 KB 会话界面作为首页
+        var contentDiv = document.createElement('div');
+        contentDiv.id = 'content-view';
+        contentDiv.style.cssText = 'height:100%;min-height:400px;';
+        container.appendChild(contentDiv);
+
+        var self = this;
+        var loadKb = function() {
+            if (typeof WikiKnowledge !== 'undefined') {
+                WikiKnowledge.init();
+                // 恢复会话
+                if (tab.state && tab.state.sessionId) {
+                    sessionStorage.setItem('kb_session_id', tab.state.sessionId);
+                }
+            }
+        };
+        if (typeof WikiKnowledge !== 'undefined') {
+            loadKb();
+        } else {
+            _loadScript('js/kb.js', function() {
+                setTimeout(loadKb, 200);
+            });
+        }
+    },
+
+    _renderFb: function(tab, container) {
+        var contentDiv = document.createElement('div');
+        contentDiv.id = 'content-view';
+        contentDiv.style.cssText = 'height:100%;min-height:400px;';
+        container.appendChild(contentDiv);
+
+        // 恢复 FB 状态
+        if (tab.state && tab.state.fbId) {
+            localStorage.setItem('docflow_current_fb_id', tab.state.fbId);
+            localStorage.setItem('docflow_current_fb_name', tab.state.fbName || '');
+            localStorage.setItem('docflow_current_fb_local_path', tab.state.fbLocalPath || '');
+            localStorage.setItem('docflow_current_fb_display_path', tab.state.fbDisplayPath || '');
+            localStorage.setItem('docflow_current_fb_permission', tab.state.fbPermission || 'view');
+            localStorage.setItem('docflow_current_subdir', tab.state.fbSubdir || '');
+        } else {
+            localStorage.removeItem('docflow_current_fb_id');
+            localStorage.removeItem('docflow_current_subdir');
+        }
+
+        var self = this;
         _loadScript('js/fb.js', function() {
             if (typeof FileBase !== 'undefined') {
-                if (prevView === 'fb') {
-                    // 已在文件库视图内点击导航 → 回到文件库列表
-                    FileBase.currentFbId = null;
-                } else {
-                    // 从其他视图（如知识库/主页）切换 → 尝试恢复 localStorage 中的文件库
-                    var locFbId = localStorage.getItem('docflow_current_fb_id');
-                    var locSubdir = localStorage.getItem('docflow_current_subdir');
-                    console.log('[nav FB] locFbId:', locFbId, 'locSubdir:', locSubdir);
-                    if (locFbId) {
-                        FileBase.currentFbId = locFbId;
-                        FileBase.fbLocalCurrentSubdir = locSubdir || '';
-                        var parts = (locSubdir || '').replace(/\\/g, '/').split('/');
-                        FileBase.currentPath = [{ id: locFbId, name: '文件库', type: 'kb' }];
-                        for (var i = 0; i < parts.length; i++) {
-                            if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
-                        }
-                        localStorage.removeItem('docflow_current_fb_id');
-                        localStorage.removeItem('docflow_current_subdir');
-                    } else {
-                        FileBase.currentFbId = null;
+                if (tab.state && tab.state.fbId) {
+                    FileBase.currentFbId = tab.state.fbId;
+                    FileBase.fbName = tab.state.fbName || '';
+                    FileBase.fbLocalPath = tab.state.fbLocalPath || '';
+                    FileBase.fbDisplayPath = tab.state.fbDisplayPath || '';
+                    FileBase.fbCurrentPermission = tab.state.fbPermission || 'view';
+                    FileBase.fbCanEdit = tab.state.fbPermission === 'edit' || tab.state.fbPermission === 'manage';
+                    FileBase.fbCanManage = tab.state.fbPermission === 'manage';
+                    FileBase.fbLocalCurrentSubdir = tab.state.fbSubdir || '';
+                    if (tab.state.fbCurrentPath && tab.state.fbCurrentPath.length > 0) {
+                        FileBase.currentPath = JSON.parse(JSON.stringify(tab.state.fbCurrentPath));
                     }
+                } else {
+                    FileBase.currentFbId = null;
                 }
                 FileBase.init();
             }
         });
-    } else if (view === 'kb') {
-        if (homeView) homeView.style.display = 'none';
-        if (kbView) kbView.style.display = '';
-        _loadScript('js/kb.js', function() {
-            if (typeof WikiKnowledge !== 'undefined') { WikiKnowledge.init(); }
-            else { setTimeout(function() { if (typeof WikiKnowledge !== 'undefined') WikiKnowledge.init(); }, 500); }
-        });
-    } else if (view === 'config') {
-        if (typeof openConfig !== 'undefined') openConfig();
-    } else if (view === 'about') {
-        if (typeof showAbout !== 'undefined') showAbout();
+    },
+
+    _renderTools: function(tab, container) {
+        // 渲染工具页面（原首页内容）
+        container.innerHTML =
+            '<div class="container" id="tools-view">' +
+            '<div class="card">' +
+            '<h2>选择功能</h2>' +
+            '<div class="tools-grid">' +
+            '<div class="tool-item" onclick="selectTool(\'to_docx\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2b5797" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></div>' +
+            '<div class="name">批量提取</div><div class="desc">PDF/TXT → DOCX</div></div>' +
+            '<div class="tool-item" onclick="selectTool(\'to_index\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#217346" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg></div>' +
+            '<div class="name">构建索引</div><div class="desc">目录 → Excel索引表</div></div>' +
+            '<div class="tool-item" onclick="selectTool(\'to_compare\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d24726" stroke-width="1.5"><rect x="2" y="4" width="9" height="16" rx="1"/><rect x="13" y="4" width="9" height="16" rx="1"/><line x1="7" y1="9" x2="7" y2="16"/><line x1="18" y1="8" x2="18" y2="14"/></svg></div>' +
+            '<div class="name">文档比较</div><div class="desc">对比"原稿"和"终稿"</div></div>' +
+            '<div class="tool-item" onclick="selectTool(\'to_pdf\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b30b00" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="7" font-weight="bold" fill="#b30b00">PDF</text></svg></div>' +
+            '<div class="name">批量转化</div><div class="desc">DOCX → PDF</div></div>' +
+            '<div class="tool-item" onclick="selectTool(\'to_pageNum\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#563d7c" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="18" text-anchor="middle" font-size="8" font-weight="bold" fill="#563d7c">#</text></svg></div>' +
+            '<div class="name">添加页码</div><div class="desc">批量添加页码</div></div>' +
+            '<div class="tool-item" onclick="selectTool(\'to_redhead\')">' +
+            '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e94560" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/><circle cx="12" cy="12" r="4" fill="#e94560" fill-opacity="0.2"/></svg></div>' +
+            '<div class="name">文件套红</div><div class="desc">生成红头文件</div></div>' +
+            '</div></div>' +
+            '<div class="card" id="toolPanel" style="display:none">' +
+            '<h2 id="toolTitle">功能名称</h2>' +
+            '<div class="form-group" id="folderSelectGroup">' +
+            '<div style="display:flex;gap:8px">' +
+            '<input type="text" id="workdir" placeholder="选择本机目录或从文件库选择" readonly style="flex:1">' +
+            '<button type="button" class="btn" id="selectFolderBtn" style="width:auto;padding:8px 12px" onclick="selectFolder()">本机选择</button>' +
+            '<button type="button" class="btn" id="selectFromKbBtn" style="width:auto;padding:8px 12px" onclick="showKbSelector()">文件库</button>' +
+            '</div></div>' +
+            '<div id="filePanel" style="display:none">' +
+            '<div style="margin-bottom:5px"><label id="fileLabel" style="margin:0">👇目录文件：</label></div>' +
+            '<div class="file-row"><div id="leftList" class="file-list" style="flex:1"></div><div id="rightList" class="file-list" style="flex:1"></div></div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center">' +
+            '<button class="btn" id="showFileListBtn" onclick="toggleFileList()" style="width:auto;padding:10px 16px;white-space:nowrap">📂 查看</button>' +
+            '<button class="btn" id="openDirBtn" onclick="openWorkdir()" style="width:auto;padding:10px 16px;white-space:nowrap">📁 打开</button>' +
+            '<button class="btn" onclick="runTool()" style="flex:1">执行</button></div>' +
+            '<div id="fileListPanel" style="display:none;margin-top:8px"><div id="fileList" style="display:flex;flex-wrap:wrap;gap:4px"></div></div>' +
+            '<p class="intro" id="toolIntro" style="margin-top:10px"></p></div>' +
+            '<div id="result"></div></div>';
+
+        // 恢复工具状态
+        var savedTool = (tab.state && tab.state.currentTool) || 'to_docx';
+        if (tab.state && tab.state.workdirValue) {
+            var wd = document.getElementById('workdir');
+            if (wd) {
+                wd.value = tab.state.workdirValue;
+                if (tab.state.fbId) {
+                    wd.setAttribute('data-fb-id', tab.state.fbId);
+                    wd.setAttribute('data-fb-subdir', tab.state.fbSubdir || '');
+                }
+            }
+        }
+        selectTool(savedTool);
+
+        // 绑定拖拽支持
+        var wd = document.getElementById('workdir');
+        if (wd) {
+            wd.addEventListener('dragover', function(e) { e.preventDefault(); });
+            wd.addEventListener('drop', function(e) { e.preventDefault(); });
+        }
     }
-}
+};
 
 // ==================== 文件库选择器 ====================
 

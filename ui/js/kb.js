@@ -10,6 +10,9 @@ var WikiKnowledge = {
     init: function() {
         if (!document.getElementById('kb-messages')) {
             this._renderView();
+            // 初始状态添加 initial class 以便居中
+            var container = document.querySelector('.kb-chat-container');
+            if (container) container.classList.add('initial');
             // 从 sessionStorage 恢复会话
             var savedId = sessionStorage.getItem('kb_session_id');
             if (savedId) {
@@ -344,6 +347,8 @@ var WikiKnowledge = {
         initialArea.style.display = 'none';
         if (header) header.style.display = '';
         if (messages) messages.style.display = 'flex';
+        var container = document.querySelector('.kb-chat-container');
+        if (container) container.classList.remove('initial');
     },
 
     _switchToInitial: function() {
@@ -354,6 +359,8 @@ var WikiKnowledge = {
         initialArea.style.display = 'flex';
         if (header) header.style.display = 'none';
         if (messages) messages.style.display = 'none';
+        var container = document.querySelector('.kb-chat-container');
+        if (container) container.classList.add('initial');
     },
 
     handleKeyDown: function(event) {

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import platform
 import random
 import re
 import sqlite3
@@ -14,10 +15,21 @@ from server.workspace import _get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
-# FTS5 simple 分词器扩展路径
+# FTS5 simple 分词器扩展路径（平台相关）
 _EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools')
-_FTS_EXTENSION = os.path.join(_EXTENSION_DIR, 'simple.dll')
-assert os.path.exists(_EXTENSION_DIR), f"tools directory not found: {_EXTENSION_DIR}"
+_SYS = platform.system()
+_MACH = platform.machine()
+
+if _SYS == 'Windows':
+    _FTS_NAME = 'simple.dll'
+elif _SYS == 'Linux':
+    _FTS_NAME = 'simple.so'
+elif _SYS == 'Darwin':
+    # macOS: Intel (x86_64) / Apple Silicon (arm64)
+    _FTS_NAME = 'simple_arm64.dylib' if _MACH == 'arm64' else 'simple_x64.dylib'
+else:
+    _FTS_NAME = ''
+_FTS_EXTENSION = os.path.join(_EXTENSION_DIR, _FTS_NAME)
 
 SCHEMA_VERSION = 3
 
@@ -511,7 +523,7 @@ class SessionDB:
         """
         if not query or not query.strip():
             return []
-        limit = min(max(limit, 1), 20)
+        limit = min(max(limit, 1), 50)
         keywords = query.strip().split()
         if not keywords:
             return []

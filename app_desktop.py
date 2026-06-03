@@ -22,8 +22,11 @@ def _run_startup_scripts():
 
     scripts = [
         # ('fetch_github_hosts.py', False),  # 一次性任务（已禁用）
-        ('WordKeepAlive.py', True),         # 守护进程
     ]
+
+    # WordKeepAlive 仅 Windows 可用
+    if sys.platform == 'win32':
+        scripts.append(('WordKeepAlive.py', True))
 
     for script_name, is_daemon in scripts:
         script_path = os.path.join(tools_dir, script_name)
@@ -61,6 +64,15 @@ def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
 class JsBridge:
     """JS Bridge: 暴露给前端调用的原生 API"""
 
+    def __init__(self):
+        self._window = None
+
+    def _get_window(self):
+        if self._window is None:
+            import webview
+            self._window = webview.active_window()
+        return self._window
+
     def selectDirectory(self):
         """弹出 Windows 原生目录选择对话框"""
         import tkinter as tk
@@ -86,6 +98,50 @@ class JsBridge:
         )
         root.destroy()
         return path or ''
+
+    def windowMinimize(self):
+        """最小化窗口"""
+        try:
+            w = self._get_window()
+            if w:
+                w.minimize()
+                return True
+        except Exception as e:
+            logger.warning("windowMinimize error: %s", e)
+        return False
+
+    def windowMaximize(self):
+        """最大化窗口"""
+        try:
+            w = self._get_window()
+            if w:
+                w.maximize()
+                return True
+        except Exception as e:
+            logger.warning("windowMaximize error: %s", e)
+        return False
+
+    def windowRestore(self):
+        """恢复窗口"""
+        try:
+            w = self._get_window()
+            if w:
+                w.restore()
+                return True
+        except Exception as e:
+            logger.warning("windowRestore error: %s", e)
+        return False
+
+    def windowClose(self):
+        """关闭窗口"""
+        try:
+            w = self._get_window()
+            if w:
+                w.destroy()
+                return True
+        except Exception as e:
+            logger.warning("windowClose error: %s", e)
+        return False
 
 
 # ==================== 主入口 ====================
@@ -138,7 +194,8 @@ def main():
         'height': win_h,
         'min_size': (800, 500),
         'resizable': True,
-        'easy_drag': False,
+        'frameless': True,
+        'easy_drag': True,
         'js_api': JsBridge(),
     }
     if win_x is not None:

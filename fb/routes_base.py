@@ -269,7 +269,7 @@ def list_fb():
 
     # 批量查询所有本地文件库的文件数（避免 N+1 SQL + 全量 JSON 解析）
     fb_file_counts = {}
-    local_fb_ids = [(row['id'], row['owner_id']) for row in visible_rows if 'filebase_type' not in row or row['filebase_type'] != 'net']
+    local_fb_ids = [(row['id'], row['owner_id']) for row in visible_rows if row['filebase_type'] not in ('net', 'remote')]
     if local_fb_ids:
         try:
             conditions = []

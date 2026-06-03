@@ -1,12 +1,49 @@
 .kb-chat-container {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 32px);
-    background: #fafaf8;
-    border-radius: 8px;
-    overflow: hidden;
-    font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", -apple-system, sans-serif;
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	height: calc(100vh - 40px);
+	background: #f2f2f2;
+	overflow: hidden;
+	font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", -apple-system, sans-serif;
+}
+/* 初始状态：初始区和输入框一起居中 */
+.kb-chat-container.initial {
+	justify-content: center;
+}
+.kb-chat-container.initial .kb-chat-initial-area {
+	flex: 0 0 auto;
+}
+.kb-chat-container.initial .kb-chat-input-area {
+	width: 100%;
+	max-width: 560px;
+	margin: 0 auto;
+	padding: 16px 20px 24px;
+	background: transparent;
+}
+
+/* 美化滚动条 */
+.kb-chat-container ::-webkit-scrollbar,
+.kb-chat-messages::-webkit-scrollbar,
+.kb-sidebar-content::-webkit-scrollbar {
+	width: 4px;
+	height: 4px;
+}
+.kb-chat-container ::-webkit-scrollbar-track,
+.kb-chat-messages::-webkit-scrollbar-track,
+.kb-sidebar-content::-webkit-scrollbar-track {
+	background: transparent;
+}
+.kb-chat-container ::-webkit-scrollbar-thumb,
+.kb-chat-messages::-webkit-scrollbar-thumb,
+.kb-sidebar-content::-webkit-scrollbar-thumb {
+	background: #ddd;
+	border-radius: 2px;
+}
+.kb-chat-container ::-webkit-scrollbar-thumb:hover,
+.kb-chat-messages::-webkit-scrollbar-thumb:hover,
+.kb-sidebar-content::-webkit-scrollbar-thumb:hover {
+	background: #ccc;
 }
 
 .kb-chat-header {
@@ -14,7 +51,7 @@
     align-items: center;
     justify-content: flex-end;
     padding: 12px 20px;
-    background: #fff;
+    background: #f2f2f2;
     flex-shrink: 0;
 }
 
@@ -95,7 +132,7 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    background: #fff;
+    background: #f2f2f2;
     user-select: text;
 }
 
@@ -404,7 +441,7 @@
 
 .kb-chat-input-area {
     padding: 16px 20px;
-    background: #fff;
+    background: #f2f2f2;
     flex-shrink: 0;
 }
 
@@ -412,8 +449,8 @@
     display: flex;
     align-items: flex-end;
     gap: 10px;
-    background: #fafaf8;
-    border: 1px solid #e8e8e8;
+    background: #fff;
+    border: 1px solid #e0e0e0;
     border-radius: 12px;
     padding: 10px 14px;
     transition: border-color 0.2s, box-shadow 0.2s;

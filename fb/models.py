@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS filebases (
     owner_id TEXT NOT NULL,
     filebase_type TEXT NOT NULL DEFAULT 'upload',
     local_path TEXT DEFAULT '',
-    is_synced_to_kb INTEGER NOT NULL DEFAULT 1,
+    is_synced_to_kb INTEGER NOT NULL DEFAULT 0,
     created_at REAL,
     updated_at REAL
 )
@@ -61,7 +61,10 @@ ALL_TABLES = [
 ]
 
 # 旧迁移保留以支持现有部署
-MIGRATIONS = []
+MIGRATIONS = [
+    # v1: 新文件库默认不同步（旧数据库表默认值为 1）
+    "ALTER TABLE filebases ALTER COLUMN is_synced_to_kb SET DEFAULT 0",
+]
 
 CREATE_INDEX_SHARED = [
     "CREATE INDEX IF NOT EXISTS idx_shared_nodes_filebase ON shared_nodes(filebase_id)",
