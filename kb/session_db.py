@@ -14,7 +14,12 @@ from server.workspace import _get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+# FTS5 simple 分词器扩展路径
+_EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools')
+_FTS_EXTENSION = os.path.join(_EXTENSION_DIR, 'simple.dll')
+assert os.path.exists(_EXTENSION_DIR), f"tools directory not found: {_EXTENSION_DIR}"
+
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -57,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestam
 FTS_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,
-    tokenize='unicode61'
+    tokenize='{tokenizer}'
 );
 
 CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
@@ -102,6 +107,11 @@ class SessionDB:
         self.db_path = Path(db_path) if db_path else Path(data_dir) / 'state.db'
         self._lock = threading.Lock()
         self._write_count = 0
+        self._simple_loaded = False
+
+        # 启用扩展加载（Python < 3.12 需在 connect 前全局启用）
+        self._enable_sqlite_extensions()
+
         self._conn = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,
@@ -111,7 +121,41 @@ class SessionDB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+
+        # 加载 simple 分词器扩展
+        self._simple_loaded = self._load_fts_extension()
+        self._fts_tokenizer = 'simple' if self._simple_loaded else 'unicode61'
+
         self._init_schema()
+
+    @staticmethod
+    def _enable_sqlite_extensions() -> None:
+        """启用 SQLite 扩展加载能力。
+        Python < 3.12 需在 connect 前全局启用，>= 3.12 支持 per-connection 启用。"""
+        try:
+            sqlite3.enable_load_extension(True)
+        except AttributeError:
+            # Python >= 3.12：conn.enable_load_extension() 已足够
+            pass
+
+    def _load_fts_extension(self) -> bool:
+        """加载 FTS5 simple 分词器扩展。返回 True 表示加载成功。"""
+        if not os.path.isfile(_FTS_EXTENSION):
+            logger.warning("FTS5 simple 扩展未找到: %s，将使用 unicode61 作为备选", _FTS_EXTENSION)
+            return False
+        try:
+            conn = self._conn
+            # Python >= 3.12 per-connection 启用
+            try:
+                conn.enable_load_extension(True)
+            except AttributeError:
+                pass  # 已在全局启用
+            conn.load_extension(_FTS_EXTENSION)
+            logger.info("FTS5 simple 分词器扩展加载成功")
+            return True
+        except Exception as e:
+            logger.warning("加载 FTS5 simple 扩展失败 (%s): %s，将使用 unicode61 备选", _FTS_EXTENSION, e)
+            return False
 
     def _execute_write(self, fn: Callable[[sqlite3.Connection], Any]) -> Any:
         last_err: Optional[Exception] = None
@@ -153,6 +197,20 @@ class SessionDB:
         except Exception:
             pass
 
+    def _migrate_fts_v2_to_v3(self, cursor) -> None:
+        """迁移 FTS 表：删除旧 unicode61 表，用 simple 分词器重建并重新索引。"""
+        try:
+            cursor.execute("DROP TABLE IF EXISTS messages_fts")
+            cursor.executescript(FTS_SQL.format(tokenizer=self._fts_tokenizer))
+            cursor.execute(
+                "INSERT INTO messages_fts(rowid, content) "
+                "SELECT id, COALESCE(content, '') FROM messages"
+            )
+            logger.info("FTS 表已重建为 simple 分词器")
+        except Exception as e:
+            logger.error("FTS 迁移失败: %s", e)
+            raise
+
     def close(self):
         with self._lock:
             if self._conn:
@@ -170,22 +228,33 @@ class SessionDB:
         cursor.execute("SELECT version FROM schema_version LIMIT 1")
         row = cursor.fetchone()
         if row is None:
+            # 全新数据库
             cursor.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
                 (SCHEMA_VERSION,),
             )
-        elif row["version"] < 2:
-            # v1 → v2: add sources column
-            try:
-                cursor.execute("ALTER TABLE messages ADD COLUMN sources TEXT")
-            except sqlite3.OperationalError:
-                pass
-            cursor.execute("UPDATE schema_version SET version = 2")
+            cursor.executescript(FTS_SQL.format(tokenizer=self._fts_tokenizer))
+        else:
+            db_version = row["version"]
+            if db_version < 2:
+                # v1 → v2: add sources column
+                try:
+                    cursor.execute("ALTER TABLE messages ADD COLUMN sources TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                cursor.execute("UPDATE schema_version SET version = 2")
+                db_version = 2
 
-        try:
-            cursor.execute("SELECT * FROM messages_fts LIMIT 0")
-        except sqlite3.OperationalError:
-            cursor.executescript(FTS_SQL)
+            if db_version < 3:
+                # v2 → v3: migrate FTS to simple tokenizer
+                self._migrate_fts_v2_to_v3(cursor)
+                cursor.execute("UPDATE schema_version SET version = 3")
+            else:
+                # 确保 FTS 表存在
+                try:
+                    cursor.execute("SELECT * FROM messages_fts LIMIT 0")
+                except sqlite3.OperationalError:
+                    cursor.executescript(FTS_SQL.format(tokenizer=self._fts_tokenizer))
 
         self._conn.commit()
 
@@ -307,48 +376,164 @@ class SessionDB:
             sessions.append(s)
         return sessions
 
+    # ── 搜索辅助方法 ─────────────────────────────────────────────
+
+    @staticmethod
+    def _escape_fts_term(term: str) -> str:
+        """转义 FTS5 查询中的特殊字符，用双引号包裹。"""
+        escaped = term.replace('"', '""')
+        return f'"{escaped}"'
+
+    def _fts_search(
+        self,
+        keywords: List[str],
+        user_id: Optional[str],
+        limit: int,
+        mode: str = 'AND',
+    ) -> List[Dict[str, Any]]:
+        """FTS5 搜索，支持 AND/OR 模式。"""
+        if mode == 'AND':
+            fts_clause = ' '.join(self._escape_fts_term(k) for k in keywords)
+        else:
+            fts_clause = ' OR '.join(self._escape_fts_term(k) for k in keywords)
+
+        where_clauses = ["messages_fts MATCH ?"]
+        params: list = [fts_clause]
+        if user_id:
+            where_clauses.append("s.user_id = ?")
+            params.append(user_id)
+        params.append(limit)
+
+        sql = f"""
+            SELECT
+                m.id,
+                m.session_id,
+                m.role,
+                snippet(messages_fts, 0, '>>>', '<<<', '...', 120) AS snippet,
+                m.timestamp,
+                s.title AS session_title
+            FROM messages_fts
+            JOIN messages m ON m.id = messages_fts.rowid
+            JOIN sessions s ON s.id = m.session_id
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY rank
+            LIMIT ?
+        """
+        try:
+            with self._lock:
+                cursor = self._conn.execute(sql, params)
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.OperationalError as e:
+            logger.debug("FTS5 %s 搜索失败: %s", mode, e)
+            return []
+
+    @staticmethod
+    def _generate_like_snippet(content: Optional[str], keywords: List[str], max_len: int = 120) -> str:
+        """为 LIKE 搜索结果手动生成 snippet。"""
+        if not content:
+            return ''
+        # 找第一个关键词出现位置
+        content_lower = content.lower()
+        best_pos = -1
+        for kw in keywords:
+            pos = content_lower.find(kw.lower())
+            if pos != -1 and (best_pos == -1 or pos < best_pos):
+                best_pos = pos
+        if best_pos == -1:
+            return content[:max_len]
+        half = max_len // 2
+        start = max(0, best_pos - half)
+        end = min(len(content), start + max_len)
+        if end - start < max_len:
+            start = max(0, end - max_len)
+        prefix = '...' if start > 0 else ''
+        suffix = '...' if end < len(content) else ''
+        return f'{prefix}{content[start:end]}{suffix}'
+
+    def _like_search(
+        self,
+        keywords: List[str],
+        user_id: Optional[str],
+        limit: int,
+        mode: str = 'AND',
+    ) -> List[Dict[str, Any]]:
+        """LIKE 模糊搜索，支持 AND/OR 模式，手动生成 snippet。"""
+        connector = ' AND ' if mode == 'AND' else ' OR '
+        like_parts = []
+        params: list = []
+        for kw in keywords:
+            like_parts.append("m.content LIKE ?")
+            params.append(f'%{kw}%')
+
+        where_clauses = [f"({connector.join(like_parts)})"]
+        if user_id:
+            where_clauses.append("s.user_id = ?")
+            params.append(user_id)
+        params.append(limit)
+
+        sql = f"""
+            SELECT
+                m.id,
+                m.session_id,
+                m.role,
+                m.content,
+                m.timestamp,
+                s.title AS session_title
+            FROM messages m
+            JOIN sessions s ON s.id = m.session_id
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY m.timestamp DESC
+            LIMIT ?
+        """
+        try:
+            with self._lock:
+                cursor = self._conn.execute(sql, params)
+                matches = [dict(row) for row in cursor.fetchall()]
+        except sqlite3.OperationalError as e:
+            logger.debug("LIKE %s 搜索失败: %s", mode, e)
+            return []
+
+        # 手动生成 snippet
+        for match in matches:
+            content = match.pop("content", None)
+            match["snippet"] = self._generate_like_snippet(content, keywords)
+        return matches
+
     def search_messages(
         self,
         query: str,
         user_id: str = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
+        """
+        多阶段搜索降级：FTS5 AND → FTS5 OR → LIKE AND → LIKE OR。
+        返回结果包含 id, session_id, role, snippet, timestamp, session_title。
+        """
         if not query or not query.strip():
             return []
-        where_clauses = ["messages_fts MATCH ?"]
-        params: list = [query]
-        if user_id:
-            where_clauses.append("s.user_id = ?")
-            params.append(user_id)
-        where_sql = " AND ".join(where_clauses)
-        params.extend([limit])
-        sql = f"""
-            SELECT
-                m.id,
-                m.session_id,
-                m.role,
-                snippet(messages_fts, 0, '>>>', '<<<', '...', 40) AS snippet,
-                m.content,
-                m.timestamp,
-                s.title AS session_title,
-                s.user_id
-            FROM messages_fts
-            JOIN messages m ON m.id = messages_fts.rowid
-            JOIN sessions s ON s.id = m.session_id
-            WHERE {where_sql}
-            ORDER BY rank
-            LIMIT ?
-        """
-        with self._lock:
-            try:
-                cursor = self._conn.execute(sql, params)
-            except sqlite3.OperationalError:
-                return []
-            else:
-                matches = [dict(row) for row in cursor.fetchall()]
-        for match in matches:
-            match.pop("content", None)
-        return matches
+        limit = min(max(limit, 1), 20)
+        keywords = query.strip().split()
+        if not keywords:
+            return []
+
+        # 第一阶段：FTS5 AND（最精准）
+        result = self._fts_search(keywords, user_id, limit, mode='AND')
+        if result:
+            return result
+
+        # 第二阶段：FTS5 OR（宽松召回）
+        result = self._fts_search(keywords, user_id, limit, mode='OR')
+        if result:
+            return result
+
+        # 第三阶段：LIKE AND（兜底精准）
+        result = self._like_search(keywords, user_id, limit, mode='AND')
+        if result:
+            return result
+
+        # 第四阶段：LIKE OR（兜底召回）
+        result = self._like_search(keywords, user_id, limit, mode='OR')
+        return result
 
     def delete_messages(self, session_id: str, message_ids: List[int]) -> int:
         def _do(conn):

@@ -267,6 +267,25 @@ def list_fb():
             if r:
                 visible_rows.append(r)
 
+    # 批量查询所有本地文件库的文件数（避免 N+1 SQL + 全量 JSON 解析）
+    fb_file_counts = {}
+    local_fb_ids = [(row['id'], row['owner_id']) for row in visible_rows if 'filebase_type' not in row or row['filebase_type'] != 'net']
+    if local_fb_ids:
+        try:
+            conditions = []
+            params = []
+            for fb_id, owner_id in local_fb_ids:
+                conditions.append('(filebase_id = ? AND user_id = ?)')
+                params.extend([fb_id, owner_id])
+            batch_sql = f"""SELECT filebase_id, json_extract(state_json, '$.total_files') AS total_files
+                FROM filebase_sync_states
+                WHERE {' OR '.join(conditions)}"""
+            for r in db.execute(batch_sql, params).fetchall():
+                fb_file_counts[r['filebase_id']] = r['total_files'] or 0
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('批量查询文件数失败，使用逐个回退')
+
     kbs = []
     for row in visible_rows:
         perm_row = db.execute(
@@ -302,7 +321,8 @@ def list_fb():
             'created_at': row['created_at'],
             'permission': permission,
             'filebase_type': row['filebase_type'] or 'local',
-            'local_path': local_path
+            'local_path': local_path,
+            'total_files': fb_file_counts.get(row['id'], _get_fb_file_count(row['id'], row['owner_id']))
         })
 
     from p2p.models import RemoteFilebaseStore, TrustStore
@@ -327,6 +347,25 @@ def list_fb():
     _list_fb_cache[cache_key] = result
     _list_fb_cache_time = now
     return jsonify(result)
+
+
+def _get_fb_file_count(filebase_id: str, owner_id: str) -> int:
+    """获取文件库的文件总数，优先使用同步缓存，回退到数据库持久化状态"""
+    try:
+        from kb.sync_worker import get_sync_worker
+        worker = get_sync_worker()
+        stats = worker.get_filebase_stats(filebase_id)
+        if stats:
+            return stats['total_files']
+    except Exception:
+        pass
+    try:
+        from kb.sync_state import get_sync_state_manager
+        state_manager = get_sync_state_manager()
+        state = state_manager.load_state(owner_id, filebase_id)
+        return state.total_files or 0
+    except Exception:
+        return 0
 
 
 @fb_bp.route('/<fb_id>', methods=['PUT'])

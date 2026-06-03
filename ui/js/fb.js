@@ -224,10 +224,14 @@ var FileBase = {
             var html = '<div class="fb-grid">';
             for (var i = 0; i < kbs.length; i++) {
                 var kb = kbs[i];
+                var initialCountHtml = '';
+                if (kb.total_files !== undefined && kb.total_files !== null) {
+                    initialCountHtml = '<small style="color:#666;font-size:11px;">文件数: ' + kb.total_files + '</small>';
+                }
                 html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
-                html += '<div class="fb-card-sync-status" id="sync-status-' + kb.id + '" data-fb-id="' + kb.id + '"></div>';
+                html += '<div class="fb-card-sync-status" id="sync-status-' + kb.id + '" data-fb-id="' + kb.id + '">' + initialCountHtml + '</div>';
                 html += '</div>';
             }
             html += '</div>';
@@ -801,6 +805,34 @@ var FileBase = {
         }
         h += '</tbody></table>';
         div.innerHTML = h;
+
+        // 从参考来源右键定位到文件库，滚动并高亮目标文件
+        var targetPath = self._lsGet('docflow_target_file_path');
+        console.log('[FB Locate] targetPath from localStorage:', targetPath);
+        if (targetPath) {
+            self._lsDel('docflow_target_file_path');
+            // 归一化目标路径：转小写、统一为正斜杠、去掉两端空白
+            var normTarget = targetPath.trim().toLowerCase().replace(/\\/g, '/');
+            console.log('[FB Locate] normalized target:', normTarget);
+            var rows = div.querySelectorAll('.fb-file-row');
+            var found = false;
+            for (var ri = 0; ri < rows.length; ri++) {
+                var rowPath = rows[ri].getAttribute('data-local-path') || '';
+                var normRow = rowPath.trim().toLowerCase().replace(/\\/g, '/');
+                console.log('[FB Locate] row[' + ri + '] data-local-path:', rowPath, '| normalized:', normRow);
+                if (normRow === normTarget) {
+                    rows[ri].classList.add('selected');
+                    rows[ri].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    console.log('[FB Locate] MATCH found and highlighted, row index:', ri);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                console.warn('[FB Locate] No matching row found for targetPath:', targetPath);
+            }
+        }
+
         this.initColumnResize();
     },
 
@@ -1643,6 +1675,8 @@ var FileBase = {
     handleRowClick: function(event) {
         var row = event.target.closest('.fb-file-row');
         if (!row) return;
+        // 如果该行正在重命名中，不执行任何文件打开操作
+        if (row.querySelector('.fb-inline-rename-input')) return;
         var rowIndex = parseInt(row.getAttribute('data-row-index'), 10);
 
         if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {

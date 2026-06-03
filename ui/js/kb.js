@@ -122,14 +122,19 @@ var WikiKnowledge = {
     _contextLocate: function(srcIdx) {
         WikiKnowledge._hideSourceContextMenu();
         var src = WikiKnowledge._allSources[srcIdx];
-        if (!src || !src.fb_id || !src.fb_path) return;
+        if (!src || !src.fb_id || !src.fb_path) {
+            console.warn('[KB Locate] Invalid source for locate:', src);
+            return;
+        }
 
         var fbPath = src.fb_path;
         var dirPath = fbPath.substring(0, fbPath.lastIndexOf('/'));
 
-        localStorage.setItem('docflow_current_view', 'fb');
+        console.log('[KB Locate] Storing: fb_id=' + src.fb_id + ', dirPath=' + dirPath + ', targetPath=' + fbPath);
+
         localStorage.setItem('docflow_current_fb_id', src.fb_id);
         localStorage.setItem('docflow_current_subdir', dirPath);
+        localStorage.setItem('docflow_target_file_path', fbPath);
 
         if (typeof navigateTo === 'function') {
             navigateTo('fb');

@@ -1262,6 +1262,7 @@ document.addEventListener('click', function(e) {
 });
 
 function navigateTo(view) {
+    var prevView = localStorage.getItem('docflow_current_view');
     localStorage.setItem('docflow_current_view', view);
 
     var navItems = document.querySelectorAll('.sidebar-nav-item');
@@ -1284,22 +1285,30 @@ function navigateTo(view) {
     } else if (view === 'fb') {
         if (homeView) homeView.style.display = 'none';
         if (kbView) kbView.style.display = '';
+        // 捕获进入 fb 分支前的旧视图，以判断是从外部切换还是已在文件库内
         _loadScript('js/fb.js', function() {
             if (typeof FileBase !== 'undefined') {
-                var locFbId = localStorage.getItem('docflow_current_fb_id');
-                var locSubdir = localStorage.getItem('docflow_current_subdir');
-                if (locFbId) {
-                    FileBase.currentFbId = locFbId;
-                    FileBase.fbLocalCurrentSubdir = locSubdir || '';
-                    var parts = (locSubdir || '').replace(/\\/g, '/').split('/');
-                    FileBase.currentPath = [{ id: locFbId, name: '文件库', type: 'kb' }];
-                    for (var i = 0; i < parts.length; i++) {
-                        if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
-                    }
-                    localStorage.removeItem('docflow_current_fb_id');
-                    localStorage.removeItem('docflow_current_subdir');
-                } else {
+                if (prevView === 'fb') {
+                    // 已在文件库视图内点击导航 → 回到文件库列表
                     FileBase.currentFbId = null;
+                } else {
+                    // 从其他视图（如知识库/主页）切换 → 尝试恢复 localStorage 中的文件库
+                    var locFbId = localStorage.getItem('docflow_current_fb_id');
+                    var locSubdir = localStorage.getItem('docflow_current_subdir');
+                    console.log('[nav FB] locFbId:', locFbId, 'locSubdir:', locSubdir);
+                    if (locFbId) {
+                        FileBase.currentFbId = locFbId;
+                        FileBase.fbLocalCurrentSubdir = locSubdir || '';
+                        var parts = (locSubdir || '').replace(/\\/g, '/').split('/');
+                        FileBase.currentPath = [{ id: locFbId, name: '文件库', type: 'kb' }];
+                        for (var i = 0; i < parts.length; i++) {
+                            if (parts[i]) FileBase.currentPath.push({ id: parts[i], name: parts[i], type: 'category' });
+                        }
+                        localStorage.removeItem('docflow_current_fb_id');
+                        localStorage.removeItem('docflow_current_subdir');
+                    } else {
+                        FileBase.currentFbId = null;
+                    }
                 }
                 FileBase.init();
             }
