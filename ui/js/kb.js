@@ -220,6 +220,15 @@ var WikiKnowledge = {
 
     _sendMessageInternal: function(content) {
         this._switchToActive();
+
+        // 首页标签→会话标签：首次发送后转换
+        if (this.sessionId && typeof tabManager !== 'undefined') {
+            var activeTab = tabManager._findById(tabManager.activeTabId);
+            if (activeTab && activeTab.type === 'home') {
+                tabManager.convertHomeToChat(this.sessionId, content);
+            }
+        }
+
         this.messages.push({
             role: 'user',
             content: content,
@@ -269,12 +278,6 @@ var WikiKnowledge = {
             '<div class="kb-chat-container" id="kb-container">' +
                 // 右上角图标按钮
                 '<div class="kb-chat-header-actions">' +
-                    '<button onclick="WikiKnowledge.newSession()" title="新建会话" class="kb-header-btn primary">' +
-                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
-                    '</button>' +
-                    '<button onclick="WikiKnowledge.showSessions()" title="历史会话" class="kb-header-btn">' +
-                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2-5.3"/><path d="M3 3v6h6"/><polyline points="12 7 12 12 16 14"/></svg>' +
-                    '</button>' +
                     '<button onclick="WikiKnowledge.showLLMSettings()" title="LLM 设置" class="kb-header-btn">' +
                         '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
                     '</button>' +
@@ -298,16 +301,16 @@ var WikiKnowledge = {
                         '<div class="title">开始对话</div>' +
                         '<div class="desc">与AI助手对话，它将基于记忆与技能持续进化</div>' +
                     '</div>' +
+                    '<div class="kb-chat-messages-inner" id="kb-messages-inner"></div>' +
                 '</div>' +
                 // 初始居中区（移除快捷按钮）
                 '<div class="kb-chat-initial-area" id="kb-initial-area">' +
                     '<div class="kb-chat-greeting-title">开始会话</div>' +
-                    '<div class="kb-chat-greeting-desc">输入消息，检索与会话</div>' +
                 '</div>' +
                 // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +
                     '<div class="kb-chat-input-wrapper">' +
-                        '<textarea id="kb-input" rows="1" placeholder="输入消息，开始对话..." onkeydown="WikiKnowledge.handleKeyDown(event)" oninput="WikiKnowledge.autoResize(this)"></textarea>' +
+                        '<textarea id="kb-input" rows="1" placeholder="输入消息，检索与会话..." onkeydown="WikiKnowledge.handleKeyDown(event)" oninput="WikiKnowledge.autoResize(this)"></textarea>' +
                         '<div class="kb-chat-input-actions">' +
                             '<button class="kb-chat-send-btn" onclick="WikiKnowledge.sendMessage()" title="发送">' +
                                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z"/></svg>' +
@@ -436,9 +439,9 @@ var WikiKnowledge = {
                 '</div>' +
             '</div>';
 
-        var messagesEl = document.getElementById('kb-messages');
-        if (messagesEl) {
-            messagesEl.insertAdjacentHTML('beforeend', typingHtml);
+        var innerEl = document.getElementById('kb-messages-inner');
+        if (innerEl) {
+            innerEl.insertAdjacentHTML('beforeend', typingHtml);
             self._scrollToBottom();
         }
 
@@ -867,12 +870,14 @@ var WikiKnowledge = {
     _renderMessages: function() {
         var messagesEl = document.getElementById('kb-messages');
         var emptyEl = document.getElementById('kb-empty-state');
-        if (!messagesEl) return;
+        var innerEl = document.getElementById('kb-messages-inner');
+        if (!messagesEl || !innerEl) return;
 
         this._allSources = [];
 
         if (this.messages.length === 0) {
             if (emptyEl) emptyEl.style.display = 'flex';
+            innerEl.innerHTML = '';
             return;
         }
 
@@ -933,7 +938,7 @@ var WikiKnowledge = {
                 '</div>';
         }
 
-        messagesEl.innerHTML = html;
+        innerEl.innerHTML = html;
         this._scrollToBottom();
     },
 

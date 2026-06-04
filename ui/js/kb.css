@@ -13,38 +13,16 @@
 }
 .kb-chat-container.initial .kb-chat-initial-area {
 	flex: 0 0 auto;
+	padding: 0 20px 16px;
 }
 .kb-chat-container.initial .kb-chat-input-area {
 	width: 100%;
 	max-width: 560px;
 	margin: 0 auto;
-	padding: 16px 20px 24px;
+	padding: 8px 20px 20px;
 	background: transparent;
 }
 
-/* 美化滚动条 */
-.kb-chat-container ::-webkit-scrollbar,
-.kb-chat-messages::-webkit-scrollbar,
-.kb-sidebar-content::-webkit-scrollbar {
-	width: 4px;
-	height: 4px;
-}
-.kb-chat-container ::-webkit-scrollbar-track,
-.kb-chat-messages::-webkit-scrollbar-track,
-.kb-sidebar-content::-webkit-scrollbar-track {
-	background: transparent;
-}
-.kb-chat-container ::-webkit-scrollbar-thumb,
-.kb-chat-messages::-webkit-scrollbar-thumb,
-.kb-sidebar-content::-webkit-scrollbar-thumb {
-	background: #ddd;
-	border-radius: 2px;
-}
-.kb-chat-container ::-webkit-scrollbar-thumb:hover,
-.kb-chat-messages::-webkit-scrollbar-thumb:hover,
-.kb-sidebar-content::-webkit-scrollbar-thumb:hover {
-	background: #ccc;
-}
 
 .kb-chat-header {
     display: flex;
@@ -128,12 +106,19 @@
 .kb-chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f2f2f2;
+    user-select: text;
+}
+.kb-chat-messages-inner {
+    max-width: 800px;
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 16px;
-    background: #f2f2f2;
-    user-select: text;
 }
 
 .kb-chat-empty {
@@ -404,11 +389,7 @@
     color: #333;
 }
 
-.kb-chat-greeting-desc {
-    font-size: 14px;
-    color: #999;
-    margin-bottom: 8px;
-}
+
 
 .kb-chat-shortcuts {
     display: flex;
@@ -440,9 +421,11 @@
 }
 
 .kb-chat-input-area {
-    padding: 16px 20px;
+    padding: 16px 0;
     background: #f2f2f2;
     flex-shrink: 0;
+    display: flex;
+    justify-content: center;
 }
 
 .kb-chat-input-wrapper {
@@ -454,6 +437,8 @@
     border-radius: 12px;
     padding: 10px 14px;
     transition: border-color 0.2s, box-shadow 0.2s;
+    max-width: 760px;
+    width: 100%;
 }
 
 .kb-chat-input-wrapper:focus-within {

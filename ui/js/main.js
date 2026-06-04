@@ -969,6 +969,9 @@
         }
 
         // ==================== 关于弹窗 ====================
+        // <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:12px;color:#666;line-height:2;">
+        //     <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1</a></div>
+        // </div>
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
             overlay.style.display = 'flex';
@@ -976,15 +979,9 @@
                 <div style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;">
                     <div style="text-align:center;margin-bottom:12px;">
                         <h2 style="margin:6px 0 2px;font-size:18px;color:#1a1a2e;">文枢</h2>
-                        <div style="font-size:11px;color:#999;">DocFlow · 文档工作流工具集</div>
+                        <div style="font-size:11px;color:#999;">DocFlow · 文档工作流</div>
                     </div>
-                    <div style="color:#444;font-size:12px;line-height:2;">
-                        <div>批量提取 · 文件索引 · 文档比较</div>
-                        <div>批量转化 · 添加页码 · 文件套红</div>
-                    </div>
-                    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:12px;color:#666;line-height:2;">
-                        <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/DocFlow" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1/DocFlow</a></div>
-                    </div>
+
                     <div style="text-align:center;margin-top:14px;">
                         <button onclick="closeAbout()" style="padding:5px 24px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
                     </div>
@@ -1285,6 +1282,8 @@ window.tabManager = {
         switch (type) {
             case 'home':
                 return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>';
+            case 'chat':
+                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>';
             case 'fb':
                 return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>';
             case 'tools':
@@ -1297,6 +1296,7 @@ window.tabManager = {
     _getTabTitle: function(tab) {
         switch (tab.type) {
             case 'home': return '首页';
+            case 'chat': return tab.state.chatName || '会话';
             case 'fb': return tab.state.fbName || '文件库';
             case 'tools': return tab.state.toolName || '工具';
             default: return tab.type;
@@ -1311,12 +1311,6 @@ window.tabManager = {
     },
 
     createTab: function(type, forceNew) {
-        // home 标签始终只有唯一一个
-        if (type === 'home') {
-            var existing = this._findByType('home');
-            if (existing) { this.switchTab(existing.id); return existing; }
-        }
-
         // 非 home 标签：forceNew=false 时复用同类型无标识标签
         if (!forceNew && type !== 'home') {
             for (var i = 0; i < this.tabs.length; i++) {
@@ -1348,6 +1342,19 @@ window.tabManager = {
         this.createTab(type, false);
     },
 
+    // 首页标签→会话标签：发送第一条消息后，标签名变为消息内容
+    convertHomeToChat: function(sessionId, title) {
+        var tab = this._findById(this.activeTabId);
+        if (!tab || tab.type !== 'home') return;
+        tab.type = 'chat';
+        tab.state = {
+            sessionId: sessionId,
+            chatName: title.length > 20 ? title.substring(0, 20) + '...' : title
+        };
+        tab._identified = true;
+        this._renderBar();
+    },
+
     switchTab: function(id) {
         // 保存当前标签状态
         if (this.activeTabId) this._saveTabState(this.activeTabId);
@@ -1362,15 +1369,18 @@ window.tabManager = {
         for (var i = 0; i < this.tabs.length; i++) {
             if (this.tabs[i].id === id) { idx = i; break; }
         }
-        if (idx === -1 || this.tabs[idx].type === 'home') return;
+        if (idx === -1) return;
 
         this.tabs.splice(idx, 1);
 
+        if (this.tabs.length === 0) {
+            this.createTab('home');
+            return;
+        }
+
         if (this.activeTabId === id) {
-            if (this.tabs.length > 0) {
-                var newIdx = Math.min(idx, this.tabs.length - 1);
-                this.switchTab(this.tabs[newIdx].id);
-            }
+            var newIdx = Math.min(idx, this.tabs.length - 1);
+            this.switchTab(this.tabs[newIdx].id);
         } else {
             this._renderBar();
         }
@@ -1388,8 +1398,10 @@ window.tabManager = {
         if (!tab) return;
         switch (tab.type) {
             case 'home':
+            case 'chat':
                 tab.state = {
-                    sessionId: typeof WikiKnowledge !== 'undefined' ? WikiKnowledge.sessionId : null
+                    sessionId: typeof WikiKnowledge !== 'undefined' ? WikiKnowledge.sessionId : null,
+                    chatName: tab.state.chatName || ''
                 };
                 break;
             case 'fb':
@@ -1434,20 +1446,19 @@ window.tabManager = {
 
         left.innerHTML = '<button class="tab-collapse-btn" onclick="toggleSidebarCollapse()" title="折叠/展开侧边栏"></button>';
 
-        var centerHtml = '<button class="tab-add-btn" onclick="tabManager.createTab(\'home\')" title="新建标签页">+</button>';
+        var centerHtml = '';
         for (var i = 0; i < this.tabs.length; i++) {
             var t = this.tabs[i];
             var isActive = t.id === this.activeTabId;
             var cls = 'tab-item' + (isActive ? ' active' : '');
-            var closeBtn = t.type !== 'home'
-                ? '<span class="tab-close" onclick="event.stopPropagation();tabManager.closeTab(\'' + t.id + '\')">✕</span>'
-                : '';
+            var closeBtn = '<span class="tab-close" onclick="event.stopPropagation();tabManager.closeTab(\'' + t.id + '\')">✕</span>';
             centerHtml += '<div class="' + cls + '" onclick="tabManager.switchTab(\'' + t.id + '\')" title="' + this._getTabTitle(t) + '">' +
                 this._getTabIcon(t.type) +
                 '<span>' + this._getTabTitle(t) + '</span>' +
                 closeBtn +
                 '</div>';
         }
+        centerHtml += '<button class="tab-add-btn" onclick="tabManager.createTab(\'home\')" title="新建标签页">+</button>';
         center.innerHTML = centerHtml;
 
         right.innerHTML =
@@ -1471,6 +1482,7 @@ window.tabManager = {
 
         switch (tab.type) {
             case 'home': this._renderHome(tab, mc); break;
+            case 'chat': this._renderChat(tab, mc); break;
             case 'fb': this._renderFb(tab, mc); break;
             case 'tools': this._renderTools(tab, mc); break;
         }
@@ -1486,11 +1498,15 @@ window.tabManager = {
         var self = this;
         var loadKb = function() {
             if (typeof WikiKnowledge !== 'undefined') {
-                WikiKnowledge.init();
-                // 恢复会话
+                // 先恢复/清除会话 ID，再初始化 KB
                 if (tab.state && tab.state.sessionId) {
                     sessionStorage.setItem('kb_session_id', tab.state.sessionId);
+                } else {
+                    sessionStorage.removeItem('kb_session_id');
+                    WikiKnowledge.sessionId = null;
+                    WikiKnowledge.messages = [];
                 }
+                WikiKnowledge.init();
             }
         };
         if (typeof WikiKnowledge !== 'undefined') {
@@ -1500,6 +1516,11 @@ window.tabManager = {
                 setTimeout(loadKb, 200);
             });
         }
+    },
+
+    _renderChat: function(tab, container) {
+        // 会话标签：与首页相同，渲染 KB 会话界面
+        this._renderHome(tab, container);
     },
 
     _renderFb: function(tab, container) {
@@ -1533,11 +1554,20 @@ window.tabManager = {
                     FileBase.fbCanEdit = tab.state.fbPermission === 'edit' || tab.state.fbPermission === 'manage';
                     FileBase.fbCanManage = tab.state.fbPermission === 'manage';
                     FileBase.fbLocalCurrentSubdir = tab.state.fbSubdir || '';
+                    FileBase.fbCategoryTree = null;
+                    FileBase.fbTreeLoaded = false;
                     if (tab.state.fbCurrentPath && tab.state.fbCurrentPath.length > 0) {
                         FileBase.currentPath = JSON.parse(JSON.stringify(tab.state.fbCurrentPath));
                     }
                 } else {
                     FileBase.currentFbId = null;
+                    FileBase.fbName = '';
+                    FileBase.fbLocalPath = '';
+                    FileBase.fbDisplayPath = '';
+                    FileBase.fbCurrentPermission = 'view';
+                    FileBase.fbCanEdit = false;
+                    FileBase.fbCanManage = false;
+                    FileBase.fbLocalCurrentSubdir = '';
                 }
                 FileBase.init();
             }

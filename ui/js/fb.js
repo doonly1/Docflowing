@@ -167,6 +167,7 @@ var FileBase = {
     renderKbList: async function() {
         try {
             this.currentFbId = null;
+            this.fbName = '';
             this.fbLocalPath = '';
             this.currentPath = [{ id: null, name: '文件库', type: 'home' }];
             this._lsDel('docflow_current_fb_id');
@@ -515,6 +516,37 @@ var FileBase = {
     },
 
     openKb: async function(kbId, permission, name, localPath, displayPath) {
+        // 通过 tabManager 为每个文件库创建独立标签页
+        if (typeof tabManager !== 'undefined') {
+            // 查找是否已有该文件库的标签
+            for (var i = 0; i < tabManager.tabs.length; i++) {
+                if (tabManager.tabs[i].type === 'fb' && tabManager.tabs[i].state.fbId === kbId) {
+                    tabManager.switchTab(tabManager.tabs[i].id);
+                    return;
+                }
+            }
+            // 创建新标签
+            var id = 't' + (tabManager.nextId++);
+            var tab = {
+                id: id,
+                type: 'fb',
+                state: {
+                    fbId: kbId,
+                    fbName: name,
+                    fbLocalPath: localPath,
+                    fbDisplayPath: displayPath,
+                    fbPermission: permission,
+                    fbSubdir: ''
+                },
+                _identified: true
+            };
+            tabManager.tabs.push(tab);
+            tabManager.switchTab(id);
+            tabManager._renderBar();
+            return;
+        }
+
+        // 后备：原有行为（无 tabManager 时）
         this.currentFbId = kbId;
         this.fbCurrentPermission = permission;
         this.fbCanEdit = permission === 'edit' || permission === 'manage';

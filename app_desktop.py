@@ -195,7 +195,7 @@ def main():
         'min_size': (800, 500),
         'resizable': True,
         'frameless': True,
-        'easy_drag': True,
+        'easy_drag': False,
         'js_api': JsBridge(),
     }
     if win_x is not None:
