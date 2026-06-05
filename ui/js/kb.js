@@ -101,8 +101,8 @@ var WikiKnowledge = {
 
         var fileName = src.fb_path.split('/').pop();
 
-        if (typeof window.pywebview !== 'undefined' && window.pywebview.api && window.pywebview.api.saveFileAs) {
-            window.pywebview.api.saveFileAs(fileName).then(function(savePath) {
+        if (typeof window.electronAPI !== 'undefined' && window.electronAPI.saveFileAs) {
+            window.electronAPI.saveFileAs(fileName).then(function(savePath) {
                 if (!savePath) return;
                 apiFetch('/api/fb/' + src.fb_id + '/local-files/save-as', {
                     method: 'POST',

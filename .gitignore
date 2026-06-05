@@ -18,6 +18,16 @@ temp*
 # 工作区（含运行时用户配置、P2P 身份、图标等）
 workspaces/
 
+# Node.js
+node_modules/
+
+# 前端 lib（由 postinstall 自动生成）
+ui/lib/
+
+# Electron 构建输出
+release/
+dist/
+
 # 其他
 /.*/
 !/.git/

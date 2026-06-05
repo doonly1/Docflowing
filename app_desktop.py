@@ -1,5 +1,7 @@
-"""DocFlow 桌面版入口 — pywebview 壳
+"""DocFlow 桌面版入口 — pywebview 壳（已废弃）
 
+注意：此文件已迁移至 Electron，请使用 npm run dev 启动。
+保留此文件仅用于回退参考，未来版本将删除。
 启动 Flask 后台线程 + 原生桌面窗口
 开机自启管理由 settings API 通过 Windows 注册表完成
 """

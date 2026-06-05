@@ -22,19 +22,6 @@
             margin: 0;
         }
 
-        /* ──────── 窗口边缘缩放手柄（frameless 窗口用） ──────── */
-        .window-resize-edge {
-            position: fixed;
-            z-index: 9999;
-        }
-        .window-resize-edge.t  { top: 0; left: 8px; right: 8px; height: 4px; cursor: n-resize; }
-        .window-resize-edge.b  { bottom: 0; left: 8px; right: 8px; height: 4px; cursor: s-resize; }
-        .window-resize-edge.l  { top: 8px; left: 0; bottom: 8px; width: 4px; cursor: w-resize; }
-        .window-resize-edge.r  { top: 8px; right: 0; bottom: 8px; width: 4px; cursor: e-resize; }
-        .window-resize-edge.tl { top: 0; left: 0; width: 8px; height: 8px; cursor: nw-resize; }
-        .window-resize-edge.tr { top: 0; right: 0; width: 8px; height: 8px; cursor: ne-resize; }
-        .window-resize-edge.bl { bottom: 0; left: 0; width: 8px; height: 8px; cursor: sw-resize; }
-        .window-resize-edge.br { bottom: 0; right: 0; width: 8px; height: 8px; cursor: se-resize; }
 
         /* ──────── 全局滚动条美化 ──────── */
         ::-webkit-scrollbar {
@@ -999,15 +986,6 @@
     <noscript><link rel="stylesheet" href="js/fb.css?v=2"><link rel="stylesheet" href="js/kb.css"></noscript>
 </head>
 <body>
-    <!-- 窗口边缘缩放手柄（frameless pywebview 窗口） -->
-    <div class="window-resize-edge t"></div>
-    <div class="window-resize-edge b"></div>
-    <div class="window-resize-edge l"></div>
-    <div class="window-resize-edge r"></div>
-    <div class="window-resize-edge tl"></div>
-    <div class="window-resize-edge tr"></div>
-    <div class="window-resize-edge bl"></div>
-    <div class="window-resize-edge br"></div>
     <!-- 全局标题栏（贯穿窗口两端） -->
     <div class="app-header" id="app-header">
         <div class="header-left" id="header-left"></div>
@@ -1227,41 +1205,84 @@
     
     <script src="js/main.js" defer></script>
     <script>
-    window._loadScriptAsync = function(url) {
+    // 本地 lib 前缀（npm 包拷贝到 ui/lib/）
+    window._LIB_PREFIX = '/lib/';
+
+    window._loadScriptAsync = function(url, fallbackUrl) {
         return new Promise(function(resolve, reject) {
-            var s = document.createElement('script');
-            s.src = url;
-            s.async = true;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
+            var attempts = fallbackUrl ? [url, fallbackUrl] : [url];
+            tryLoad(0);
+
+            function tryLoad(idx) {
+                if (idx >= attempts.length) {
+                    reject(new Error('Failed to load ' + url));
+                    return;
+                }
+                var s = document.createElement('script');
+                s.src = attempts[idx];
+                s.async = true;
+                s.onload = resolve;
+                s.onerror = function() {
+                    if (idx < attempts.length - 1) {
+                        console.warn('[DocFlow] 回退加载: ' + attempts[idx + 1]);
+                        tryLoad(idx + 1);
+                    } else {
+                        reject(new Error('Failed to load ' + attempts[idx]));
+                    }
+                };
+                document.head.appendChild(s);
+            }
         });
     };
+
+    window._loadStyleAsync = function(url, fallbackUrl) {
+        return new Promise(function(resolve) {
+            var l = document.createElement('link');
+            l.rel = 'stylesheet';
+            l.href = url;
+            l.onload = resolve;
+            l.onerror = function() {
+                if (fallbackUrl) {
+                    l.href = fallbackUrl;
+                } else {
+                    resolve();
+                }
+            };
+            document.head.appendChild(l);
+        });
+    };
+
     window._ensureQuill = function() {
         if (window._quillPromise) return window._quillPromise;
         if (typeof Quill !== 'undefined') return Promise.resolve();
         window._quillPromise = Promise.all([
-            window._loadScriptAsync('https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js'),
-            new Promise(function(resolve) {
-                var l = document.createElement('link');
-                l.rel = 'stylesheet';
-                l.href = 'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css';
-                l.onload = resolve;
-                document.head.appendChild(l);
-            })
+            window._loadScriptAsync(
+                window._LIB_PREFIX + 'quill/dist/quill.min.js',
+                'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js'
+            ),
+            window._loadStyleAsync(
+                window._LIB_PREFIX + 'quill/dist/quill.snow.css',
+                'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css'
+            )
         ]);
         return window._quillPromise;
     };
     window._ensureMarked = function() {
         if (window._markedPromise) return window._markedPromise;
         if (typeof marked !== 'undefined') return Promise.resolve();
-        window._markedPromise = window._loadScriptAsync('https://cdn.jsdelivr.net/npm/marked/marked.min.js');
+        window._markedPromise = window._loadScriptAsync(
+            window._LIB_PREFIX + 'marked/marked.min.js',
+            'https://cdn.jsdelivr.net/npm/marked/marked.min.js'
+        );
         return window._markedPromise;
     };
     window._ensureTurndown = function() {
         if (window._turndownPromise) return window._turndownPromise;
         if (typeof TurndownService !== 'undefined') return Promise.resolve();
-        window._turndownPromise = window._loadScriptAsync('https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js');
+        window._turndownPromise = window._loadScriptAsync(
+            window._LIB_PREFIX + 'turndown/dist/turndown.min.js',
+            'https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js'
+        );
         return window._turndownPromise;
     };
     </script>

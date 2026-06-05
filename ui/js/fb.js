@@ -963,13 +963,13 @@ var FileBase = {
             return;
         }
 
-        var isPyWebView = typeof window.pywebview !== 'undefined' && window.pywebview.api && window.pywebview.api.saveFileAs;
+        var hasElectronAPI = typeof window.electronAPI !== 'undefined' && window.electronAPI && window.electronAPI.saveFileAs;
 
         if (items.length === 1 && items[0].type === 'file') {
-            if (isPyWebView) {
+            if (hasElectronAPI) {
                 var fileName = items[0].path.split('/').pop().split('\\').pop();
                 try {
-                    var savePath = await window.pywebview.api.saveFileAs(fileName);
+                    var savePath = await window.electronAPI.saveFileAs(fileName);
                     if (!savePath) return;
                     var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/save-as', 'POST', { path: items[0].path, save_path: savePath });
                     if (res.success) {
@@ -984,9 +984,9 @@ var FileBase = {
                 window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path), '_blank');
             }
         } else {
-            if (isPyWebView) {
+            if (hasElectronAPI) {
                 try {
-                    var destDir = await window.pywebview.api.selectDirectory();
+                    var destDir = await window.electronAPI.selectDirectory();
                     if (!destDir) return;
                     var paths = [];
                     for (var i = 0; i < items.length; i++) {

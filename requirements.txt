@@ -10,7 +10,6 @@ cryptography>=41.0.0
 markitdown>=0.1.0
 zeroconf>=0.132.0
 requests>=2.31.0
-pywebview>=5.0.0
 
 
 # Windows 可选依赖（提供 Word COM 支持，其他平台不需要）

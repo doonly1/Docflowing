@@ -429,7 +429,8 @@
         // ==================== 选择本机目录 ====================
         window.selectFolder = async function() {
             try {
-                const path = await window.pywebview.api.selectDirectory();
+                const api = window.electronAPI || window.pywebview?.api;
+                const path = api ? await api.selectDirectory() : null;
                 if (path) {
                     const workdirInput = document.getElementById('workdir');
                     workdirInput.value = path;
@@ -440,7 +441,7 @@
                     }
                 }
             } catch (e) {
-                console.error('pywebview selectDirectory error:', e);
+                console.error('selectDirectory error:', e);
                 showToast('选择目录失败', 'error');
             }
         };
@@ -1099,7 +1100,11 @@
             const href = link.getAttribute('href');
             if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
             e.preventDefault();
-            window.open(href, '_blank');
+            if (window.electronAPI && window.electronAPI.openExternal) {
+                window.electronAPI.openExternal(href);
+            } else {
+                window.open(href, '_blank');
+            }
         });
 
         async function initApp() {
@@ -1236,221 +1241,18 @@ function toggleSidebarCollapse() {
     localStorage.setItem('docflow_sidebar_collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0');
 }
 
-// ==================== 窗口控制（桌面版 pywebview） ====================
-
-// 拖拽状态
-var _dragState = null;
-// 缩放状态
-var _resizeState = null;
+// ==================== 窗口控制（Electron IPC） ====================
 
 function windowMinimize() {
-    try {
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.windowMinimize) {
-            window.pywebview.api.windowMinimize();
-        }
-    } catch(e) { /* 浏览器中忽略 */ }
+    if (window.electronAPI) window.electronAPI.windowMinimize();
 }
 
 function windowMaximizeRestore() {
-    try {
-        if (window.pywebview && window.pywebview.api) {
-            if (window.pywebview.api.windowToggleMaximize) {
-                window.pywebview.api.windowToggleMaximize();
-            } else if (window.pywebview.api.windowMaximize) {
-                window.pywebview.api.windowMaximize();
-            }
-        }
-    } catch(e) { /* 浏览器中忽略 */ }
+    if (window.electronAPI) window.electronAPI.windowToggleMaximize();
 }
 
 function windowClose() {
-    try {
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.windowClose) {
-            window.pywebview.api.windowClose();
-        } else {
-            window.close();
-        }
-    } catch(e) { /* 浏览器中忽略 */ }
-}
-
-// ==================== 标题栏拖拽 ====================
-function _initHeaderDrag() {
-    var header = document.querySelector('.app-header');
-    if (!header) header = document.querySelector('header');
-    if (!header) return;
-
-    header.style.cursor = 'default';
-
-    header.addEventListener('mousedown', function(e) {
-        if (e.button !== 0) return;
-        if (e.target.closest('button, a, input, select, textarea, .tab-item, .tab-close, .tab-add-btn')) return;
-
-        // 最大化时不允许拖拽
-        var isMax = false;
-        try {
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.windowIsMaximized) {
-                isMax = window.pywebview.api.windowIsMaximized();
-            }
-        } catch(ex) {}
-        if (isMax) return;
-
-        _dragState = {
-            startX: e.clientX,
-            startY: e.clientY
-        };
-
-        try {
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.windowGetPosition) {
-                var pos = window.pywebview.api.windowGetPosition();
-                _dragState.origX = pos.x;
-                _dragState.origY = pos.y;
-            }
-        } catch(ex) {
-            _dragState.origX = 0;
-            _dragState.origY = 0;
-        }
-
-        e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', function(e) {
-        if (!_dragState) return;
-
-        var dx = e.clientX - _dragState.startX;
-        var dy = e.clientY - _dragState.startY;
-
-        try {
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.windowMove) {
-                window.pywebview.api.windowMove(_dragState.origX + dx, _dragState.origY + dy);
-            }
-        } catch(ex) {}
-
-        e.preventDefault();
-    });
-
-    document.addEventListener('mouseup', function() {
-        _dragState = null;
-    });
-
-    // 双击标题栏切换最大化
-    header.addEventListener('dblclick', function(e) {
-        if (e.target.closest('button, a, input, select, textarea, .tab-item, .tab-close, .tab-add-btn')) return;
-        windowMaximizeRestore();
-    });
-}
-
-// ==================== 窗口边缘缩放 ====================
-function _getEdgeStyle(dir) {
-    var s = 6;
-    var map = {
-        'n':  'top:0;left:0;right:0;height:' + s + 'px;cursor:n-resize;',
-        's':  'bottom:0;left:0;right:0;height:' + s + 'px;cursor:s-resize;',
-        'e':  'top:0;right:0;bottom:0;width:' + s + 'px;cursor:e-resize;',
-        'w':  'top:0;left:0;bottom:0;width:' + s + 'px;cursor:w-resize;',
-        'nw': 'top:0;left:0;width:' + (s*2) + 'px;height:' + (s*2) + 'px;cursor:nw-resize;',
-        'ne': 'top:0;right:0;width:' + (s*2) + 'px;height:' + (s*2) + 'px;cursor:ne-resize;',
-        'sw': 'bottom:0;left:0;width:' + (s*2) + 'px;height:' + (s*2) + 'px;cursor:sw-resize;',
-        'se': 'bottom:0;right:0;width:' + (s*2) + 'px;height:' + (s*2) + 'px;cursor:se-resize;'
-    };
-    return map[dir] || map['se'];
-}
-
-function _initResizeEdges() {
-    // 创建八个方向的缩放边缘
-    var dirs = ['n','s','e','w','nw','ne','sw','se'];
-    dirs.forEach(function(dir) {
-        var existing = document.querySelector('.window-resize-' + dir);
-        if (existing) return;
-
-        var el = document.createElement('div');
-        el.className = 'window-resize-edge window-resize-' + dir;
-        el.setAttribute('data-dir', dir);
-        el.style.cssText = 'position:fixed;z-index:9999;pointer-events:auto;background:transparent;' + _getEdgeStyle(dir);
-        document.body.appendChild(el);
-    });
-
-    var edges = document.querySelectorAll('.window-resize-edge');
-    edges.forEach(function(edge) {
-        edge.addEventListener('mousedown', function(e) {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-
-            var dir = edge.getAttribute('data-dir') || 'se';
-            _resizeState = {
-                dir: dir,
-                startX: e.clientX,
-                startY: e.clientY
-            };
-
-            try {
-                if (window.pywebview && window.pywebview.api) {
-                    var pos = window.pywebview.api.windowGetPosition();
-                    var size = window.pywebview.api.windowGetSize();
-                    _resizeState.origX = pos.x;
-                    _resizeState.origY = pos.y;
-                    _resizeState.origW = size.width;
-                    _resizeState.origH = size.height;
-                }
-            } catch(ex) {
-                _resizeState.origX = 0;
-                _resizeState.origY = 0;
-                _resizeState.origW = 1100;
-                _resizeState.origH = 700;
-            }
-        });
-    });
-
-    document.addEventListener('mousemove', function(e) {
-        if (!_resizeState) return;
-
-        var dir = _resizeState.dir;
-        var dx = e.clientX - _resizeState.startX;
-        var dy = e.clientY - _resizeState.startY;
-
-        var minW = 800, minH = 500;
-        var nx = _resizeState.origX, ny = _resizeState.origY;
-        var nw = _resizeState.origW, nh = _resizeState.origH;
-
-        if (dir.indexOf('e') >= 0) nw = Math.max(minW, _resizeState.origW + dx);
-        if (dir.indexOf('s') >= 0) nh = Math.max(minH, _resizeState.origH + dy);
-        if (dir.indexOf('w') >= 0) {
-            nw = Math.max(minW, _resizeState.origW - dx);
-            if (nw > minW) nx = _resizeState.origX + dx;
-        }
-        if (dir.indexOf('n') >= 0) {
-            nh = Math.max(minH, _resizeState.origH - dy);
-            if (nh > minH) ny = _resizeState.origY + dy;
-        }
-
-        try {
-            if (window.pywebview && window.pywebview.api) {
-                if (nx !== _resizeState.origX || ny !== _resizeState.origY) {
-                    window.pywebview.api.windowMove(nx, ny);
-                }
-                if (nw !== _resizeState.origW || nh !== _resizeState.origH) {
-                    window.pywebview.api.windowResize(nw, nh);
-                }
-            }
-        } catch(ex) {}
-
-        e.preventDefault();
-    });
-
-    document.addEventListener('mouseup', function() {
-        _resizeState = null;
-    });
-}
-
-// 初始化
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-        _initHeaderDrag();
-        _initResizeEdges();
-    });
-} else {
-    _initHeaderDrag();
-    _initResizeEdges();
+    if (window.electronAPI) window.electronAPI.windowClose();
 }
 
 // ==================== Tab Manager - 浏览器风格多标签页 ====================

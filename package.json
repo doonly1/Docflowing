@@ -1,0 +1,58 @@
+{
+  "name": "docflow",
+  "version": "1.0.0",
+  "description": "文枢 DocFlow — 文档工作流桌面应用",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env DOCFLOW_DEV=1 electron .",
+    "postinstall": "node electron/copy-libs.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.docflow.app",
+    "productName": "文枢",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "ui/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "ui/favicon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "ui/favicon.ico"
+    }
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "marked": "^15.0.0",
+    "quill": "^2.0.3",
+    "turndown": "^7.2.0"
+  }
+}
