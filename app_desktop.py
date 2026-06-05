@@ -66,6 +66,7 @@ class JsBridge:
 
     def __init__(self):
         self._window = None
+        self._maximized = False  # 跟踪最大化状态
 
     def _get_window(self):
         if self._window is None:
@@ -116,6 +117,7 @@ class JsBridge:
             w = self._get_window()
             if w:
                 w.maximize()
+                self._maximized = True
                 return True
         except Exception as e:
             logger.warning("windowMaximize error: %s", e)
@@ -127,9 +129,84 @@ class JsBridge:
             w = self._get_window()
             if w:
                 w.restore()
+                self._maximized = False
                 return True
         except Exception as e:
             logger.warning("windowRestore error: %s", e)
+        return False
+
+    def windowToggleMaximize(self):
+        """切换最大化/还原状态"""
+        try:
+            w = self._get_window()
+            if w:
+                if self._maximized:
+                    w.restore()
+                    self._maximized = False
+                else:
+                    w.maximize()
+                    self._maximized = True
+                return True
+        except Exception as e:
+            logger.warning("windowToggleMaximize error: %s", e)
+        return False
+
+    def windowIsMaximized(self):
+        """返回窗口是否最大化"""
+        return self._maximized
+
+    def windowGetPosition(self):
+        """返回窗口位置 {x, y}"""
+        try:
+            w = self._get_window()
+            if w:
+                state = w.get_state()
+                return {
+                    'x': int(state.get('x') or 0),
+                    'y': int(state.get('y') or 0)
+                }
+        except Exception as e:
+            logger.warning("windowGetPosition error: %s", e)
+        return {'x': 0, 'y': 0}
+
+    def windowGetSize(self):
+        """返回窗口大小 {width, height}"""
+        try:
+            w = self._get_window()
+            if w:
+                state = w.get_state()
+                return {
+                    'width': int(state.get('width') or 1100),
+                    'height': int(state.get('height') or 700)
+                }
+        except Exception as e:
+            logger.warning("windowGetSize error: %s", e)
+        return {'width': 1100, 'height': 700}
+
+    def windowMove(self, x, y):
+        """移动窗口到指定位置"""
+        try:
+            if x is None or y is None:
+                return False
+            w = self._get_window()
+            if w:
+                w.move(int(x), int(y))
+                return True
+        except Exception as e:
+            logger.warning("windowMove error: %s", e)
+        return False
+
+    def windowResize(self, width, height):
+        """调整窗口大小"""
+        try:
+            if width is None or height is None:
+                return False
+            w = self._get_window()
+            if w:
+                w.resize(int(width), int(height))
+                return True
+        except Exception as e:
+            logger.warning("windowResize error: %s", e)
         return False
 
     def windowClose(self):

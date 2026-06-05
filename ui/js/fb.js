@@ -24,6 +24,7 @@ var FileBase = {
     fbExpandedTreePaths: {},  // 跟踪手动展开的树节点路径
     fbDisplayPath: '',
     fbClipboard: null,
+    _renderVersion: 0,  // 用于取消因异步竞态导致的冗余渲染
 
     api: function(url, method, body) {
         var o = {
@@ -128,7 +129,11 @@ var FileBase = {
         this.currentSort = { field: 'mtime', asc: false };
         // 如果 main.js 已加载用户角色，跳过重复请求
         if (!window.authRole) await this.refreshAuthRole();
+        // 记录当前渲染版本，用于后续检测是否被取消
+        var myVersion = ++this._renderVersion;
         await this.refreshUserCache();
+        // 异步恢复后检查版本：如果版本已被其他操作（如 switchTab 守卫）递增，则放弃本次渲染
+        if (this._renderVersion !== myVersion) return;
         if (this.currentFbId) {
             await this.renderDetail();
         } else {
@@ -177,6 +182,22 @@ var FileBase = {
             this._lsDel('docflow_current_fb_permission');
             this._lsDel('docflow_current_subdir');
             this.fbExpandedTreePaths = {};
+
+            // 同步更新当前 fb 标签状态为列表态
+            if (typeof tabManager !== 'undefined') {
+                var activeTab = tabManager._findById(tabManager.activeTabId);
+                if (activeTab && activeTab.type === 'fb') {
+                    activeTab.state.fbId = null;
+                    activeTab.state.fbName = '文件库';
+                    activeTab.state.fbLocalPath = '';
+                    activeTab.state.fbDisplayPath = '';
+                    activeTab.state.fbPermission = '';
+                    activeTab.state.fbSubdir = '';
+                    activeTab.state.fbCurrentPath = [];
+                    activeTab._identified = false;
+                    tabManager._renderBar();
+                }
+            }
             var role = this.getUserRole();
 
             var kbView = document.getElementById('content-view');
@@ -516,7 +537,7 @@ var FileBase = {
     },
 
     openKb: async function(kbId, permission, name, localPath, displayPath) {
-        // 通过 tabManager 为每个文件库创建独立标签页
+        // 通过 tabManager 管理标签
         if (typeof tabManager !== 'undefined') {
             // 查找是否已有该文件库的标签
             for (var i = 0; i < tabManager.tabs.length; i++) {
@@ -524,6 +545,43 @@ var FileBase = {
                     tabManager.switchTab(tabManager.tabs[i].id);
                     return;
                 }
+            }
+            // 复用当前未标识的 fb 标签（列表态），进入具体库
+            var activeTab = tabManager._findById(tabManager.activeTabId);
+            if (activeTab && activeTab.type === 'fb' && !activeTab._identified) {
+                activeTab._identified = true;
+                activeTab.state = {
+                    fbId: kbId,
+                    fbName: name,
+                    fbLocalPath: localPath,
+                    fbDisplayPath: displayPath,
+                    fbPermission: permission,
+                    fbSubdir: ''
+                };
+                this.currentFbId = kbId;
+                this.fbCurrentPermission = permission;
+                this.fbCanEdit = permission === 'edit' || permission === 'manage';
+                this.fbCanManage = permission === 'manage';
+                this.fbIsRemote = !localPath;
+                this.selectedDocs = {};
+                this.fbName = name || '';
+                this.fbLocalPath = localPath || '';
+                this.fbDisplayPath = displayPath || '';
+                this.fbLocalCurrentSubdir = '';
+                this.currentPath = [{ id: kbId, name: name || '未知文件库', type: 'kb' }];
+                this.currentSort = { field: 'mtime', asc: false };
+                this.fbCategoryTree = null;
+                this.fbTreeLoaded = false;
+                this.fbExpandedTreePaths = {};
+                this._lsSet('docflow_current_fb_id', kbId);
+                this._lsSet('docflow_current_fb_permission', permission);
+                this._lsSet('docflow_current_fb_name', name || '');
+                this._lsSet('docflow_current_fb_local_path', localPath || '');
+                this._lsSet('docflow_current_fb_display_path', displayPath || '');
+                this._lsDel('docflow_current_subdir');
+                tabManager._renderBar();
+                await this.renderDetail();
+                return;
             }
             // 创建新标签
             var id = 't' + (tabManager.nextId++);
