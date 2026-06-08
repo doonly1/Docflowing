@@ -117,13 +117,14 @@ class RemoteFilebaseStore:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self._filebases, f, ensure_ascii=False, indent=2)
 
-    def add(self, fb_id: str, owner_node_id: str, owner_addr: str, name: str, permission: str):
+    def add(self, fb_id: str, owner_node_id: str, owner_addr: str, name: str, permission: str, perm_mask: int = None):
         with self._lock:
             self._filebases[fb_id] = {
                 'owner_node_id': owner_node_id,
                 'owner_addr': owner_addr,
                 'name': name,
                 'permission': permission,
+                'perm_mask': perm_mask,
                 'created_at': time.time()
             }
             self._save()

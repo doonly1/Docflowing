@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _get_node_identity
 from server import get_p2p_discovery
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 @fb_bp.route('/<fb_id>/share', methods=['POST'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def share_filebase(filebase_id):
     """将文件库共享给其他 P2P 节点"""
     data = request.get_json() or {}
@@ -87,7 +87,7 @@ def share_filebase(filebase_id):
 
 @fb_bp.route('/<fb_id>/shared-nodes', methods=['GET'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def list_shared_nodes(filebase_id):
     """获取文件库已共享的节点列表"""
     db = get_db()
@@ -111,7 +111,7 @@ def list_shared_nodes(filebase_id):
 
 @fb_bp.route('/<fb_id>/shared-nodes/<node_id>', methods=['DELETE'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def revoke_share(filebase_id, node_id):
     """撤销对某个节点的共享"""
     db = get_db()

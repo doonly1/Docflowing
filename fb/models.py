@@ -53,11 +53,39 @@ CREATE TABLE IF NOT EXISTS shared_nodes (
 )
 """
 
+
+CREATE_FILEBASE_PERM_V2 = """CREATE TABLE IF NOT EXISTS filebase_perm_v2 (
+    filebase_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    perm_mask INTEGER NOT NULL DEFAULT 1,
+    created_at REAL,
+    updated_at REAL,
+    PRIMARY KEY (filebase_id, user_id)
+)
+"""
+
+CREATE_FILE_LOCKS = """CREATE TABLE IF NOT EXISTS file_locks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filebase_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    locked_by TEXT NOT NULL,
+    locked_at REAL NOT NULL,
+    expires_at REAL,
+    UNIQUE(filebase_id, path)
+)
+"""
+
+CREATE_INDEX_FILE_LOCKS = [
+    "CREATE INDEX IF NOT EXISTS idx_file_locks_filebase ON file_locks(filebase_id)",
+]
+
 ALL_TABLES = [
     CREATE_FILEBASES,
     CREATE_FILEBASE_PERMISSIONS,
     CREATE_FILEBASE_SYNC_STATES,
     CREATE_SHARED_NODES,
+    CREATE_FILEBASE_PERM_V2,
+    CREATE_FILE_LOCKS,
 ]
 
 # 旧迁移保留以支持现有部署

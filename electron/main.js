@@ -5,8 +5,10 @@ const http = require('http');
 
 // ==================== 配置 ====================
 const PORT = parseInt(process.env.PORT || '5000', 10);
-const DEV_MODE = process.env.DOCFLOW_DEV === '1' || !app.isPackaged;
-const ROOT_DIR = app.isPackaged ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..');
+const IS_PACKAGED = app.isPackaged;
+const DEV_MODE = process.env.DOCFLOW_DEV === '1';
+const OPEN_DEVTOOLS = DEV_MODE;
+const ROOT_DIR = IS_PACKAGED ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..');
 const APP_NAME = '文枢';
 
 // ==================== 全局状态 ====================
@@ -17,20 +19,20 @@ let isQuitting = false;
 
 // ==================== Python 后端管理 ====================
 function getPythonCommand() {
-    if (DEV_MODE) {
-        // 开发模式：使用系统 python
+    if (IS_PACKAGED) {
+        // 生产模式：使用 PyInstaller 编译的 exe
+        const exePath = path.join(process.resourcesPath, 'backend', 'backend.exe');
         return {
-            cmd: process.platform === 'win32' ? 'python' : 'python3',
-            args: ['app_server.py'],
-            cwd: ROOT_DIR
+            cmd: exePath,
+            args: [],
+            cwd: path.dirname(exePath)
         };
     }
-    // 生产模式：使用 PyInstaller 编译的 exe
-    const exePath = path.join(process.resourcesPath, 'backend', 'backend.exe');
+    // 开发模式：使用系统 python
     return {
-        cmd: exePath,
-        args: [],
-        cwd: path.dirname(exePath)
+        cmd: process.platform === 'win32' ? 'python' : 'python3',
+        args: ['app_server.py'],
+        cwd: ROOT_DIR
     };
 }
 
@@ -131,7 +133,7 @@ function createWindow() {
     mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
 
     // 开发模式自动打开 DevTools
-    if (DEV_MODE) {
+    if (OPEN_DEVTOOLS) {
         mainWindow.webContents.openDevTools({ mode: 'bottom' });
     }
 
@@ -281,6 +283,20 @@ ipcMain.handle('open-external', async (_event, url) => {
 ipcMain.handle('get-app-version', () => {
     return app.getVersion();
 });
+
+// ==================== 单实例锁（防止重复启动） ====================
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+}
 
 // ==================== 应用生命周期 ====================
 app.whenReady().then(async () => {

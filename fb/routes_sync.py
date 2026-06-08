@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission
+from fb.decorators import _require_fb_permission, require_fb_perm
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -51,7 +51,7 @@ def _trigger_fb_sync(filebase_id):
 
 @fb_bp.route('/<fb_id>/sync', methods=['POST'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def toggle_sync(filebase_id):
     """切换文件库同步状态"""
     data = request.get_json() or {}
@@ -79,7 +79,7 @@ def toggle_sync(filebase_id):
 
 @fb_bp.route('/<fb_id>/sync-now', methods=['POST'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def sync_now(filebase_id):
     """手动触发立即同步"""
     db = get_db()
@@ -107,7 +107,7 @@ def sync_now(filebase_id):
 
 @fb_bp.route('/<fb_id>/sync-status', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def get_sync_status(filebase_id):
     """获取同步状态"""
     db = get_db()

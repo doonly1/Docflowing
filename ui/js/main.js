@@ -1632,6 +1632,17 @@ window.tabManager = {
                 }
             }
         }
+        // 从右键菜单带入文件库路径
+        var preselect = window._toolsPreselect;
+        window._toolsPreselect = null;
+        if (preselect && !tab.state.workdirValue) {
+            var wd = document.getElementById('workdir');
+            if (wd && preselect.type === 'kb' && preselect.kbId) {
+                wd.value = preselect.name + (preselect.subdir ? '/' + preselect.subdir : '');
+                wd.setAttribute('data-fb-id', preselect.kbId);
+                wd.setAttribute('data-fb-subdir', preselect.subdir || '');
+            }
+        }
         selectTool(savedTool);
 
         // 绑定拖拽支持

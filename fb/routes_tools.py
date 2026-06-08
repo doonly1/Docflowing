@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity
 from tools.tool_defs import TOOL_SCRIPTS
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -16,7 +16,7 @@ fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 @fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
 @_ensure_local_fb_route
 def run_tool_on_fb(filebase_id):
     """在文件库上执行工具"""
@@ -115,7 +115,7 @@ def run_tool_on_fb(filebase_id):
 
 @fb_bp.route('/<fb_id>/convert-doc', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
 def convert_doc_files(filebase_id):
     """扫描文件库中的 .doc 文件并转换为 .docx"""
     db = get_db()

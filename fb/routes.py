@@ -13,12 +13,15 @@
 - routes_sync: KB 同步
 - routes_p2p: P2P 共享
 - routes_tools: 工具执行
+- routes_locks: 文件锁定管理
 """
 
 from fb.decorators import (
     _is_remote_fb, _get_node_identity, _ensure_local_fb_route,
     _check_fb_permission, _require_fb_permission, _is_admin,
-    PERMISSION_LEVELS
+    PERMISSION_LEVELS, PERM_BITS, ROLE_TEMPLATES,
+    _check_fb_perm_bits, require_fb_perm,
+    check_file_lock, require_not_locked,
 )
 
 from fb.routes_base import (
@@ -93,7 +96,12 @@ fb_bp.add_url_rule('/share-batch', 'batch_share', batch_share, methods=['POST'])
 fb_bp.add_url_rule('/p2p/node', 'get_p2p_node_info', get_p2p_node_info, methods=['GET'])
 fb_bp.add_url_rule('/p2p/node', 'update_p2p_node_info', update_p2p_node_info, methods=['PUT'])
 fb_bp.add_url_rule('/p2p/discovered-nodes', 'get_discovered_nodes', get_discovered_nodes, methods=['GET'])
-
 from fb.routes_tools import run_tool_on_fb, convert_doc_files
 fb_bp.add_url_rule('/<fb_id>/run-tool', 'run_tool_on_fb', run_tool_on_fb, methods=['POST'])
 fb_bp.add_url_rule('/<fb_id>/convert-doc', 'convert_doc_files', convert_doc_files, methods=['POST'])
+
+from fb.routes_locks import list_locks, acquire_lock, release_lock, check_lock_status
+fb_bp.add_url_rule('/<fb_id>/locks', 'list_locks', list_locks, methods=['GET'])
+fb_bp.add_url_rule('/<fb_id>/locks', 'acquire_lock', acquire_lock, methods=['POST'])
+fb_bp.add_url_rule('/<fb_id>/locks', 'release_lock', release_lock, methods=['DELETE'])
+fb_bp.add_url_rule('/<fb_id>/locks/check', 'check_lock_status', check_lock_status, methods=['GET'])

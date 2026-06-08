@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, send_file, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity, require_not_locked
 from fb.routes_files import _trigger_fb_sync
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -14,7 +14,8 @@ fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 @fb_bp.route('/<fb_id>/local-files/content', methods=['PUT'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def save_local_file_content(filebase_id):
     """保存文件内容"""
@@ -64,7 +65,7 @@ def save_local_file_content(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/content', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 @_ensure_local_fb_route
 def get_local_file_content(filebase_id):
     """获取文件内容"""
@@ -133,7 +134,7 @@ SUPPORTED_PREVIEW_EXTS = {'.docx', '.pptx', '.ppt', '.xlsx', '.xls'}
 
 @fb_bp.route('/<fb_id>/local-files/preview', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 @_ensure_local_fb_route
 def file_preview(filebase_id):
     """预览文件"""
@@ -178,7 +179,7 @@ def file_preview(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/download', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 @_ensure_local_fb_route
 def download_local_file(filebase_id):
     """下载文件"""
@@ -214,7 +215,7 @@ def download_local_file(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/batch-download', methods=['POST'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def batch_download_local(filebase_id):
     """批量下载文件"""
     db = get_db()
@@ -252,7 +253,7 @@ def batch_download_local(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/save-as', methods=['POST'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def save_local_file_as(filebase_id):
     """另存文件"""
     if getattr(g, 'is_remote_fb', False):
@@ -310,7 +311,7 @@ def save_local_file_as(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/batch-save-as', methods=['POST'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def batch_save_local_files(filebase_id):
     """批量另存文件"""
     data = request.get_json() or {}
@@ -369,7 +370,7 @@ def batch_save_local_files(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/open', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def open_local_file(filebase_id):
     """打开文件"""
     db = get_db()
@@ -398,7 +399,7 @@ def open_local_file(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/open-with-app', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def open_with_app(filebase_id):
     """用系统默认软件打开文件"""
     import platform

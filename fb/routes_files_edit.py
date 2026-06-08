@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity, require_not_locked
 from fb.routes_files import _trigger_fb_sync
 from fb.routes_base import _get_trash_dir
 
@@ -17,7 +17,8 @@ fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 @fb_bp.route('/<fb_id>/local-files/replace', methods=['PUT'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def replace_local_file(filebase_id):
     """替换文件"""
@@ -72,7 +73,8 @@ def replace_local_file(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/move', methods=['PUT'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def move_local_items(filebase_id):
     """移动文件或目录"""
@@ -136,7 +138,8 @@ def move_local_items(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files', methods=['DELETE'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def delete_local_items(filebase_id):
     """删除文件或目录"""
@@ -191,7 +194,8 @@ def delete_local_items(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/rename', methods=['PUT'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def rename_local_item(filebase_id):
     """重命名文件或目录"""
@@ -244,7 +248,8 @@ def rename_local_item(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/copy', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def copy_local_items(filebase_id):
     """复制文件或目录"""
@@ -312,7 +317,7 @@ def copy_local_items(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/trash-items', methods=['GET'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
 @_ensure_local_fb_route
 def list_file_trash(filebase_id):
     """列出文件库内的回收站项目"""
@@ -363,7 +368,7 @@ def list_file_trash(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/trash-restore', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
 @_ensure_local_fb_route
 def restore_file_trash(filebase_id):
     """从回收站恢复文件"""
@@ -428,7 +433,7 @@ def restore_file_trash(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/trash-item', methods=['DELETE'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
 @_ensure_local_fb_route
 def delete_file_trash_item(filebase_id):
     """永久删除回收站中的项目"""

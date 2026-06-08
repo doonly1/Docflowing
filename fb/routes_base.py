@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db, get_visible_fb_ids
-from fb.decorators import _require_fb_permission, _is_admin
+from fb.decorators import _require_fb_permission, require_fb_perm, _is_admin
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -370,7 +370,7 @@ def _get_fb_file_count(filebase_id: str, owner_id: str) -> int:
 
 @fb_bp.route('/<fb_id>', methods=['PUT'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def rename_fb(filebase_id):
     """重命名文件库"""
     data = request.get_json()
@@ -420,7 +420,7 @@ def _cleanup_synced_data(user_id, filebase_id):
 
 @fb_bp.route('/<fb_id>', methods=['DELETE'])
 @login_required
-@_require_fb_permission('manage')
+@require_fb_perm('manage')
 def delete_fb(filebase_id):
     """删除文件库"""
     db = get_db()

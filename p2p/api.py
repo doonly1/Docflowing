@@ -16,20 +16,58 @@ logger = get_logger(__name__)
 
 p2p_bp = Blueprint('p2p', __name__, url_prefix='/p2p')
 
+from fb.decorators import PERM_BITS, _check_fb_perm_bits
+
+# Backward compatible levels for old system
 FB_PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
 
+
 def _check_permission(fb_id: str, node_id: str, required: str) -> bool:
+    """Check permission using either old table or new bitmask table"""
     from fb.database import get_db
+    from fb.decorators import ROLE_TEMPLATES
     db = get_db()
+
+    # Try new perm_v2 first
+    bit = PERM_BITS.get(required)
+    if bit is not None:
+        row = db.execute(
+            "SELECT perm_mask FROM filebase_perm_v2 WHERE filebase_id = ? AND user_id = ?",
+            (fb_id, node_id)
+        ).fetchone()
+        if row:
+            return (row['perm_mask'] & bit) == bit
+
+    # Fallback to old permission_level
     row = db.execute(
         "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
         (fb_id, node_id)
     ).fetchone()
     if not row:
+        # Check if node is owner
+        owner_row = db.execute("SELECT owner_id FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+        if owner_row and owner_row['owner_id'] == node_id:
+            if bit is not None:
+                return (ROLE_TEMPLATES['manage'] & bit) == bit
+            return True
         return False
-    actual = FB_PERMISSION_LEVELS.get(row['permission_level'], -1)
-    return actual >= FB_PERMISSION_LEVELS.get(required, 0)
+
+    if bit is None:
+        # Old style level check
+        actual = FB_PERMISSION_LEVELS.get(row['permission_level'], -1)
+        return actual >= FB_PERMISSION_LEVELS.get(required, 0)
+    else:
+        # Map old level to role template and check bit
+        level = row['permission_level']
+        if level == 'manage':
+            return (ROLE_TEMPLATES['manage'] & bit) == bit
+        elif level == 'edit':
+            return (ROLE_TEMPLATES['edit'] & bit) == bit
+        elif level == 'view':
+            return (ROLE_TEMPLATES['view'] & bit) == bit
+        return False
+
 
 
 def _get_fb_local_path(fb_id: str) -> str | None:
@@ -735,8 +773,9 @@ def p2p_share_notify():
     trust_store = TrustStore()
     trust_store.add_node(node_id, node_name, owner_addr, node_public_key)
 
+    perm_mask = data.get('perm_mask')
     remote_store = RemoteFilebaseStore()
-    remote_store.add(fb_id, node_id, owner_addr, fb_name, permission)
+    remote_store.add(fb_id, node_id, owner_addr, fb_name, permission, perm_mask)
 
     logger.info("Received shared filebase: %s (%s) from %s", fb_name, fb_id[:8], node_id[:8])
     return jsonify({'success': True, 'message': '文件库已添加到本地列表'})
@@ -747,6 +786,7 @@ def p2p_share_notify():
 def p2p_share_list():
     from fb.database import get_db
     db = get_db()
+    # Get from old permissions table
     rows = db.execute(
         "SELECT f.id, f.name, f.filebase_type FROM filebases f "
         "JOIN filebase_permissions p ON f.id = p.filebase_id "
@@ -755,6 +795,19 @@ def p2p_share_list():
     ).fetchall()
 
     filebases = [{'id': r['id'], 'name': r['name'], 'type': r['filebase_type']} for r in rows]
+
+    # Also include from perm_v2 table
+    v2_rows = db.execute(
+        "SELECT f.id, f.name, f.filebase_type FROM filebases f "
+        "JOIN filebase_perm_v2 p ON f.id = p.filebase_id "
+        "WHERE p.user_id = ? AND p.perm_mask > 0",
+        (g.remote_node_id,)
+    ).fetchall()
+    existing_ids = {r['id'] for r in rows}
+    for r in v2_rows:
+        if r['id'] not in existing_ids:
+            filebases.append({'id': r['id'], 'name': r['name'], 'type': r['filebase_type']})
+
     return jsonify({'success': True, 'filebases': filebases})
 
 

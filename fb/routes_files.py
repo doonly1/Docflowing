@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, send_file, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, _ensure_local_fb_route, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity, require_not_locked
 from tools.tool_defs import TOOL_EXTENSIONS
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -44,7 +44,8 @@ SUPPORTED_PREVIEW_EXTS = {'.docx', '.pptx', '.ppt', '.xlsx', '.xls'}
 
 @fb_bp.route('/<fb_id>/local-files', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def upload_local_files(filebase_id):
     """上传文件"""
@@ -102,7 +103,8 @@ def upload_local_files(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/dir', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def create_local_dir(filebase_id):
     """创建目录"""
@@ -144,7 +146,8 @@ def create_local_dir(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/create', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def create_local_file(filebase_id):
     """创建本地文件"""
@@ -195,7 +198,8 @@ def create_local_file(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files/create-office', methods=['POST'])
 @login_required
-@_require_fb_permission('edit')
+@require_fb_perm('edit')
+@require_not_locked
 @_ensure_local_fb_route
 def create_office_file(filebase_id):
     """创建 Office 文件"""
@@ -263,7 +267,7 @@ def create_office_file(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-files', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 @_ensure_local_fb_route
 def list_local_files(filebase_id):
     """列出本地文件"""
@@ -336,7 +340,7 @@ def list_local_files(filebase_id):
 
 @fb_bp.route('/<fb_id>/local-categories', methods=['GET'])
 @login_required
-@_require_fb_permission('view')
+@require_fb_perm('view')
 def list_local_categories(filebase_id):
     """列出目录树"""
     db = get_db()

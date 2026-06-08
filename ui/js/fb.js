@@ -4,6 +4,22 @@ var FileBase = {
     _lsSet: function(key, val) { try { localStorage.setItem(key, val); } catch(e) {} },
     _lsDel: function(key) { try { localStorage.removeItem(key); } catch(e) {} },
 
+    // ---- Granular permission bit constants ----
+    PERM_VIEW:   1,
+    PERM_CREATE: 2,
+    PERM_EDIT:   4,
+    PERM_RENAME: 8,
+    PERM_MOVE:   16,
+    PERM_COPY:   32,
+    PERM_DELETE: 64,
+    PERM_MANAGE: 128,
+
+
+    hasPerm: function(bits) {
+        return (this.fbPermMask & bits) === bits;
+    },
+
+
     currentFbId: null,
     fbCurrentPermission: null,
     fbIsRemote: false,  // 是否为远程文件库（其他节点共享的）
@@ -15,8 +31,7 @@ var FileBase = {
     currentSort: { field: 'mtime', asc: false },
     currentPath: [],
     fbName: '',
-    fbCanEdit: false,
-    fbCanManage: false,
+    fbPermMask: 0,
     fbLocalPath: '',
     fbLocalCurrentSubdir: '',
     fbCategoryTree: null,
@@ -129,6 +144,16 @@ var FileBase = {
         this.currentSort = { field: 'mtime', asc: false };
         // 如果 main.js 已加载用户角色，跳过重复请求
         if (!window.authRole) await this.refreshAuthRole();
+        // 窗口重新获得焦点时自动刷新（从OS删除文件后切回）
+        if (!this._focusRefreshRegistered) {
+            this._focusRefreshRegistered = true;
+            var self = this;
+            window.addEventListener('focus', function() {
+                if (self.currentFbId) {
+                    self.renderDetail();
+                }
+            });
+        }
         // 记录当前渲染版本，用于后续检测是否被取消
         var myVersion = ++this._renderVersion;
         await this.refreshUserCache();
@@ -215,7 +240,6 @@ var FileBase = {
             h += '<button onclick="FileBase.search()">🔍</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
-            h += '<button onclick="navigateTo(\'tools\')" title="文档处理工具">🔧 工具</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
             h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
             h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px">🗑️</button>';
@@ -560,8 +584,7 @@ var FileBase = {
                 };
                 this.currentFbId = kbId;
                 this.fbCurrentPermission = permission;
-                this.fbCanEdit = permission === 'edit' || permission === 'manage';
-                this.fbCanManage = permission === 'manage';
+                this.fbPermMask = permission === 'manage' ? 255 : (permission === 'edit' ? 127 : 1);
                 this.fbIsRemote = !localPath;
                 this.selectedDocs = {};
                 this.fbName = name || '';
@@ -607,8 +630,7 @@ var FileBase = {
         // 后备：原有行为（无 tabManager 时）
         this.currentFbId = kbId;
         this.fbCurrentPermission = permission;
-        this.fbCanEdit = permission === 'edit' || permission === 'manage';
-        this.fbCanManage = permission === 'manage';
+        this.fbPermMask = permission === 'manage' ? 255 : (permission === 'edit' ? 127 : 1);
         // 无本地路径 = 远程文件库（其他节点共享的）
         this.fbIsRemote = !localPath;
         this.selectedDocs = {};
@@ -653,7 +675,7 @@ var FileBase = {
             h += '</div>';
             h += '</div>';
             h += '<button onclick="FileBase.downloadAction()">下载</button>';
-            h += '<button onclick="navigateTo(\'tools\')" title="文档处理工具">🔧 工具</button>';
+            h += '<button onclick="FileBase.showLockManager()" class="fb-lock-btn" title="文件锁管理">🔒 锁</button>';
             h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px;cursor:pointer;color:#888;transition:color 0.15s" onmouseover="this.style.color=\'#e94560\'" onmouseout="this.style.color=\'#888\'">🗑️</button>';
             h += '<input type="file" id="fb-file-upload-input" multiple style="display:none" onchange="FileBase.handleFileUpload(this)">';
             h += '<input type="file" id="fb-folder-upload-input" webkitdirectory style="display:none" onchange="FileBase.handleFolderUpload(this)">';
@@ -677,11 +699,9 @@ var FileBase = {
         }
         this.renderBreadcrumb();
 
-        if (!this.fbTreeLoaded) {
-            var res = await this.api('/api/fb/' + this.currentFbId + '/local-categories?recursive=1', 'GET');
-            this.fbCategoryTree = res.success ? (res.categories || []) : [];
-            this.fbTreeLoaded = true;
-        }
+        var res = await this.api('/api/fb/' + this.currentFbId + '/local-categories?recursive=1', 'GET');
+        this.fbCategoryTree = res.success ? (res.categories || []) : [];
+        this.fbTreeLoaded = true;
         this.renderCategoryTree();
         await this.loadFiles();
         this.initTreeResize();
@@ -1333,46 +1353,83 @@ var FileBase = {
     _buildFileContextMenu: function(path, isDir) {
         var escPath = path.replace(/'/g, "\\'");
         var h = '';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        if (this.hasPerm(this.PERM_RENAME)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
+        }
+        if (this.hasPerm(this.PERM_COPY)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextCopyOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
+        }
+        if (this.hasPerm(this.PERM_MOVE)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextMoveOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        }
         h += '<div class="fb-menu-item" onclick="FileBase.contextDownloadOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
-        h += '<div class="fb-menu-divider"></div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        if (this.hasPerm(this.PERM_RENAME) || this.hasPerm(this.PERM_COPY) || this.hasPerm(this.PERM_MOVE)) {
+            h += '<div class="fb-menu-divider"></div>';
+        }
+        if (this.hasPerm(this.PERM_EDIT)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextLockFile(\'' + escPath + '\')"><span class="icon">🔒</span> 锁定</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.contextUnlockFile(\'' + escPath + '\')"><span class="icon">🔓</span> 解锁</div>';
+        }
+        if (this.hasPerm(this.PERM_EDIT) && this.hasPerm(this.PERM_DELETE)) {
+            h += '<div class="fb-menu-divider"></div>';
+        }
+        if (this.hasPerm(this.PERM_DELETE)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        }
         h += '<div class="fb-menu-divider"></div>';
         h += '<div class="fb-menu-item" onclick="FileBase.showProperties(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="5" r=".8" fill="currentColor"/><path d="M6.5 7h1v3h-1z" fill="currentColor"/></svg></span> 属性</div>';
         return h;
     },
 
     _buildMultiSelectContextMenu: function() {
-        var h = '<div class="fb-menu-item" onclick="FileBase.contextCopyMulti();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.showMoveDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        var h = '';
+        if (this.hasPerm(this.PERM_COPY)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextCopyMulti();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 1.5h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M4.5 4h7a1 1 0 011 1v7a1 1 0 01-1 1h-7a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/></svg></span> 复制</div>';
+        }
+        if (this.hasPerm(this.PERM_MOVE)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.showMoveDialog();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4v6.5a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 3H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5l3 3-3 3M11 8H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 移动</div>';
+        }
         h += '<div class="fb-menu-item" onclick="FileBase.downloadAction();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
-        h += '<div class="fb-menu-divider"></div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.batchDelete();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        if (this.hasPerm(this.PERM_COPY) || this.hasPerm(this.PERM_MOVE)) {
+            h += '<div class="fb-menu-divider"></div>';
+        }
+        if (this.hasPerm(this.PERM_EDIT)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.contextLockSelected()"><span class="icon">🔒</span> 锁定选中</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.contextUnlockSelected()"><span class="icon">🔓</span> 解锁选中</div>';
+        }
+        if ((this.hasPerm(this.PERM_EDIT) && this.hasPerm(this.PERM_DELETE))) {
+            h += '<div class="fb-menu-divider"></div>';
+        }
+        if (this.hasPerm(this.PERM_DELETE)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.batchDelete();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        }
         return h;
     },
 
     _buildEmptyContextMenu: function() {
-        var h = '<div class="fb-menu-item fb-menu-item-has-sub">' +
-                '<span class="icon">📄</span> 新建' +
-                '<span class="fb-menu-arrow">▸</span>' +
-                '<div class="fb-context-submenu">' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建md</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon">📄</span> 新建txt</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'docx\',\'Word文档\');FileBase.hideContextMenu()"><span class="icon">📃</span> 新建docx</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'xlsx\',\'Excel表格\');FileBase.hideContextMenu()"><span class="icon">📊</span> 新建xlsx</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'pptx\',\'PPT演示\');FileBase.hideContextMenu()"><span class="icon">📽️</span> 新建pptx</div>' +
-                '</div></div>' +
-                '<div class="fb-menu-item fb-menu-item-has-sub">' +
-                '<span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 2.5h4l3 3v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传' +
-                '<span class="fb-menu-arrow">▸</span>' +
-                '<div class="fb-context-submenu">' +
-                '<div class="fb-menu-item" onclick="FileBase.triggerFileUpload();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 2.5h4l3 3v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件</div>' +
-                '<div class="fb-menu-item" onclick="FileBase.triggerFolderUpload();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件夹</div>' +
-                '</div></div>' +
-                '<div class="fb-menu-divider"></div>' +
+        var h = '';
+        if (this.hasPerm(this.PERM_EDIT)) {
+            h += '<div class="fb-menu-item fb-menu-item-has-sub">' +
+                    '<span class="icon">📄</span> 新建' +
+                    '<span class="fb-menu-arrow">▸</span>' +
+                    '<div class="fb-context-submenu">' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateFolderDialog();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateMdDialog();FileBase.hideContextMenu()"><span class="icon">📝</span> 新建md</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateTxtDialog();FileBase.hideContextMenu()"><span class="icon">📄</span> 新建txt</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'docx\',\'Word文档\');FileBase.hideContextMenu()"><span class="icon">📃</span> 新建docx</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'xlsx\',\'Excel表格\');FileBase.hideContextMenu()"><span class="icon">📊</span> 新建xlsx</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.showCreateOfficeFile(\'pptx\',\'PPT演示\');FileBase.hideContextMenu()"><span class="icon">📽️</span> 新建pptx</div>' +
+                    '</div></div>';
+            h += '<div class="fb-menu-item fb-menu-item-has-sub">' +
+                    '<span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 2.5h4l3 3v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传' +
+                    '<span class="fb-menu-arrow">▸</span>' +
+                    '<div class="fb-context-submenu">' +
+                    '<div class="fb-menu-item" onclick="FileBase.triggerFileUpload();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 2.5h4l3 3v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.5 2.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件</div>' +
+                    '<div class="fb-menu-item" onclick="FileBase.triggerFolderUpload();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 4.5v6a1 1 0 001 1h9a1 1 0 001-1V5a1 1 0 00-1-1H7L5.5 2.5H2.5a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 7v4M5.5 8.5L7 7l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 上传文件夹</div>' +
+                    '</div></div>';
+            h += '<div class="fb-menu-divider"></div>';
+        }
+        h += '<div class="fb-menu-item" onclick="FileBase.contextOpenTools()"><span class="icon">🔧</span> 工具</div>' +
                 '<div class="fb-menu-item" onclick="FileBase.contextPaste()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 2h8a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.1"/><path d="M5 1h4v2H5V1z" stroke="currentColor" stroke-width="1.1"/><path d="M5 7l2 2 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 粘贴</div>' +
                 '<div class="fb-menu-divider"></div>' +
                 '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
@@ -1381,10 +1438,19 @@ var FileBase = {
 
     _buildTreeContextMenu: function(path) {
         var escPath = path.replace(/'/g, "\\'");
-        var h = '<div class="fb-menu-item" onclick="FileBase.treeNewFolder(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.treeRename(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
-        h += '<div class="fb-menu-item" onclick="FileBase.treeDelete(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
-        h += '<div class="fb-menu-divider"></div>';
+        var h = '';
+        if (this.hasPerm(this.PERM_EDIT)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.treeNewFolder(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>';
+        }
+        if (this.hasPerm(this.PERM_RENAME)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.treeRename(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
+        }
+        if (this.hasPerm(this.PERM_DELETE)) {
+            h += '<div class="fb-menu-item" onclick="FileBase.treeDelete(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        }
+        if (this.hasPerm(this.PERM_EDIT) || this.hasPerm(this.PERM_RENAME) || this.hasPerm(this.PERM_DELETE)) {
+            h += '<div class="fb-menu-divider"></div>';
+        }
         h += '<div class="fb-menu-item" onclick="FileBase.refreshKbList();FileBase.hideContextMenu()"><span class="icon">🔄</span> 刷新</div>';
         return h;
     },
@@ -1588,6 +1654,87 @@ var FileBase = {
         } else {
             showToast(res.message || '删除失败', 'error');
         }
+    },
+
+    // ──────────── 文件锁 右键菜单 ────────────
+
+    contextLockFile: async function(path) {
+        this.hideContextMenu();
+        var res = await this.api('/api/fb/' + this.currentFbId + '/locks', 'POST', { path: path });
+        if (res.success) {
+            showToast('已锁定: ' + path.split('/').pop(), 'success');
+        } else {
+            showToast(res.message || '锁定失败', 'error');
+        }
+    },
+
+    contextUnlockFile: async function(path) {
+        this.hideContextMenu();
+        if (!(await showConfirm('确定解锁 "' + path.split('/').pop() + '" 吗？'))) return;
+        var res = await this.api('/api/fb/' + this.currentFbId + '/locks?path=' + encodeURIComponent(path), 'DELETE');
+        if (res.success) {
+            showToast('已解锁: ' + path.split('/').pop(), 'success');
+            await this.renderDetail();
+        } else {
+            showToast(res.message || '解锁失败', 'error');
+        }
+    },
+
+    contextLockSelected: async function() {
+        this.hideContextMenu();
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        var paths = [];
+        for (var i = 0; i < rows.length; i++) {
+            var p = rows[i].getAttribute('data-local-path');
+            if (p) paths.push(p);
+        }
+        if (paths.length === 0) { showToast('没有选中的文件', 'error'); return; }
+        var ok = 0, fail = 0, lastErr = '';
+        for (var i = 0; i < paths.length; i++) {
+            var res = await this.api('/api/fb/' + this.currentFbId + '/locks', 'POST', { path: paths[i] });
+            if (res.success) { ok++; } else { fail++; lastErr = res.message || '锁定失败'; }
+        }
+        if (fail === 0) {
+            showToast('已锁定 ' + ok + ' 个文件', 'success');
+        } else {
+            showToast('锁定完成：' + ok + ' 成功，' + fail + ' 失败' + (lastErr ? '（' + lastErr + '）' : ''), fail === 0 ? 'success' : 'error');
+        }
+    },
+
+    contextUnlockSelected: async function() {
+        this.hideContextMenu();
+        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
+        var paths = [];
+        for (var i = 0; i < rows.length; i++) {
+            var p = rows[i].getAttribute('data-local-path');
+            if (p) paths.push(p);
+        }
+        if (paths.length === 0) { showToast('没有选中的文件', 'error'); return; }
+        if (!(await showConfirm('确定解锁选中的 ' + paths.length + ' 个文件吗？'))) return;
+        var ok = 0, fail = 0, lastErr = '';
+        for (var i = 0; i < paths.length; i++) {
+            var res = await this.api('/api/fb/' + this.currentFbId + '/locks?path=' + encodeURIComponent(paths[i]), 'DELETE');
+            if (res.success) { ok++; } else { fail++; lastErr = res.message || '解锁失败'; }
+        }
+        if (fail === 0) {
+            showToast('已解锁 ' + ok + ' 个文件', 'success');
+            await this.renderDetail();
+        } else {
+            showToast('解锁完成：' + ok + ' 成功，' + fail + ' 失败' + (lastErr ? '（' + lastErr + '）' : ''), 'error');
+        }
+    },
+
+    contextOpenTools: function() {
+        if (this.currentFbId) {
+            window._toolsPreselect = {
+                type: 'kb',
+                kbId: this.currentFbId,
+                name: this.fbName || '文件库',
+                subdir: this.fbLocalCurrentSubdir || ''
+            };
+        }
+        this.hideContextMenu();
+        navigateTo('tools');
     },
 
     treeNewFolder: async function(parentPath) {
@@ -2630,8 +2777,7 @@ var FileBase = {
     _openFromSearch: async function(kbId, kbName, subdir) {
         this.currentFbId = kbId;
         this.fbCurrentPermission = 'view';
-        this.fbCanEdit = false;
-        this.fbCanManage = false;
+        this.fbPermMask = 1;
         this.fbIsRemote = true;  // 搜索结果打开的文件库视为远程
         this.selectedDocs = {};
         this.fbName = kbName;
@@ -3075,7 +3221,96 @@ var FileBase = {
 
     formatDate: function(ts) {
         return new Date(ts * 1000).toLocaleString('zh-CN');
-    }
+    },
+
+    // ──────────── 文件锁管理 ────────────
+
+    showLockManager: async function() {
+        var self = this;
+        var fbId = this.currentFbId;
+        if (!fbId) { showToast('未打开文件库', 'error'); return; }
+
+        // 获取当前所有锁
+        var res = await this.api('/api/fb/' + fbId + '/locks', 'GET');
+        var locks = res.success ? (res.locks || []) : [];
+
+        var h = '<div id="fb-modal-overlay" class="fb-modal-overlay">';
+        h += '<div class="fb-modal" style="max-width:500px">';
+        h += '<h3>🔒 文件锁管理</h3>';
+        h += '<div style="margin-bottom:12px;font-size:13px;color:#666">锁定文件后，其他用户无法编辑/删除/重命名被锁定的文件</div>';
+
+        // 当前锁列表
+        h += '<div style="margin-bottom:12px">';
+        h += '<div style="font-size:13px;font-weight:600;color:#333;margin-bottom:6px">当前锁定 (' + locks.length + ')</div>';
+        if (locks.length === 0) {
+            h += '<div style="padding:12px;color:#999;font-size:12px;background:#f8f9fa;border-radius:4px">暂无锁定</div>';
+        } else {
+            h += '<div style="max-height:200px;overflow-y:auto;border:1px solid #e1e4e8;border-radius:4px">';
+            for (var i = 0; i < locks.length; i++) {
+                var l = locks[i];
+                var isSelf = l.locked_by === window.authUserId;
+                h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid #f0f0f0">';
+                h += '<div>';
+                h += '<span style="font-size:13px;color:#333">' + escapeHtmlText(l.path) + '</span>';
+                h += '<span style="font-size:11px;color:#999;margin-left:8px">' + (isSelf ? '（我锁定的）' : '由 ' + escapeHtmlText(l.locked_by_short) + ' 锁定') + '</span>';
+                h += '</div>';
+                if (isSelf || this.hasPerm(this.PERM_MANAGE)) {
+                    h += '<button class="fb-btn-remove" onclick="FileBase._doUnlock(\'' + escapeHtmlText(l.path) + '\')">解锁</button>';
+                }
+                h += '</div>';
+            }
+            h += '</div>';
+        }
+        h += '</div>';
+
+        // 锁定新文件
+        h += '<div style="margin-bottom:12px;padding-top:8px;border-top:1px solid #eee">';
+        h += '<div style="font-size:13px;font-weight:600;color:#333;margin-bottom:6px">锁定新文件</div>';
+        h += '<div style="display:flex;gap:8px">';
+        h += '<input type="text" id="fb-lock-path" placeholder="输入相对路径，如 folder/file.txt" style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">';
+        h += '<button class="fb-btn-primary" onclick="FileBase._doLock()">锁定</button>';
+        h += '</div>';
+        h += '<div style="margin-top:6px;font-size:11px;color:#999">支持锁定文件夹，锁定的目录下所有文件自动继承锁定状态</div>';
+        h += '</div>';
+
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
+        h += '</div></div></div>';
+
+        document.body.insertAdjacentHTML('beforeend', h);
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
+            if (e.target.id === 'fb-modal-overlay') self.closeModal();
+        });
+        var pathInput = document.getElementById('fb-lock-path');
+        if (pathInput) pathInput.focus();
+    },
+
+    _doLock: async function() {
+        var fbId = this.currentFbId;
+        var path = document.getElementById('fb-lock-path');
+        if (!path || !path.value.trim()) { showToast('请输入文件路径', 'error'); return; }
+        var res = await this.api('/api/fb/' + fbId + '/locks', 'POST', { path: path.value.trim() });
+        if (res.success) {
+            showToast(res.message || '锁定成功', 'success');
+            this.closeModal();
+            this.showLockManager();
+        } else {
+            showToast(res.message || '锁定失败', 'error');
+        }
+    },
+
+    _doUnlock: async function(path) {
+        if (!confirm('确定要解锁 "' + path + '" 吗？')) return;
+        var fbId = this.currentFbId;
+        var res = await this.api('/api/fb/' + fbId + '/locks?path=' + encodeURIComponent(path), 'DELETE');
+        if (res.success) {
+            showToast(res.message || '解锁成功', 'success');
+            this.closeModal();
+            this.showLockManager();
+        } else {
+            showToast(res.message || '解锁失败', 'error');
+        }
+    },
 };
 
 function escapeHtmlText(text) {
