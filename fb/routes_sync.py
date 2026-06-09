@@ -6,16 +6,23 @@ from flask import Blueprint, request, jsonify, g
 from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, require_fb_perm
+from fb.routes_base import _count_files_on_disk
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 
 def _toggle_fb_sync_visibility(filebase_id, visible):
-    """切换同步数据在 KB 中的可见性"""
+    """切换同步数据在 KB 中的可见性（当前请求上下文）"""
+    from flask import g
+    _update_kb_path_prefix(g.user_id, filebase_id, visible)
+
+
+def _update_kb_path_prefix(user_id, filebase_id, visible):
+    """重命名 KB 路径前缀：imported/ ↔ _disabled/（指定用户），
+    两条 UPDATE 在同一事务中，失败整体回滚，避免出现"半更新"状态"""
     try:
-        from flask import g
         from kb.database import get_db as get_kb_db
-        conn = get_kb_db(g.user_id)
+        conn = get_kb_db(user_id)
         if visible:
             old_prefix = f'_disabled/{filebase_id}/'
             new_prefix = f'imported/{filebase_id}/'
@@ -23,18 +30,23 @@ def _toggle_fb_sync_visibility(filebase_id, visible):
             old_prefix = f'imported/{filebase_id}/'
             new_prefix = f'_disabled/{filebase_id}/'
 
-        conn.execute(
-            "UPDATE wiki_files SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
-            (old_prefix, new_prefix, g.user_id, old_prefix + '%')
-        )
-        conn.execute(
-            "UPDATE wiki_fts SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
-            (old_prefix, new_prefix, g.user_id, old_prefix + '%')
-        )
-        conn.commit()
+        try:
+            # sqlite3 在遇到 DML 时自动开启事务；这里确保两条 UPDATE 在同一事务中整体提交/回滚
+            conn.execute(
+                "UPDATE wiki_files SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
+                (old_prefix, new_prefix, user_id, old_prefix + '%')
+            )
+            conn.execute(
+                "UPDATE wiki_fts SET path = REPLACE(path, ?, ?) WHERE usr_id = ? AND path LIKE ?",
+                (old_prefix, new_prefix, user_id, old_prefix + '%')
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     except Exception:
         import logging
-        logging.getLogger(__name__).warning(f"Failed to toggle visibility for {filebase_id}")
+        logging.getLogger(__name__).exception(f"Failed to toggle visibility for {filebase_id}")
 
 
 def _trigger_fb_sync(filebase_id):
@@ -132,8 +144,9 @@ def get_sync_status(filebase_id):
             total_files = state.total_files
             syncable_count = state.syncable_files
         else:
-            total_files = 0
-            syncable_count = 0
+            # 兜底：直接扫描磁盘
+            total_files = _count_files_on_disk(filebase_id, kb_row['owner_id'])
+            syncable_count = total_files
 
         is_syncing = filebase_id in worker._processing_filebases
 

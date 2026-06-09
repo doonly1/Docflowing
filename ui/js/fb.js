@@ -1001,6 +1001,7 @@ var FileBase = {
                     showToast('保存失败: ' + e.message, 'error');
                 }
             } else {
+                showToast('正在下载...', 'info');
                 window.open('/api/fb/' + this.currentFbId + '/local-files/download?path=' + encodeURIComponent(items[0].path), '_blank');
             }
         } else {
@@ -1030,6 +1031,7 @@ var FileBase = {
                     showToast('请至少选择一个文件或文件夹', 'error');
                     return;
                 }
+                showToast('正在打包下载...', 'info');
                 var url = '/api/fb/' + this.currentFbId + '/local-files/batch-download';
                 try {
                     var resp = await fetch(url, {
@@ -1639,6 +1641,9 @@ var FileBase = {
 
     contextDownloadOne: function(path) {
         this.hideContextMenu();
+        this._clearSelection();
+        var row = document.querySelector('.fb-file-row[data-local-path="' + path.replace(/\\/g, '\\\\') + '"]');
+        if (row) row.classList.add('selected');
         FileBase.downloadAction();
     },
 
@@ -2685,12 +2690,53 @@ var FileBase = {
         h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+
+        // 异步加载 agent 开关状态
+        (async function() {
+            var agentRes = await FileBase.api('/api/fb/' + self.currentFbId + '/agent-settings', 'GET');
+            if (agentRes.success) {
+                var checked = agentRes.agent_enabled === 1 || agentRes.agent_enabled === null || agentRes.agent_enabled === undefined;
+                var toggleHtml = '' +
+'<div class="fb-agent-toggle" style="margin:12px 0;padding:10px 0;border-top:1px solid #ddd;display:flex;align-items:center;justify-content:space-between">' +
+'    <div>' +
+'        <div style="font-weight:600;font-size:14px">🤖 AI 助手访问</div>' +
+'        <div style="font-size:12px;color:#888;margin-top:2px">允许 AI 助手读取和编辑此文件库中的文件</div>' +
+'    </div>' +
+'    <label style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer">' +
+'        <input type="checkbox" id="fb-agent-toggle-input" ' + (checked ? 'checked' : '') + ' onchange="FileBase._toggleAgentAccess(\'' + self.currentFbId + '\', this.checked)" style="opacity:0;width:0;height:0">' +
+'        <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;transition:0.3s;border-radius:24px"></span>' +
+'    </label>' +
+'</div>';
+                var existingToggle = document.querySelector('.fb-modal .fb-agent-toggle');
+                if (existingToggle) {
+                    existingToggle.outerHTML = toggleHtml;
+                } else {
+                    var p2pHeading = document.querySelector('.fb-modal h4');
+                    if (p2pHeading) {
+                        p2pHeading.insertAdjacentHTML('beforebegin', toggleHtml);
+                    }
+                }
+            }
+        })();
+
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
     closeModal: function() {
         var ov = document.getElementById('fb-modal-overlay');
         if (ov) ov.remove();
+    },
+
+    _toggleAgentAccess: async function(fbId, enabled) {
+        var res = await this.api('/api/fb/' + fbId + '/agent-settings', 'PUT', { agent_enabled: enabled });
+        if (res.success) {
+            showToast('AI 助手访问已' + (enabled ? '开启' : '关闭'), 'success');
+        } else {
+            showToast(res.message || '设置失败', 'error');
+            // 恢复开关状态
+            var cb = document.getElementById('fb-agent-toggle-input');
+            if (cb) cb.checked = !enabled;
+        }
     },
 
     _revokeShareNode: async function(fbId, nodeId) {

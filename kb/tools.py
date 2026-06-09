@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -229,7 +230,818 @@ WIKI_SEARCH_SCHEMA = {
 }
 
 
-ALL_TOOL_SCHEMAS = [MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA, WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA]
+# ==================== 文件库工具 ====================
+
+FB_LIST_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_list",
+        "description": (
+            "List all filebases (file libraries) accessible to the agent. "
+            "Returns each filebase with its id, name, type, file count, and whether agent access is enabled. "
+            "Use this to discover which filebases are available before browsing their contents."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
+
+FB_BROWSE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_browse",
+        "description": (
+            "Browse the directory tree or file listing of a filebase. "
+            "Returns files and subdirectories in the specified path. "
+            "Use 'subdir' to navigate into subdirectories. Leave 'subdir' empty to browse the root."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fb_id": {
+                    "type": "string",
+                    "description": "The filebase id (from fb_list)."
+                },
+                "subdir": {
+                    "type": "string",
+                    "description": "Relative path within the filebase (e.g. 'documents/subdir'). Empty string for root."
+                }
+            },
+            "required": ["fb_id"]
+        }
+    }
+}
+
+FB_READ_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_read",
+        "description": (
+            "Read the content of a text-based file (markdown, txt, source code, JSON, CSV, etc.) "
+            "in a filebase. Also supports reading .docx and .xlsx files as plain text. "
+            "Binary files like images, PDFs, and videos are not supported. "
+            "Returns the file content and its detected type."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fb_id": {
+                    "type": "string",
+                    "description": "The filebase id (from fb_list)."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Relative path of the file within the filebase (e.g. 'notes/meeting.md')."
+                }
+            },
+            "required": ["fb_id", "path"]
+        }
+    }
+}
+
+FB_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_search",
+        "description": (
+            "Search across all accessible filebases for documents matching keywords. "
+            "Matches both file names and file content (text-based files only). "
+            "Returns results grouped by filebase with file paths and match type (filename/content). "
+            "Use this when you need to find specific information across filebases."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Space-separated keywords to search for."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results per filebase. Default: 10."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+FB_CREATE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_create",
+        "description": (
+            "Create a new file or directory in a filebase. "
+            "Files can be created with optional initial content. "
+            "Subdirectories are supported via the 'parent' parameter. "
+            "If no extension is provided for a file, '.md' is used by default. "
+            "Cannot be used to create Office documents (.docx/.xlsx/.pptx). "
+            "Duplicates will be auto-renamed with a numeric suffix."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fb_id": {
+                    "type": "string",
+                    "description": "The filebase id (from fb_list)."
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["file", "dir"],
+                    "description": "'file' to create a text file, 'dir' to create a directory."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name of the file or directory to create."
+                },
+                "parent": {
+                    "type": "string",
+                    "description": "Parent directory path within the filebase. Empty string for root."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Initial file content (only for type='file')."
+                }
+            },
+            "required": ["fb_id", "type", "name"]
+        }
+    }
+}
+
+FB_MOVE_RENAME_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fb_move_rename",
+        "description": (
+            "Move one or more files/directories within a filebase to another directory, "
+            "or rename a single file/directory. "
+            "For moves: provide 'sources' (list of paths) and 'dest' (target directory path). "
+            "For renames: provide 'path' and 'new_name' (name only, not full path). "
+            "Cannot move items outside the filebase."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fb_id": {
+                    "type": "string",
+                    "description": "The filebase id (from fb_list)."
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["move", "rename"],
+                    "description": "'move' to move items to another directory, 'rename' to rename a single item."
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of relative paths to move (required for action='move')."
+                },
+                "dest": {
+                    "type": "string",
+                    "description": "Target directory path (required for action='move')."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Relative path of the item to rename (required for action='rename')."
+                },
+                "new_name": {
+                    "type": "string",
+                    "description": "New name for the item (required for action='rename')."
+                }
+            },
+            "required": ["fb_id", "action"]
+        }
+    }
+}
+
+
+# ==================== 工具创建工具 ====================
+
+TOOL_CREATE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "tool_create",
+        "description": (
+            "Create a new reusable tool with a custom function. "
+            "The tool will be saved to disk and become available in future conversations. "
+            "You define the tool's name, description, input JSON schema, and the Python code that implements it.\n\n"
+            "WHEN TO CREATE A TOOL:\n"
+            "- The user asks you to make a new tool for a recurring task\n"
+            "- You need a capability that doesn't exist yet in your toolset\n"
+            "- You want to automate a multi-step workflow\n\n"
+            "HOW IT WORKS:\n"
+            "- Provide a name (lowercase, underscores), description, and parameters schema\n"
+            "- Write the execute() function body as Python code\n"
+            "- The function receives 'args' (dict from LLM call) and 'user_id' (str)\n"
+            "- Must return a JSON string via json.dumps()\n"
+            "- The tool will be loaded and immediately available\n\n"
+            "EXAMPLE execute_body:\n"
+            '''```python
+    value = args.get("value", 0)
+    result = value * 2
+    return json.dumps({"success": True, "result": result}, ensure_ascii=False)
+    ```'''
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Tool name, lowercase with underscores (e.g. 'my_calculator'). Must be unique."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Clear description of what this tool does, when to use it."
+                },
+                "parameters_schema": {
+                    "type": "object",
+                    "description": "JSON Schema for the tool's parameters (the 'properties' field of the function parameters object). Each property must have type and description."
+                },
+                "required_params": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of required parameter names."
+                },
+                "execute_body": {
+                    "type": "string",
+                    "description": (
+                        "Python code for the execute() function body. "
+                        "Available variables: args (dict), user_id (str). "
+                        "Must call json.dumps() and return the result. "
+                        "Indentation must be exactly 4 spaces per level."
+                    )
+                }
+            },
+            "required": ["name", "description", "parameters_schema", "execute_body"]
+        }
+    }
+}
+
+
+def _load_user_tools():
+    """加载用户自建工具并更新全局列表"""
+    try:
+        from tools.user_tools.loader import load_user_tools
+        return load_user_tools()
+    except Exception as e:
+        logger.warning("无法加载用户工具: %s", e)
+        return [], {}
+
+
+# 加载用户自建工具
+_USER_TOOL_SCHEMAS, _USER_TOOL_EXECUTORS = _load_user_tools()
+
+
+ALL_TOOL_SCHEMAS = [
+    MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA,
+    WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA,
+    FB_LIST_SCHEMA, FB_BROWSE_SCHEMA, FB_READ_SCHEMA,
+    FB_SEARCH_SCHEMA, FB_CREATE_SCHEMA, FB_MOVE_RENAME_SCHEMA,
+    TOOL_CREATE_SCHEMA,
+] + _USER_TOOL_SCHEMAS
+
+
+def _check_fb_agent_allowed(fb_id: str) -> tuple:
+    """检查文件库是否允许 agent 访问。返回 (allowed, error_json)"""
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute(
+            "SELECT id, name, local_path, fb_agent_enabled, filebase_type FROM filebases WHERE id = ?",
+            (fb_id,)
+        ).fetchone()
+        if not row:
+            return False, json.dumps({"success": False, "error": f"文件库不存在: {fb_id}"}, ensure_ascii=False)
+        # 远程文件库暂时不支持 agent 访问
+        if row['filebase_type'] in ('remote',):
+            return False, json.dumps({"success": False, "error": "远程文件库不支持 agent 访问"}, ensure_ascii=False)
+        # NULL 视为默认开启（与 routes_base.py agent_settings GET 和前端逻辑一致）
+        agent_enabled = row['fb_agent_enabled']
+        if agent_enabled == 0:
+            return False, json.dumps({"success": False, "error": f"文件库 '{row['name']}' 未允许 agent 访问"}, ensure_ascii=False)
+        return True, None
+    except Exception as e:
+        return False, json.dumps({"success": False, "error": f"检查权限失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_list(args: Dict[str, Any], user_id: str) -> str:
+    """列出所有允许 agent 访问的文件库"""
+    try:
+        from fb.database import get_db
+        db = get_db()
+        # agent 可见所有显式开启或未设置过开关的文件库（NULL 视为默认开启，与 _check_fb_agent_allowed 一致）
+        rows = db.execute(
+            "SELECT id, name, filebase_type, local_path, fb_agent_enabled, owner_id "
+            "FROM filebases WHERE COALESCE(status, 'active') != 'trashed' AND (fb_agent_enabled IS NULL OR fb_agent_enabled != 0)"
+        ).fetchall()
+        results = []
+        for row in rows:
+            file_count = 0
+            if row['local_path']:
+                # 优先使用 worker 缓存 / sync_state，避免每次全量 os.walk
+                try:
+                    from fb.routes_base import _get_fb_file_count
+                    file_count = _get_fb_file_count(row['id'], row['owner_id'])
+                except Exception:
+                    pass
+            results.append({
+                'id': row['id'],
+                'name': row['name'],
+                'type': row['filebase_type'] or 'local',
+                'owner_id': row['owner_id'][:8] if row['owner_id'] else '',
+                'file_count': file_count,
+            })
+        return json.dumps({"success": True, "filebases": results, "count": len(results)}, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_list failed: %s", e)
+        return json.dumps({"success": False, "error": f"列出文件库失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_browse(args: Dict[str, Any], user_id: str) -> str:
+    """浏览文件库目录"""
+    fb_id = args.get("fb_id", "")
+    subdir = args.get("subdir", "")
+    if not fb_id:
+        return json.dumps({"success": False, "error": "fb_id is required"}, ensure_ascii=False)
+
+    allowed, err = _check_fb_agent_allowed(fb_id)
+    if not allowed:
+        return err
+
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+        if not row or not row['local_path']:
+            return json.dumps({"success": False, "error": "文件库路径不存在"}, ensure_ascii=False)
+        local_path = row['local_path']
+        target = os.path.join(local_path, subdir) if subdir else local_path
+        target = os.path.normpath(target)
+        if not target.startswith(os.path.normpath(local_path)):
+            return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
+        if not os.path.isdir(target):
+            return json.dumps({"success": False, "error": f"目录不存在: {subdir or '/'}"}, ensure_ascii=False)
+
+        files = []
+        dirs = []
+        for entry in os.scandir(target):
+            if entry.name.startswith('~$'):
+                continue
+            stat = entry.stat()
+            rel = os.path.relpath(entry.path, local_path).replace('\\', '/')
+            if entry.is_dir():
+                dirs.append({'name': entry.name, 'path': rel})
+            elif entry.is_file():
+                files.append({
+                    'name': entry.name,
+                    'path': rel,
+                    'size': stat.st_size,
+                    'mtime': stat.st_mtime,
+                })
+        dirs.sort(key=lambda x: x['name'].lower())
+        files.sort(key=lambda x: x['name'].lower())
+
+        return json.dumps({
+            "success": True,
+            "current_path": subdir.replace('\\', '/') if subdir else '',
+            "directories": dirs,
+            "files": files,
+            "total_dirs": len(dirs),
+            "total_files": len(files),
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_browse failed: %s", e)
+        return json.dumps({"success": False, "error": f"浏览文件库失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_read(args: Dict[str, Any], user_id: str) -> str:
+    """读取文件内容"""
+    fb_id = args.get("fb_id", "")
+    path = args.get("path", "")
+    if not fb_id or not path:
+        return json.dumps({"success": False, "error": "fb_id and path are required"}, ensure_ascii=False)
+
+    allowed, err = _check_fb_agent_allowed(fb_id)
+    if not allowed:
+        return err
+
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+        if not row or not row['local_path']:
+            return json.dumps({"success": False, "error": "文件库路径不存在"}, ensure_ascii=False)
+        local_path = row['local_path']
+        file_path = os.path.normpath(os.path.join(local_path, path))
+        if not file_path.startswith(os.path.normpath(local_path)):
+            return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
+        if not os.path.isfile(file_path):
+            return json.dumps({"success": False, "error": f"文件不存在: {path}"}, ensure_ascii=False)
+
+        ext = os.path.splitext(file_path)[1].lower()
+
+        # 文本文件
+        text_exts = {'.md', '.txt', '.html', '.htm', '.xml', '.json', '.csv', '.yaml', '.yml',
+                     '.py', '.js', '.css', '.ts', '.tsx', '.jsx', '.sh', '.bat', '.conf', '.ini',
+                     '.cfg', '.env', '.log', '.sql', '.rb', '.go', '.rs', '.java', '.c', '.cpp',
+                     '.h', '.hpp', '.toml', '.lock', '.gradle', '.m', '.swift', '.kt', '.scala'}
+        if ext in text_exts:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                if len(content) > 50000:
+                    content = content[:50000] + "\n\n... (truncated at 50000 characters)"
+                return json.dumps({"success": True, "content": content, "file_type": ext}, ensure_ascii=False)
+            except UnicodeDecodeError:
+                try:
+                    with open(file_path, 'r', encoding='gbk') as f:
+                        content = f.read()
+                    return json.dumps({"success": True, "content": content, "file_type": ext}, ensure_ascii=False)
+                except Exception:
+                    return json.dumps({"success": False, "error": "无法以文本方式读取此文件"}, ensure_ascii=False)
+
+        # .docx
+        if ext == '.docx':
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                text = '\n'.join(p.text for p in doc.paragraphs)
+                if len(text) > 50000:
+                    text = text[:50000] + "\n\n... (truncated at 50000 characters)"
+                return json.dumps({"success": True, "content": text, "file_type": ext}, ensure_ascii=False)
+            except Exception:
+                return json.dumps({"success": False, "error": "无法读取 docx 内容"}, ensure_ascii=False)
+
+        # .xlsx
+        if ext in ('.xlsx', '.xls'):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(file_path, data_only=True)
+                lines = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    lines.append(f'# {sheet_name}')
+                    for row_data in ws.iter_rows(values_only=True):
+                        lines.append('\t'.join(str(c) if c is not None else '' for c in row_data))
+                text = '\n'.join(lines)
+                if len(text) > 50000:
+                    text = text[:50000] + "\n\n... (truncated at 50000 characters)"
+                return json.dumps({"success": True, "content": text, "file_type": ext}, ensure_ascii=False)
+            except Exception:
+                return json.dumps({"success": False, "error": "无法读取 xlsx 内容"}, ensure_ascii=False)
+
+        return json.dumps({"success": False, "error": f"不支持在线读取 {ext} 类型文件"}, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_read failed: %s", e)
+        return json.dumps({"success": False, "error": f"读取文件失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_search(args: Dict[str, Any], user_id: str) -> str:
+    """搜索文件"""
+    query = args.get("query", "")
+    limit = args.get("limit", 10)
+    if not query:
+        return json.dumps({"success": False, "error": "query is required"}, ensure_ascii=False)
+
+    try:
+        from fb.database import get_db
+        from fb.routes_search import _search_local_dir
+
+        db = get_db()
+        # 只搜索允许 agent 访问的文件库
+        rows = db.execute(
+            "SELECT id, name, local_path FROM filebases "
+            "WHERE COALESCE(status, 'active') != 'trashed' AND (fb_agent_enabled IS NULL OR fb_agent_enabled != 0) "
+            "AND local_path != '' AND filebase_type != 'remote'"
+        ).fetchall()
+
+        keywords = query.lower().split()
+        all_results = []
+        for row in rows:
+            if row['local_path'] and os.path.isdir(row['local_path']):
+                fb_results = _search_local_dir(row['local_path'], row['id'], row['name'], keywords)
+                all_results.extend(fb_results)
+
+        # 限制总数
+        if limit and len(all_results) > limit:
+            all_results = all_results[:limit]
+
+        return json.dumps({
+            "success": True,
+            "results": all_results,
+            "count": len(all_results),
+            "query": query,
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_search failed: %s", e)
+        return json.dumps({"success": False, "error": f"搜索失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_create(args: Dict[str, Any], user_id: str) -> str:
+    """创建文件或目录"""
+    fb_id = args.get("fb_id", "")
+    create_type = args.get("type", "file")
+    name = args.get("name", "")
+    parent = args.get("parent", "")
+    content = args.get("content", "")
+
+    if not fb_id or not name:
+        return json.dumps({"success": False, "error": "fb_id and name are required"}, ensure_ascii=False)
+
+    allowed, err = _check_fb_agent_allowed(fb_id)
+    if not allowed:
+        return err
+
+    if '/' in name or '\\' in name:
+        return json.dumps({"success": False, "error": "名称不能包含路径分隔符"}, ensure_ascii=False)
+
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+        if not row or not row['local_path']:
+            return json.dumps({"success": False, "error": "文件库路径不存在"}, ensure_ascii=False)
+        local_path = row['local_path']
+
+        target_dir = os.path.join(local_path, parent) if parent else local_path
+        target_dir = os.path.normpath(target_dir)
+        if not target_dir.startswith(os.path.normpath(local_path)):
+            return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
+
+        if create_type == 'dir':
+            new_dir = os.path.join(target_dir, name)
+            counter = 1
+            orig = name
+            while os.path.exists(new_dir) and counter < 100:
+                name = f'{orig}_{counter}'
+                new_dir = os.path.join(target_dir, name)
+                counter += 1
+            if os.path.exists(new_dir):
+                return json.dumps({"success": False, "error": "无法生成唯一的目录名称"}, ensure_ascii=False)
+            os.makedirs(new_dir, exist_ok=True)
+            rel = os.path.relpath(new_dir, local_path).replace('\\', '/')
+            return json.dumps({"success": True, "type": "dir", "path": rel}, ensure_ascii=False)
+
+        # 创建文件
+        base, ext = os.path.splitext(name)
+        if ext:
+            filename = name
+            default_ext = ext
+        else:
+            filename = name + '.md'
+            default_ext = '.md'
+        file_path = os.path.join(target_dir, filename)
+
+        counter = 1
+        while os.path.exists(file_path) and counter < 100:
+            filename = f'{base}_{counter}{default_ext}'
+            file_path = os.path.join(target_dir, filename)
+            counter += 1
+        if os.path.exists(file_path):
+            return json.dumps({"success": False, "error": "无法生成唯一的文件名"}, ensure_ascii=False)
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content or '')
+
+        # 触发同步（直接调 worker，不依赖 Flask 请求上下文 g）
+        try:
+            from kb.sync_worker import get_sync_worker
+            worker = get_sync_worker()
+            worker.adjust_file_count(user_id, fb_id, 1)
+            worker._trigger_sync(user_id, fb_id)
+        except Exception:
+            logger.exception("Failed to trigger sync after fb_create")
+
+        rel = os.path.relpath(file_path, local_path).replace('\\', '/')
+        return json.dumps({"success": True, "type": "file", "path": rel, "filename": os.path.basename(file_path)}, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_create failed: %s", e)
+        return json.dumps({"success": False, "error": f"创建失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _execute_fb_move_rename(args: Dict[str, Any], user_id: str) -> str:
+    """移动或重命名文件/目录"""
+    fb_id = args.get("fb_id", "")
+    action = args.get("action", "")
+
+    if not fb_id or not action:
+        return json.dumps({"success": False, "error": "fb_id and action are required"}, ensure_ascii=False)
+
+    allowed, err = _check_fb_agent_allowed(fb_id)
+    if not allowed:
+        return err
+
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (fb_id,)).fetchone()
+        if not row or not row['local_path']:
+            return json.dumps({"success": False, "error": "文件库路径不存在"}, ensure_ascii=False)
+        local_path = row['local_path']
+
+        if action == 'move':
+            sources = args.get("sources", [])
+            dest = args.get("dest", "")
+            if not sources or not dest:
+                return json.dumps({"success": False, "error": "sources and dest are required for move"}, ensure_ascii=False)
+
+            dest_path = os.path.normpath(os.path.join(local_path, dest))
+            if not dest_path.startswith(os.path.normpath(local_path)):
+                return json.dumps({"success": False, "error": "目标目录非法"}, ensure_ascii=False)
+            os.makedirs(dest_path, exist_ok=True)
+
+            moved = 0
+            errors = []
+            for src in sources:
+                src_path = os.path.normpath(os.path.join(local_path, src))
+                if not src_path.startswith(os.path.normpath(local_path)):
+                    errors.append(f'{src}: 路径非法')
+                    continue
+                if not os.path.exists(src_path):
+                    errors.append(f'{src}: 不存在')
+                    continue
+                target = os.path.join(dest_path, os.path.basename(src_path))
+                if os.path.exists(target):
+                    errors.append(f'{src}: 目标位置已存在同名项目')
+                    continue
+                import shutil
+                shutil.move(src_path, target)
+                moved += 1
+
+            # 触发同步（直接调 worker，不依赖 Flask 请求上下文 g）
+            try:
+                from kb.sync_worker import get_sync_worker
+                worker = get_sync_worker()
+                worker._trigger_sync(user_id, fb_id)
+            except Exception:
+                logger.exception("Failed to trigger sync after fb_move")
+
+            return json.dumps({"success": True, "moved": moved, "errors": errors}, ensure_ascii=False)
+
+        elif action == 'rename':
+            path = args.get("path", "")
+            new_name = args.get("new_name", "")
+            if not path or not new_name:
+                return json.dumps({"success": False, "error": "path and new_name are required for rename"}, ensure_ascii=False)
+            if '/' in new_name or '\\' in new_name:
+                return json.dumps({"success": False, "error": "新名称不能包含路径分隔符"}, ensure_ascii=False)
+
+            old = os.path.normpath(os.path.join(local_path, path))
+            if not old.startswith(os.path.normpath(local_path)):
+                return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
+            if not os.path.exists(old):
+                return json.dumps({"success": False, "error": "文件或目录不存在"}, ensure_ascii=False)
+
+            parent_dir = os.path.dirname(old)
+            new_path = os.path.join(parent_dir, new_name)
+            if os.path.exists(new_path):
+                return json.dumps({"success": False, "error": "同名文件或目录已存在"}, ensure_ascii=False)
+
+            os.rename(old, new_path)
+            new_rel = os.path.relpath(new_path, local_path).replace('\\', '/')
+
+            try:
+                from kb.sync_worker import get_sync_worker
+                worker = get_sync_worker()
+                worker._trigger_sync(user_id, fb_id)
+            except Exception:
+                logger.exception("Failed to trigger sync after fb_rename")
+
+            return json.dumps({"success": True, "new_path": new_rel}, ensure_ascii=False)
+        else:
+            return json.dumps({"success": False, "error": f"Unknown action: {action}"}, ensure_ascii=False)
+    except Exception as e:
+        logger.error("fb_move_rename failed: %s", e)
+        return json.dumps({"success": False, "error": f"操作失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _reload_user_tools():
+    """重新加载用户工具并更新全局变量"""
+    global _USER_TOOL_SCHEMAS, _USER_TOOL_EXECUTORS, ALL_TOOL_SCHEMAS
+    try:
+        from tools.user_tools.loader import reload_user_tools
+        schemas, executors = reload_user_tools()
+        _USER_TOOL_SCHEMAS = schemas
+        _USER_TOOL_EXECUTORS = executors
+        # 重建 ALL_TOOL_SCHEMAS
+        ALL_TOOL_SCHEMAS = [
+            MEMORY_SCHEMA, SKILL_MANAGE_SCHEMA, SESSION_SEARCH_SCHEMA,
+            WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA,
+            FB_LIST_SCHEMA, FB_BROWSE_SCHEMA, FB_READ_SCHEMA,
+            FB_SEARCH_SCHEMA, FB_CREATE_SCHEMA, FB_MOVE_RENAME_SCHEMA,
+            TOOL_CREATE_SCHEMA,
+        ] + schemas
+    except Exception as e:
+        logger.error("重新加载用户工具失败: %s", e)
+
+
+def _execute_tool_create(args: Dict[str, Any], user_id: str) -> str:
+    """创建用户自建工具"""
+    name = (args.get("name") or "").strip()
+    description = (args.get("description") or "").strip()
+    parameters_schema = args.get("parameters_schema", {})
+    required_params = args.get("required_params", [])
+    execute_body = (args.get("execute_body") or "").strip()
+
+    if not name or not description or not execute_body:
+        return json.dumps({"success": False, "error": "name, description and execute_body are required"}, ensure_ascii=False)
+
+    # 校验名称
+    if not re.match(r'^[a-z][a-z0-9_]*$', name):
+        return json.dumps({"success": False, "error": "工具名必须是小写字母开头，只含小写字母、数字和下划线"}, ensure_ascii=False)
+
+    # 不能覆盖内置工具
+    builtin_tools = {
+        "memory", "skill_manage", "session_search", "web_search",
+        "wiki_read", "wiki_search",
+        "fb_list", "fb_browse", "fb_read", "fb_search", "fb_create", "fb_move_rename",
+        "tool_create",
+    }
+    if name in builtin_tools:
+        return json.dumps({"success": False, "error": f"工具名 '{name}' 与内置工具冲突"}, ensure_ascii=False)
+    if name in _USER_TOOL_EXECUTORS:
+        return json.dumps({"success": False, "error": f"工具名 '{name}' 已存在，请先删除再重建"}, ensure_ascii=False)
+
+    # 安全校验：禁止危险导入
+    dangerous_keywords = [
+        "__import__", "eval(", "exec(", "compile(",  # 动态执行
+        "os.system", "os.popen", "subprocess",  # shell 执行
+        "shutil.rmtree", "os.remove", "os.unlink",  # 删除
+        "socket",  # 网络
+        "pickle.loads", "pickle.load",  # 反序列化
+    ]
+    execute_body_lower = execute_body.lower()
+    for kw in dangerous_keywords:
+        if kw in execute_body_lower:
+            return json.dumps({
+                "success": False,
+                "error": f"代码中包含禁止使用的关键字: '{kw}'"
+            }, ensure_ascii=False)
+
+    # 构建工具文件 — 先构建 SCHEMA 再序列化，避免 f-string 与 json 嵌套冲突
+    schema = {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": parameters_schema,
+                "required": required_params
+            }
+        }
+    }
+    schema_json = json.dumps(schema, ensure_ascii=False, indent=2)
+
+    # 缩进 execute_body（4 空格）
+    indented_body = '\n'.join('    ' + line for line in execute_body.split('\n'))
+
+    tool_code = f'''"""
+User-created tool: {name}
+Description: {description}
+Created by: agent ({user_id[:16]})
+"""
+
+import json
+
+SCHEMA = {schema_json}
+
+
+def execute(args: dict, user_id: str) -> str:
+{indented_body}
+'''
+
+    # 写出文件
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'user_tools')
+    os.makedirs(tools_dir, exist_ok=True)
+    fpath = os.path.join(tools_dir, f'{name}.py')
+
+    if os.path.exists(fpath):
+        return json.dumps({"success": False, "error": f"文件 {name}.py 已存在"}, ensure_ascii=False)
+
+    try:
+        with open(fpath, 'w', encoding='utf-8') as f:
+            f.write(tool_code)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"写入工具文件失败: {str(e)}"}, ensure_ascii=False)
+
+    # 重新加载用户工具
+    _reload_user_tools()
+
+    # 验证加载成功
+    if name not in _USER_TOOL_EXECUTORS:
+        error_msg = f"工具 '{name}' 文件已创建但加载失败，请检查代码语法"
+        return json.dumps({"success": False, "error": error_msg}, ensure_ascii=False)
+
+    return json.dumps({
+        "success": True,
+        "message": f"工具 '{name}' 已创建并可用",
+        "tool_name": name,
+    }, ensure_ascii=False)
 
 
 def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str:
@@ -246,6 +1058,22 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str
             return _execute_wiki_read(args, user_id)
         elif tool_name == "wiki_search":
             return _execute_wiki_search(args, user_id)
+        elif tool_name == "fb_list":
+            return _execute_fb_list(args, user_id)
+        elif tool_name == "fb_browse":
+            return _execute_fb_browse(args, user_id)
+        elif tool_name == "fb_read":
+            return _execute_fb_read(args, user_id)
+        elif tool_name == "fb_search":
+            return _execute_fb_search(args, user_id)
+        elif tool_name == "fb_create":
+            return _execute_fb_create(args, user_id)
+        elif tool_name == "fb_move_rename":
+            return _execute_fb_move_rename(args, user_id)
+        elif tool_name == "tool_create":
+            return _execute_tool_create(args, user_id)
+        elif tool_name in _USER_TOOL_EXECUTORS:
+            return _USER_TOOL_EXECUTORS[tool_name](args, user_id)
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
     except Exception as e:

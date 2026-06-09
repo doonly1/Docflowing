@@ -16,7 +16,7 @@ from server.workspace import _get_workspace_dir
 logger = logging.getLogger(__name__)
 
 # FTS5 simple 分词器扩展路径（平台相关）
-_EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools')
+_EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fts_ext')
 _SYS = platform.system()
 _MACH = platform.machine()
 
@@ -535,17 +535,16 @@ class SessionDB:
 
         # 第二阶段：FTS5 OR（宽松召回）
         result = self._fts_search(keywords, user_id, limit, mode='OR')
-        if result:
-            return result
-
-        # 第三阶段：LIKE AND（兜底精准）
-        result = self._like_search(keywords, user_id, limit, mode='AND')
-        if result:
-            return result
-
-        # 第四阶段：LIKE OR（兜底召回）
-        result = self._like_search(keywords, user_id, limit, mode='OR')
         return result
+
+        # TODO: 以下 LIKE 兜底暂注释，有 simple 分词扩展后基本用不到
+        # 第三阶段：LIKE AND（兜底精准）
+        # result = self._like_search(keywords, user_id, limit, mode='AND')
+        # if result:
+        #     return result
+        # 第四阶段：LIKE OR（兜底召回）
+        # result = self._like_search(keywords, user_id, limit, mode='OR')
+        # return result
 
     def delete_messages(self, session_id: str, message_ids: List[int]) -> int:
         def _do(conn):

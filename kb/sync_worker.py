@@ -61,8 +61,14 @@ class SyncWorker:
         # 标记已执行过一次迁移的文件库，避免每轮主循环重复检查
         self._migrated_filebases: Set[str] = set()
 
+        # 定时轮询：检测 OS 级文件变动（目录删除、新增文件等）
+        self._last_poll_time = 0.0
+        self._poll_interval = interval  # 秒，默认 60
+
         # 文件库扫描统计缓存（供 get_sync_status 直接读取，避免 os.walk）
         self._filebase_stats: Dict[str, Dict] = {}
+        # 轮询运行标志，防止 _sync_all_enabled_filebases 重入
+        self._poll_running = False
 
     def start(self):
         """启动同步线程"""
@@ -86,10 +92,23 @@ class SyncWorker:
         logger.info("Sync worker stopped")
 
     def _run(self):
-        """同步线程主循环 - 事件驱动模式"""
+        """同步线程主循环 - 事件驱动 + 定时轮询"""
         self._run_migration_once()
         while self._running:
             self._process_triggered_syncs()
+
+            # 定时轮询：检测 OS 级文件变动（目录删除、新增文件等）
+            # 加 _poll_running 防重入 —— 若扫描耗时超过 poll_interval，
+            # 下一轮不再触发，避免多个全量扫描并发，也避免与触发同步冲突
+            now = time.time()
+            if now - self._last_poll_time >= self._poll_interval and not self._poll_running:
+                self._last_poll_time = now
+                self._poll_running = True
+                try:
+                    self._sync_all_enabled_filebases()
+                finally:
+                    self._poll_running = False
+
             self._trigger_event.wait(timeout=1)
             self._trigger_event.clear()
 
@@ -145,7 +164,7 @@ class SyncWorker:
             rows = db.execute("""
                 SELECT id, owner_id, name, is_synced_to_kb
                 FROM filebases
-                WHERE is_synced_to_kb = 1
+                WHERE is_synced_to_kb = 1 AND COALESCE(status, 'active') != 'trashed'
             """).fetchall()
 
             return [
@@ -293,6 +312,8 @@ class SyncWorker:
         state.syncable_files = sum(1 for f in current_files.values() if f['syncable'])
 
         if not light_files and not heavy_files:
+            # 无 syncable 文件需要处理，但可能有非 syncable 文件需要索引文件名
+            self._index_non_syncable(user_id, filebase_id, current_files, state)
             return
 
         logger.info(
@@ -394,6 +415,58 @@ class SyncWorker:
             )
             logger.debug(f"Filebase {filebase_id}: batch saved {len(heavy_updates)} heavy files")
 
+        # 处理非 syncable 文件：不提取内容，只索引文件名和路径
+        self._index_non_syncable(user_id, filebase_id, current_files, state)
+
+    def _index_non_syncable(self, user_id: str, filebase_id: str,
+                            current_files: Dict, state) -> None:
+        """为非 syncable 文件建立文件名索引，使其可通过文件名/路径搜索到"""
+        filename_updates = []
+
+        for relative_path, file_info in current_files.items():
+            if file_info['syncable']:
+                continue
+
+            existing = state.files.get(relative_path)
+            source_mtime = file_info['mtime']
+
+            needs_sync = (
+                existing is None or
+                existing.source_mtime < source_mtime or
+                existing.status in ('failed', 'filename_only')
+            )
+
+            if not needs_sync:
+                continue
+
+            source_path = file_info['path']
+            basename = os.path.basename(source_path)
+            title = os.path.splitext(basename)[0]
+            ext = os.path.splitext(basename)[1].lower()
+            content = (
+                f"[文件名]: {basename}\n"
+                f"[路径]: {relative_path}\n"
+                f"[类型]: {ext if ext else '无扩展名'}\n"
+            )
+
+            kb_relative_path = f"imported/{filebase_id}/{relative_path}"
+            if not kb_relative_path.lower().endswith('.md'):
+                kb_relative_path += '.md'
+
+            try:
+                from .routes import update_search_index
+                update_search_index(user_id, kb_relative_path, title, content)
+                filename_updates.append((relative_path, source_mtime, 'filename_only', None, time.time()))
+            except Exception as e:
+                logger.error(f"Failed to index filename for {relative_path}: {e}")
+                filename_updates.append((relative_path, source_mtime, 'failed', str(e), None))
+
+        if filename_updates:
+            self._state_manager.batch_update_file_states(
+                user_id, filebase_id, filename_updates
+            )
+            logger.info(f"Filebase {filebase_id}: indexed {len(filename_updates)} filenames")
+
     def _convert_single(self, user_id: str, filebase_id: str,
                           relative_path: str, file_info: Dict,
                           state) -> Optional[tuple]:
@@ -466,6 +539,22 @@ class SyncWorker:
         由 _scan_filebase 在同步时填充，供 API 层直接读取避免 os.walk"""
         return self._filebase_stats.get(filebase_id)
 
+    def adjust_file_count(self, user_id: str, filebase_id: str, delta: int) -> None:
+        """文件操作后增量调整文件数，避免等待完整同步扫描"""
+        if filebase_id in self._filebase_stats:
+            self._filebase_stats[filebase_id]['total_files'] = max(
+                self._filebase_stats[filebase_id]['total_files'] + delta, 0
+            )
+        # 同时更新持久化状态
+        try:
+            from kb.sync_state import get_sync_state_manager
+            state_mgr = get_sync_state_manager()
+            state = state_mgr.load_state(user_id, filebase_id)
+            state.total_files = max(state.total_files + delta, 0)
+            state_mgr.save_state(user_id, filebase_id, state)
+        except Exception:
+            logger.exception("Failed to update sync_state total_files")
+
     def _is_sync_enabled(self, filebase_id: str) -> bool:
         """检查文件库是否启用了同步"""
         try:
@@ -484,17 +573,22 @@ class SyncWorker:
             return False
 
     def cleanup_filebase(self, user_id: str, filebase_id: str):
-        """清理文件库的同步数据（同步状态、FTS5 索引）"""
+        """清理文件库的同步数据（同步状态、FTS5 索引、文件记录）"""
         try:
             self._state_manager.clear_all_state(user_id, filebase_id)
 
             from kb.database import get_db
             conn = get_db(user_id)
-            prefix = f'imported/{filebase_id}/%'
-            conn.execute(
-                "DELETE FROM wiki_fts WHERE usr_id = ? AND path LIKE ?",
-                (user_id, prefix)
-            )
+            # 清理 imported/ 和 _disabled/ 两种前缀（软删除后数据在 _disabled/ 下）
+            for prefix in (f'imported/{filebase_id}/%', f'_disabled/{filebase_id}/%'):
+                conn.execute(
+                    "DELETE FROM wiki_fts WHERE usr_id = ? AND path LIKE ?",
+                    (user_id, prefix)
+                )
+                conn.execute(
+                    "DELETE FROM wiki_files WHERE usr_id = ? AND path LIKE ?",
+                    (user_id, prefix)
+                )
             conn.commit()
 
             logger.info(f"Cleaned up sync data for filebase {filebase_id}")

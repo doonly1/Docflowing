@@ -188,7 +188,7 @@ def delete_local_items(filebase_id):
         except Exception as e:
             errors.append(f'{rel}: {str(e)}')
 
-    _trigger_fb_sync(filebase_id)
+    _trigger_fb_sync(filebase_id, -deleted)
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
@@ -311,7 +311,7 @@ def copy_local_items(filebase_id):
         except Exception as e:
             errors.append(f'{rel}: {str(e)}')
 
-    _trigger_fb_sync(filebase_id)
+    _trigger_fb_sync(filebase_id, copied)
     return jsonify({'success': True, 'copied': copied, 'errors': errors})
 
 
@@ -427,7 +427,7 @@ def restore_file_trash(filebase_id):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-    _trigger_fb_sync(filebase_id)
+    _trigger_fb_sync(filebase_id, 1)
     return jsonify({'success': True})
 
 

@@ -210,7 +210,7 @@ def list_fb():
     ws = _get_user_workspace(user_id)
 
     db_kbs = {}
-    rows = db.execute("SELECT * FROM filebases").fetchall()
+    rows = db.execute("SELECT * FROM filebases WHERE COALESCE(status, 'active') != 'trashed'").fetchall()
     for row in rows:
         db_kbs[row['local_path']] = row
 
@@ -253,6 +253,8 @@ def list_fb():
     for path in local_existing_paths - fs_paths:
         row = db_kbs[path]
         if path.startswith(ws + os.sep) or path == ws:
+            # 目录被 OS 删除，清理 KB 同步数据后删除 DB 记录
+            _cleanup_synced_data(row['owner_id'], row['id'])
             db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (row['id'],))
             db.execute("DELETE FROM filebases WHERE id = ?", (row['id'],))
     db.commit()
@@ -350,7 +352,7 @@ def list_fb():
 
 
 def _get_fb_file_count(filebase_id: str, owner_id: str) -> int:
-    """获取文件库的文件总数，优先使用同步缓存，回退到数据库持久化状态"""
+    """获取文件库的文件总数，优先使用同步缓存，回退到数据库持久化状态，最后直接扫描磁盘"""
     try:
         from kb.sync_worker import get_sync_worker
         worker = get_sync_worker()
@@ -358,13 +360,52 @@ def _get_fb_file_count(filebase_id: str, owner_id: str) -> int:
         if stats:
             return stats['total_files']
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).debug('worker stats unavailable, falling back to sync_state', exc_info=True)
     try:
         from kb.sync_state import get_sync_state_manager
         state_manager = get_sync_state_manager()
         state = state_manager.load_state(owner_id, filebase_id)
-        return state.total_files or 0
+        if state.total_files > 0:
+            return state.total_files
     except Exception:
+        import logging
+        logging.getLogger(__name__).debug('sync_state unavailable, falling back to disk scan', exc_info=True)
+    # 最后兜底：直接扫描磁盘
+    return _count_files_on_disk(filebase_id, owner_id)
+
+
+def _count_files_on_disk(filebase_id: str, owner_id: str) -> int:
+    """直接扫描文件库目录统计文件数，并回写 sync_state 避免重复扫描"""
+    try:
+        from fb.database import get_db
+        db = get_db()
+        row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+        if not row or not row['local_path']:
+            return 0
+        local_path = row['local_path']
+        if not os.path.isdir(local_path):
+            return 0
+        total = 0
+        for root, dirs, files in os.walk(local_path):
+            # 跳过隐藏文件和临时文件
+            dirs[:] = [d for d in dirs if not d.startswith('.') and not d.startswith('~')]
+            total += sum(1 for f in files if not f.startswith('.') and not f.startswith('~'))
+        # 回写 sync_state 缓存，避免下次再扫
+        if total > 0:
+            try:
+                from kb.sync_state import get_sync_state_manager
+                state_mgr = get_sync_state_manager()
+                state = state_mgr.load_state(owner_id, filebase_id)
+                state.total_files = total
+                state_mgr.save_state(owner_id, filebase_id, state)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).debug('could not write sync_state cache', exc_info=True)
+        return total
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('disk count failed')
         return 0
 
 
@@ -407,6 +448,39 @@ def rename_fb(filebase_id):
     return jsonify({'success': True, 'message': '重命名成功'})
 
 
+@fb_bp.route('/<fb_id>/agent-settings', methods=['GET', 'PUT'])
+@login_required
+@require_fb_perm('manage')
+def agent_settings(filebase_id):
+    """获取/切换文件库的 agent 访问开关"""
+    if request.method == 'GET':
+        db = get_db()
+        row = db.execute(
+            "SELECT fb_agent_enabled FROM filebases WHERE id = ?",
+            (filebase_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': '文件库不存在'})
+        enabled = row['fb_agent_enabled']
+        return jsonify({
+            'success': True,
+            'agent_enabled': enabled if enabled is not None else 1
+        })
+
+    # PUT: 切换开关
+    data = request.get_json() or {}
+    enabled = data.get('agent_enabled')
+    if enabled is None:
+        return jsonify({'success': False, 'message': '缺少 agent_enabled 参数'})
+    db = get_db()
+    db.execute(
+        "UPDATE filebases SET fb_agent_enabled = ? WHERE id = ?",
+        (1 if enabled else 0, filebase_id)
+    )
+    db.commit()
+    return jsonify({'success': True, 'agent_enabled': 1 if enabled else 0})
+
+
 def _cleanup_synced_data(user_id, filebase_id):
     """删除文件库时清理 KB 中的同步数据"""
     try:
@@ -422,9 +496,9 @@ def _cleanup_synced_data(user_id, filebase_id):
 @login_required
 @require_fb_perm('manage')
 def delete_fb(filebase_id):
-    """删除文件库"""
+    """删除文件库（软删除：标记 status='trashed'，移到回收站，隐藏 KB 数据）"""
     db = get_db()
-    row = db.execute("SELECT id, name, local_path, owner_id, filebase_type FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
+    row = db.execute("SELECT id, name, local_path, owner_id, filebase_type, status FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not row:
         return jsonify({'success': False, 'message': '文件库不存在'})
 
@@ -432,6 +506,7 @@ def delete_fb(filebase_id):
     filebase_type = row['filebase_type'] or 'local'
     trash_dir = _get_trash_dir()
 
+    # 网络文件库：直接软删除（无磁盘目录）
     if filebase_type == 'net':
         db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
@@ -439,15 +514,17 @@ def delete_fb(filebase_id):
         _cleanup_synced_data(row['owner_id'], filebase_id)
         return jsonify({'success': True, 'message': '网络文件库已移至回收站'})
 
-    if local_path.startswith(trash_dir):
+    # 已标记 trashed 的彻底删除（从回收站清空过来）
+    if row.get('status') == 'trashed' or local_path.startswith(trash_dir):
         if os.path.isdir(local_path):
             shutil.rmtree(local_path)
+        _cleanup_synced_data(row['owner_id'], filebase_id)
         db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
-        _cleanup_synced_data(row['owner_id'], filebase_id)
         return jsonify({'success': True, 'message': '文件库已彻底删除'})
 
+    # 正常删除：移到回收站，软标记
     fb_name = row['name']
     timestamp = str(int(time.time()))
     target = os.path.join(trash_dir, fb_name + '_' + timestamp)
@@ -456,11 +533,23 @@ def delete_fb(filebase_id):
     if os.path.isdir(local_path):
         shutil.move(local_path, target)
 
+    # 软删除：标记 status，更新路径为回收站路径，关闭同步
+    db.execute(
+        "UPDATE filebases SET status = 'trashed', local_path = ?, is_synced_to_kb = 0 WHERE id = ?",
+        (target, filebase_id)
+    )
     db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
-    db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
     db.commit()
-    _cleanup_synced_data(row['owner_id'], filebase_id)
-    return jsonify({'success': True, 'message': '文件库已移至trash目录'})
+
+    # 隐藏 KB 数据（不删除，用户恢复后可见）
+    try:
+        from fb.routes_sync import _update_kb_path_prefix
+        _update_kb_path_prefix(row['owner_id'], filebase_id, False)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to hide KB data for {filebase_id}: {e}")
+
+    return jsonify({'success': True, 'message': '文件库已移至回收站'})
 
 
 def _get_trash_dir():

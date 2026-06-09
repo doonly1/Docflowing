@@ -2,12 +2,29 @@
 
 import os
 import io
+import shutil
 from flask import Blueprint, request, jsonify, send_file, g
 
 from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity, require_not_locked
 from fb.routes_files import _trigger_fb_sync
+
+
+def _unique_path(dest_dir, name):
+    """如果目标路径已存在，自动添加数字后缀以避免覆盖（有上限）"""
+    target = os.path.join(dest_dir, name)
+    if not os.path.exists(target):
+        return target
+    base, ext = os.path.splitext(name)
+    for n in range(1, 10000):
+        new_name = f"{base} ({n}){ext}"
+        target = os.path.join(dest_dir, new_name)
+        if not os.path.exists(target):
+            return target
+    # 达到上限，用时间戳兜底
+    import time
+    return os.path.join(dest_dir, f"{base}_{int(time.time() * 1000)}{ext}")
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -333,7 +350,7 @@ def batch_save_local_files(filebase_id):
                 if rel_path.endswith('/') or rel_path.endswith('\\'):
                     continue
                 fname = os.path.basename(rel_path.replace('\\', '/'))
-                save_path = os.path.join(dest_dir, fname)
+                save_path = _unique_path(dest_dir, fname)
                 resp = p2p_proxy.remote_download_file(info['owner_addr'], node, filebase_id, rel_path)
                 if not resp:
                     continue
@@ -358,7 +375,7 @@ def batch_save_local_files(filebase_id):
             if not abs_path.startswith(os.path.normpath(local_path)):
                 continue
             fname = os.path.basename(rel_path.replace('\\', '/'))
-            target = os.path.join(dest_dir, fname)
+            target = _unique_path(dest_dir, fname)
             if os.path.isfile(abs_path):
                 shutil.copy2(abs_path, target)
             elif os.path.isdir(abs_path):

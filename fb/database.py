@@ -1,8 +1,10 @@
 import os
 import sqlite3
 import threading
+import time
 
 from fb.models import ALL_TABLES, CREATE_INDEXES, MIGRATIONS, CREATE_INDEX_SYNC_STATES, CREATE_INDEX_SHARED, CREATE_INDEX_FILE_LOCKS
+from fb.models import MIGRATIONS_META, DB_MIGRATIONS
 
 _local = threading.local()
 
@@ -46,6 +48,21 @@ def init_db(conn):
             conn.execute(sql)
         except Exception:
             pass
+    # 运行版本化迁移
+    conn.execute(MIGRATIONS_META)
+    applied = set()
+    for r in conn.execute("SELECT version FROM _migrations").fetchall():
+        applied.add(r['version'])
+    for version, sql in sorted(DB_MIGRATIONS.items()):
+        if version not in applied:
+            try:
+                conn.execute(sql)
+                conn.execute(
+                    "INSERT INTO _migrations (version, applied_at) VALUES (?, ?)",
+                    (version, time.time())
+                )
+            except Exception:
+                pass
     conn.commit()
 
 
@@ -64,14 +81,14 @@ def get_db():
 def get_visible_fb_ids(user_id, is_admin=False):
     if is_admin:
         db = get_db()
-        rows = db.execute("SELECT id FROM filebases").fetchall()
+        rows = db.execute("SELECT id FROM filebases WHERE COALESCE(status, 'active') != 'trashed'").fetchall()
         return [r['id'] for r in rows]
     db = get_db()
     ids = set()
     rows = db.execute("SELECT filebase_id FROM filebase_permissions WHERE user_id = ?", (user_id,)).fetchall()
     for r in rows:
         ids.add(r['filebase_id'])
-    rows = db.execute("SELECT id FROM filebases WHERE owner_id = ?", (user_id,)).fetchall()
+    rows = db.execute("SELECT id FROM filebases WHERE owner_id = ? AND COALESCE(status, 'active') != 'trashed'", (user_id,)).fetchall()
     for r in rows:
         ids.add(r['id'])
     return list(ids)

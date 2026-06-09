@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS filebases (
     local_path TEXT DEFAULT '',
     is_synced_to_kb INTEGER NOT NULL DEFAULT 0,
     created_at REAL,
-    updated_at REAL
+    updated_at REAL,
+    status TEXT DEFAULT 'active',
+    fb_agent_enabled INTEGER DEFAULT 1
 )
 """
 
@@ -88,11 +90,26 @@ ALL_TABLES = [
     CREATE_FILE_LOCKS,
 ]
 
+# 存储已应用的迁移版本号
+MIGRATIONS_META = """
+CREATE TABLE IF NOT EXISTS _migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at REAL NOT NULL
+)
+"""
+
 # 旧迁移保留以支持现有部署
 MIGRATIONS = [
     # v1: 新文件库默认不同步（旧数据库表默认值为 1）
     "ALTER TABLE filebases ALTER COLUMN is_synced_to_kb SET DEFAULT 0",
 ]
+
+# 数据库迁移 SQL（按版本号递增）
+DB_MIGRATIONS = {
+    # 去掉 NOT NULL，兼容 3.31 以下版本的 SQLite；有 DEFAULT 新记录值仍是确定的
+    1: "ALTER TABLE filebases ADD COLUMN status TEXT DEFAULT 'active'",
+    2: "ALTER TABLE filebases ADD COLUMN fb_agent_enabled INTEGER DEFAULT 1",
+}
 
 CREATE_INDEX_SHARED = [
     "CREATE INDEX IF NOT EXISTS idx_shared_nodes_filebase ON shared_nodes(filebase_id)",

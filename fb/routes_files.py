@@ -27,12 +27,14 @@ def _resolve_local_path(db, filebase_id, subdir=''):
     return local_path, target
 
 
-def _trigger_fb_sync(filebase_id):
-    """文件变更后触发同步"""
+def _trigger_fb_sync(filebase_id, delta=0):
+    """文件变更后触发同步，delta 为文件数变化（正数增加，负数减少，0 仅触发同步）"""
     try:
         from kb.sync_worker import get_sync_worker
         from flask import g
         worker = get_sync_worker()
+        if delta:
+            worker.adjust_file_count(g.user_id, filebase_id, delta)
         worker._trigger_sync(g.user_id, filebase_id)
     except Exception:
         import logging
@@ -96,7 +98,7 @@ def upload_local_files(filebase_id):
             })
 
     if uploaded:
-        _trigger_fb_sync(filebase_id)
+        _trigger_fb_sync(filebase_id, len(uploaded))
 
     return jsonify({'success': True, 'uploaded': uploaded})
 
@@ -192,7 +194,7 @@ def create_local_file(filebase_id):
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write('')
     rel = os.path.relpath(file_path, local_path).replace('\\', '/')
-    _trigger_fb_sync(filebase_id)
+    _trigger_fb_sync(filebase_id, 1)
     return jsonify({'success': True, 'path': rel})
 
 
@@ -261,7 +263,7 @@ def create_office_file(filebase_id):
         return jsonify({'success': False, 'message': f'创建文件失败: {str(e)}'})
 
     rel = os.path.relpath(file_path, local_path).replace('\\', '/')
-    _trigger_fb_sync(filebase_id)
+    _trigger_fb_sync(filebase_id, 1)
     return jsonify({'success': True, 'path': rel})
 
 

@@ -197,6 +197,7 @@ def batch_update_search_index(usr_id, updates):
 def remove_from_index(usr_id, file_path):
     conn = get_db(usr_id)
     conn.execute("DELETE FROM wiki_fts WHERE usr_id = ? AND path = ?", (usr_id, file_path))
+    conn.execute("DELETE FROM wiki_files WHERE usr_id = ? AND path = ?", (usr_id, file_path))
     conn.commit()
 
 

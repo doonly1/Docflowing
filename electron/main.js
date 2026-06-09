@@ -96,6 +96,22 @@ function pollServer(resolve, reject, attempt = 0) {
     });
 }
 
+function startWordKeepAlive() {
+    if (process.platform !== 'win32') return;
+
+    const scriptPath = path.join(ROOT_DIR, 'tools', 'WordKeepAlive.py');
+    if (!require('fs').existsSync(scriptPath)) return;
+
+    const child = spawn('python', [scriptPath, '--silent'], {
+        cwd: ROOT_DIR,
+        stdio: 'ignore',
+        windowsHide: true,
+        shell: true
+    });
+    child.unref();
+    console.log('[WordKeepAlive] 已启动');
+}
+
 function stopPythonBackend() {
     if (!pythonProcess) return;
     try {
@@ -131,6 +147,25 @@ function createWindow() {
     mainWindow.center();
 
     mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+
+    // 设置 Content Security Policy（消除 Electron 安全警告）
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Content-Security-Policy': [
+                    "default-src 'self'; " +
+                    "script-src 'self' 'unsafe-inline'; " +
+                    "style-src 'self' 'unsafe-inline'; " +
+                    "img-src 'self' data: blob:; " +
+                    "connect-src 'self'; " +
+                    "font-src 'self' data:; " +
+                    "object-src 'none'; " +
+                    "media-src 'self' blob:"
+                ]
+            }
+        });
+    });
 
     // 开发模式自动打开 DevTools
     if (OPEN_DEVTOOLS) {
@@ -304,6 +339,7 @@ app.whenReady().then(async () => {
         console.log('[Electron] 正在启动 Python 后端...');
         await startPythonBackend();
         console.log('[Electron] Python 后端就绪');
+        startWordKeepAlive();
         createWindow();
         createTray();
         console.log('[Electron] 系统托盘已创建');
