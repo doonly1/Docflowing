@@ -411,7 +411,10 @@ def open_local_file(filebase_id):
     previewable_exts = {'.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.txt', '.csv'}
     as_attachment = ext not in previewable_exts
 
-    return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path))
+    mimetype = None
+    if ext == '.pdf':
+        mimetype = 'application/pdf'
+    return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path), mimetype=mimetype)
 
 
 @fb_bp.route('/<fb_id>/local-files/open-with-app', methods=['GET'])

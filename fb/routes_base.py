@@ -75,7 +75,7 @@ def create_folder():
         filebase_id = str(uuid.uuid4())
         now = time.time()
         db.execute(
-            "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'net', ?, ?)",
+            "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at, is_synced_to_kb) VALUES (?, ?, ?, 'net', ?, ?, 0)",
             (filebase_id, name, user_id, network_path, now)
         )
         db.execute(
@@ -116,7 +116,7 @@ def create_folder():
         return jsonify({'success': False, 'message': '该目录已在文件库中'})
 
     db.execute(
-        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at, is_synced_to_kb) VALUES (?, ?, ?, 'local', ?, ?, 0)",
         (filebase_id, folder_name, user_id, local_path, now)
     )
     db.execute(
@@ -173,7 +173,7 @@ def copy_folder():
     new_filebase_id = str(uuid.uuid4())
     now = time.time()
     db.execute(
-        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+        "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at, is_synced_to_kb) VALUES (?, ?, ?, 'local', ?, ?, 0)",
         (new_filebase_id, new_name, user_id, dst_path, now)
     )
     db.execute(
@@ -238,7 +238,7 @@ def list_fb():
                 filebase_id = str(uuid.uuid4())
                 now = time.time()
                 db.execute(
-                    "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+                    "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at, is_synced_to_kb) VALUES (?, ?, ?, 'local', ?, ?, 0)",
                     (filebase_id, entry_name, user_id, entry_path, now)
                 )
                 db.execute(

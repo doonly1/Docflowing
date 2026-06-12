@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Tray, nativeImage } = 
 const path = require('path');
 const { spawn } = require('child_process');
 const http = require('http');
+const { StringDecoder } = require('string_decoder');
 
 // ==================== 配置 ====================
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -39,21 +40,43 @@ function getPythonCommand() {
 function startPythonBackend() {
     return new Promise((resolve, reject) => {
         const { cmd, args, cwd } = getPythonCommand();
-        const env = { ...process.env, PORT: String(PORT) };
+        // 运行时数据目录：打包模式走 Electron userData 目录，
+        // 开发模式留空让 Python 端使用项目根下的 workspaces
+        const runtimeDir = IS_PACKAGED ? app.getPath('userData') : '';
+        const env = {
+            ...process.env,
+            PORT: String(PORT),
+            DOCFLOW_RUNTIME_DIR: runtimeDir
+        };
 
         pythonProcess = spawn(cmd, args, {
             cwd,
-            env,
+            env: { ...env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
             stdio: ['pipe', 'pipe', 'pipe'],
             windowsHide: true
         });
 
+        const stdoutDecoder = new StringDecoder('utf8');
+        const stderrDecoder = new StringDecoder('utf8');
+
         pythonProcess.stdout.on('data', (data) => {
-            console.log(`[Python] ${data.toString().trim()}`);
+            try {
+                const text = stdoutDecoder.write(data);
+                const trimmed = text.trim();
+                if (trimmed) console.log(`[Python] ${trimmed}`);
+            } catch (e) {
+                console.log(`[Python] ${String(data).trim()}`);
+            }
         });
 
         pythonProcess.stderr.on('data', (data) => {
-            console.error(`[Python] ${data.toString().trim()}`);
+            try {
+                const text = stderrDecoder.write(data);
+                const trimmed = text.trim();
+                if (trimmed) console.error(`[Python] ${trimmed}`);
+            } catch (e) {
+                console.error(`[Python] ${String(data).trim()}`);
+            }
         });
 
         pythonProcess.on('error', (err) => {
@@ -155,13 +178,14 @@ function createWindow() {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
                     "default-src 'self'; " +
-                    "script-src 'self' 'unsafe-inline'; " +
-                    "style-src 'self' 'unsafe-inline'; " +
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+                    "style-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
                     "img-src 'self' data: blob:; " +
                     "connect-src 'self'; " +
                     "font-src 'self' data:; " +
-                    "object-src 'none'; " +
-                    "media-src 'self' blob:"
+                    "object-src 'self'; " +
+                    "media-src 'self' blob:; " +
+                    "frame-src 'self' blob: data:"
                 ]
             }
         });
@@ -317,6 +341,33 @@ ipcMain.handle('open-external', async (_event, url) => {
 // 应用信息
 ipcMain.handle('get-app-version', () => {
     return app.getVersion();
+});
+
+// 原生文件拖拽（拖拽文件到外部应用）
+ipcMain.on('start-drag', (event, filePaths) => {
+    if (!filePaths || filePaths.length === 0) return;
+    var dragIcon = nativeImage.createFromPath(path.join(ROOT_DIR, 'ui', 'favicon.ico'));
+    dragIcon = dragIcon.resize({ width: 16, height: 16 });
+    event.sender.startDrag({
+        files: filePaths,
+        icon: dragIcon
+    });
+});
+
+// 用 OS 默认软件打开文件（自动管理窗口焦点）
+ipcMain.handle('open-file-with-app', async (_event, absolutePath) => {
+    const { shell } = require('electron');
+    try {
+        const error = await shell.openPath(absolutePath);
+        if (error) {
+            console.error('[Electron] shell.openPath error:', error);
+            return { success: false, message: error };
+        }
+        return { success: true };
+    } catch (e) {
+        console.error('[Electron] shell.openPath exception:', e.message);
+        return { success: false, message: e.message };
+    }
 });
 
 // ==================== 单实例锁（防止重复启动） ====================

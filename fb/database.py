@@ -11,8 +11,8 @@ _local = threading.local()
 
 def _get_data_dir():
     """获取全局数据存储目录：workspaces/data/"""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(project_root, 'workspaces', 'data')
+    from server.workspace import _get_workspace_dir
+    data_dir = os.path.join(_get_workspace_dir(), 'data')
     os.makedirs(data_dir, exist_ok=True)
     return data_dir
 

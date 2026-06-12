@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import io
 from contextvars import ContextVar
 
 _request_id_var: ContextVar = ContextVar('request_id', default='-')
@@ -40,6 +41,16 @@ def setup_logging(level=None):
 
     for h in root_logger.handlers[:]:
         root_logger.removeHandler(h)
+
+    # 强制 stdout 使用 UTF-8 编码，避免 Windows 默认 cp936 导致中文乱码
+    if hasattr(sys.stdout, 'buffer') and not isinstance(sys.stdout, io.TextIOWrapper):
+        # stdout 已被替换为非 TextIOWrapper，重建
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    elif hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.DEBUG)

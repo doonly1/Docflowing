@@ -10,15 +10,79 @@ DocFlow（文枢）是一个面向公文处理的 **桌面应用 + 工具集**�
 
 ## 快速开始
 
+### 安装依赖
+
 ```bash
-# 安装依赖
+# Python 后端依赖
 pip install -r requirements.txt
 
-# 启动桌面版
-python app_desktop.py
+# Node.js 前端依赖
+npm install
 ```
 
-默认打开一个 1100×700 的本地窗口，自动居中显示。
+### 开发模式（推荐）
+
+```bash
+# 1. 启动 Python 后端
+python app_server.py
+
+# 2. 另开终端，启动 Electron 桌面壳
+npm run dev
+```
+
+默认打开一个 1100×700 的无边框窗口，自动居中显示。开发模式下会自动打开 DevTools。
+
+### 生产构建
+
+```bash
+# 完整构建（编译 Python 后端 + 打包 Electron 安装包）
+npm run dist:win
+```
+
+输出在 `release/` 目录下，生成 NSIS 安装包 `文枢-Setup-1.0.0.exe`。
+
+## 下载安装
+
+### 普通用户（无需编程环境）
+
+1. 前往 **[Releases](https://github.com/doonly1/DocFlow/releases)** 页面
+2. 找到最新版本，下载 `文枢-Setup-x.x.x.exe`
+3. 双击运行安装程序
+   - 可选择安装目录（默认 `C:\Program Files\文枢`）
+   - 自动创建桌面快捷方式
+4. 安装完成后，双击桌面图标启动
+   - 首次启动会自动在安装目录下创建 `workspaces/` 数据文件夹
+   - 所有知识库、文件库、配置数据均保存在此目录
+
+> **注意**：安装包包含编译好的 Python 后端（约 60MB），首次启动无需额外配置。
+
+### 开发者
+
+```bash
+# 克隆仓库
+git clone https://github.com/doonly1/DocFlow.git
+cd DocFlow
+
+# 安装依赖
+pip install -r requirements.txt
+npm install
+
+# 开发模式
+python app_server.py       # 终端1：启动后端
+npm run dev                # 终端2：启动 Electron
+
+# 生产打包
+npm run dist:win           # 输出到 release/ 目录
+```
+
+### 自动发布流程
+
+推送 `v*` 标签到 GitHub 时，Actions 会自动构建并上传安装包：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ---
 

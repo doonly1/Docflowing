@@ -11,6 +11,13 @@
 import os
 import sys
 
+# 强制 stdout/stderr 使用 UTF-8，避免中文日志乱码
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 # 确保路径与 server/__init__.py 一致
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(project_root, 'tools'))

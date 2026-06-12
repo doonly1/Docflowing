@@ -12,7 +12,7 @@ from kb.search import search_wiki
 from kb.llm import is_llm_available, call_llm
 from kb.context_compressor import ContextCompressor
 from kb.session_db import get_session_db
-from kb.tools import _extract_relevant_snippets
+from kb.agent_tools import _extract_relevant_snippets
 
 wiki_bp = Blueprint('wiki', __name__, url_prefix='/api/kb')
 
@@ -453,7 +453,7 @@ def agent_context():
 你的记忆：{memory_context}
 你的技能：{skills_index}"""
 
-            from .tools import ALL_TOOL_SCHEMAS, execute_tool_call
+            from .agent_tools import ALL_TOOL_SCHEMAS, execute_tool_call
             from .llm import call_llm_with_tools, call_llm_with_tools_stream
 
             messages_history = None

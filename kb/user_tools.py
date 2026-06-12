@@ -5,22 +5,27 @@
     SCHEMA  — OpenAI function calling schema (dict)
     execute — 执行函数 def execute(args: dict, user_id: str) -> str
 
-文件放在 tools/user_tools/ 目录下（__init__.py 和 loader.py 除外）。
+文件放在 workspaces/user_tools/ 目录下，打包后可持久化写入。
 """
 
 import importlib.util
 import logging
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
-_TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+# 运行时目录：由 server.workspace._get_workspace_dir 统一解析
+# 开发模式 -> 项目根 /workspaces/user_tools
+# 打包模式 -> %APPDATA%/DocFlow/user_tools
+from server.workspace import _get_workspace_dir
+_RUNTIME_DIR = _get_workspace_dir()
+_TOOLS_DIR = os.path.join(_RUNTIME_DIR, 'user_tools')
 
 
 def load_user_tools() -> tuple:
-    """扫描 tools/user_tools/ 并返回 (schemas, executors)
+    """扫描 workspaces/user_tools/ 并返回 (schemas, executors)
 
     schemas: 可用于 ALL_TOOL_SCHEMAS 的 schema 列表
     executors: {tool_name: execute_function} 映射
@@ -29,12 +34,11 @@ def load_user_tools() -> tuple:
     executors: Dict[str, callable] = {}
 
     if not os.path.isdir(_TOOLS_DIR):
+        os.makedirs(_TOOLS_DIR, exist_ok=True)
         return schemas, executors
 
     for fname in sorted(os.listdir(_TOOLS_DIR)):
         if not fname.endswith('.py'):
-            continue
-        if fname in ('__init__.py', 'loader.py'):
             continue
         fpath = os.path.join(_TOOLS_DIR, fname)
         if not os.path.isfile(fpath):
@@ -47,7 +51,6 @@ def load_user_tools() -> tuple:
                 logger.warning('无法加载用户工具: %s (spec is None)', fname)
                 continue
             module = importlib.util.module_from_spec(spec)
-            # 缓存模块，避免重复加载导致状态丢失
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
 
@@ -75,8 +78,7 @@ def load_user_tools() -> tuple:
 
 def reload_user_tools() -> tuple:
     """重新加载所有用户工具（热更新用）"""
-    # 清除已有的用户工具模块缓存
     for mod_name in list(sys.modules.keys()):
-        if mod_name.startswith('user_tools.') and mod_name != 'user_tools.loader':
+        if mod_name.startswith('user_tools.'):
             del sys.modules[mod_name]
     return load_user_tools()

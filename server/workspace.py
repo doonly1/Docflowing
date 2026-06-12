@@ -17,12 +17,51 @@ MAX_FILE_SIZE = 90 * 1024 * 1024          # 单文件最大 90MB
 MAX_SESSION_SIZE = 900 * 1024 * 1024      # 单会话总大小最大 900MB
 MAX_FILES_PER_UPLOAD = 900                # 单次最多上传 900 个文件
 
-# ==================== Workspace 路径 / 活动 ====================
+# ==================== 运行时目录解析 ====================
+
+def _get_runtime_dir():
+    """返回运行时数据目录（绝对路径）。
+
+    优先级：
+    1. 环境变量 DOCFLOW_DATA_DIR（开发者/测试手动指定）
+    2. 已打包 / 桌面运行： %APPDATA%\\DocFlow 或 ~/.docflow
+       （由 Electron 通过 DOCFLOW_RUNTIME_DIR 显式传递）
+    3. 开发模式：项目根目录 /workspaces
+    """
+    env_dir = os.environ.get('DOCFLOW_DATA_DIR') or os.environ.get('DOCFLOW_RUNTIME_DIR')
+    if env_dir:
+        d = os.path.abspath(env_dir)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    marker = os.path.join(project_root, 'package.json')
+    dev_marker = os.path.join(project_root, 'app_server.py')
+
+    # 判断是否为开发模式：开发模式直接使用项目根下的 workspaces
+    if os.path.exists(marker) or os.path.exists(dev_marker):
+        d = os.path.join(project_root, 'workspaces')
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    # 否则使用用户目录
+    if os.name == 'nt':
+        appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
+        d = os.path.join(appdata, 'DocFlow')
+    else:
+        d = os.path.join(os.path.expanduser('~'), '.docflow')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _get_project_root():
+    """返回项目源代码根目录（用于定位 UI、知识库扩展等静态资源）。"""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def _get_workspace_dir(user_id=None):
-    ws_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'workspaces')
-    return ws_dir
+    """运行时数据根目录（旧名兼容，指向与 _get_runtime_dir 相同位置）。"""
+    return _get_runtime_dir()
 
 def _get_workspace_resources_dir(user_id):
     res_dir = os.path.join(_get_workspace_dir(user_id), 'resources', 'stamps')

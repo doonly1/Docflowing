@@ -70,10 +70,10 @@ _ENCRYPTION_KEY_FILE = '_llm_key'
 
 def _get_user_config_dir(user_id: str = None) -> str:
     """获取配置目录：workspaces/config/"""
-    project_root = Path(__file__).parent.parent
-    config_dir = project_root / 'workspaces' / 'config'
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return str(config_dir)
+    from server.workspace import _get_workspace_dir
+    config_dir = os.path.join(_get_workspace_dir(), 'config')
+    os.makedirs(config_dir, exist_ok=True)
+    return config_dir
 
 
 def _get_or_create_encryption_key(user_id: str = None) -> bytes:

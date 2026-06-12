@@ -15,11 +15,9 @@ def load_user_config():
         dict or None: 配置字典
     """
     import yaml
+    from server.workspace import _get_workspace_dir
 
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'workspaces', 'config', 'user_config.yaml'
-    )
+    config_path = os.path.join(_get_workspace_dir(), 'config', 'user_config.yaml')
 
     if not os.path.exists(config_path):
         return None

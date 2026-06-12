@@ -29,5 +29,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 窗口状态监听
     onWindowStateChanged: (callback) => {
         ipcRenderer.on('window-state-changed', (_event, data) => callback(data));
-    }
+    },
+
+    // 原生文件拖拽（拖拽文件到外部应用）
+    startDrag: (filePaths) => {
+        ipcRenderer.send('start-drag', filePaths);
+    },
+
+    // 用 OS 默认软件打开文件（自动管理窗口焦点）
+    openFileWithOsApp: (absolutePath) => ipcRenderer.invoke('open-file-with-app', absolutePath)
 });

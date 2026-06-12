@@ -28,6 +28,11 @@ ui/lib/
 release/
 dist/
 
+# PyInstaller 中间文件
+build/
+
 # 其他
+electron/backend.spec
 /.*/
 !/.git/
+!/.github/

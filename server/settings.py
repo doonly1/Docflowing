@@ -39,8 +39,8 @@ _DEFAULT_APP_SETTINGS = {
 
 def _get_user_config_dir(user_id=None):
     """获取用户配置目录：workspaces/config/"""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_dir = os.path.join(project_root, 'workspaces', 'config')
+    from server.workspace import _get_workspace_dir
+    config_dir = os.path.join(_get_workspace_dir(), 'config')
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 

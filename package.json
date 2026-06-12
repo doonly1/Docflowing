@@ -4,12 +4,16 @@
   "description": "文枢 DocFlow — 文档工作流桌面应用",
   "main": "electron/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "cross-env DOCFLOW_DEV=1 electron .",
+    "start": "chcp 65001 > NUL & electron .",
+    "dev": "chcp 65001 > NUL & cross-env DOCFLOW_DEV=1 electron .",
     "postinstall": "node electron/copy-libs.js",
+    "build:backend": "python electron/build-backend.py",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win"
+    "dist": "npm run build:backend && electron-builder",
+    "dist:win": "npm run build:backend && electron-builder --win",
+    "dist:quick": "electron-builder --win --dir",
+    "dist:full": "npm run build:backend && electron-builder --win",
+    "dist:portable": "npm run build:backend && electron-builder --win portable"
   },
   "build": {
     "appId": "com.docflow.app",
@@ -33,16 +37,26 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
-      "icon": "ui/favicon.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "icon": "ui/favicon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "installerIcon": "ui/favicon.ico"
+      "createStartMenuShortcut": true,
+      "installerIcon": "ui/favicon.ico",
+      "uninstallerIcon": "ui/favicon.ico",
+      "installerHeaderIcon": "ui/favicon.ico",
+      "shortcutName": "文枢 DocFlow",
+      "unicode": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}",
+      "splashImage": "ui/favicon.ico"
     }
   },
   "devDependencies": {
@@ -51,6 +65,7 @@
     "electron-builder": "^25.0.0"
   },
   "dependencies": {
+    "iconv-lite": "^0.7.2",
     "marked": "^15.0.0",
     "quill": "^2.0.3",
     "turndown": "^7.2.0"

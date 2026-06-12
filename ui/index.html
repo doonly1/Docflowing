@@ -146,7 +146,19 @@
         }
 
         .sidebar-nav-item.active {
-            /* 选中状态无任何视觉变化 */
+            background: #e0e7ff;
+            color: #4f46e5;
+        }
+
+        .sidebar-nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 8px;
+            bottom: 8px;
+            width: 3px;
+            background: #4f46e5;
+            border-radius: 0 2px 2px 0;
         }
 
         .sidebar-nav-item::after {
@@ -998,6 +1010,93 @@
         .fb-agent-toggle input:checked + .toggle-slider:before {
             transform: translateX(20px);
         }
+
+        /* ──────── 预览弹窗（DOCX/PDF/图片） ──────── */
+        .fb-docx-preview-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .fb-docx-preview-container {
+            background: #fff;
+            border-radius: 8px;
+            width: 92%;
+            max-width: 820px;
+            height: 98vh;
+            max-height: 98vh;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .fb-docx-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 12px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+            flex-shrink: 0;
+        }
+        
+        .fb-docx-preview-header span {
+            font-weight: 500;
+            color: #333;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .fb-docx-preview-header button {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: #666;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        
+        .fb-docx-preview-header button:hover {
+            background: #e9ecef;
+            color: #333;
+        }
+        
+        .fb-docx-preview-content {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #333;
+        }
+        
+        .fb-docx-preview-content h1 { font-size: 20px; font-weight: bold; margin: 20px 0 10px; color: #1a1a1a; }
+        .fb-docx-preview-content h2 { font-size: 16px; font-weight: bold; margin: 18px 0 8px; color: #222; }
+        .fb-docx-preview-content h3 { font-size: 14px; font-weight: bold; margin: 16px 0 6px; }
+        .fb-docx-preview-content p { margin: 8px 0; }
+        .fb-docx-preview-content ul, .fb-docx-preview-content ol { padding-left: 24px; margin: 8px 0; }
+        .fb-docx-preview-content li { margin: 4px 0; }
+        .fb-docx-preview-content b, .fb-docx-preview-content strong { font-weight: bold; }
+        .fb-docx-preview-content i, .fb-docx-preview-content em { font-style: italic; }
+        .fb-docx-preview-content u { text-decoration: underline; }
+        .fb-docx-preview-content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+        .fb-docx-preview-content th, .fb-docx-preview-content td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        .fb-docx-preview-content th { background: #f5f5f5; font-weight: bold; }
+        .fb-docx-preview-content img { max-width: 100% !important; height: auto !important; }
     </style>
     <link rel="preload" href="js/main.js" as="script">
     <link rel="stylesheet" href="js/fb.css?v=2" media="print" onload="this.media='all'">
@@ -1133,95 +1232,6 @@
         </div>
     </div>
 
-    <style>
-        /* DOCX预览弹窗 */
-        .fb-docx-preview-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 2000;
-        }
-        
-        .fb-docx-preview-container {
-            background: #fff;
-            border-radius: 8px;
-            width: 92%;
-            max-width: 820px;
-            height: 98vh;
-            max-height: 98vh;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .fb-docx-preview-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 12px;
-            border-bottom: 1px solid #eee;
-            background: #f8f9fa;
-            flex-shrink: 0;
-        }
-        
-        .fb-docx-preview-header span {
-            font-weight: 500;
-            color: #333;
-            font-size: 13px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .fb-docx-preview-header button {
-            background: none;
-            border: none;
-            font-size: 18px;
-            cursor: pointer;
-            color: #666;
-            padding: 2px 6px;
-            border-radius: 4px;
-            transition: background 0.2s;
-            flex-shrink: 0;
-        }
-        
-        .fb-docx-preview-header button:hover {
-            background: #e9ecef;
-            color: #333;
-        }
-        
-        .fb-docx-preview-content {
-            flex: 1;
-            padding: 16px;
-            overflow-y: auto;
-            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-            font-size: 14px;
-            line-height: 1.8;
-            color: #333;
-        }
-        
-        .fb-docx-preview-content h1 { font-size: 20px; font-weight: bold; margin: 20px 0 10px; color: #1a1a1a; }
-        .fb-docx-preview-content h2 { font-size: 16px; font-weight: bold; margin: 18px 0 8px; color: #222; }
-        .fb-docx-preview-content h3 { font-size: 14px; font-weight: bold; margin: 16px 0 6px; }
-        .fb-docx-preview-content p { margin: 8px 0; }
-        .fb-docx-preview-content ul, .fb-docx-preview-content ol { padding-left: 24px; margin: 8px 0; }
-        .fb-docx-preview-content li { margin: 4px 0; }
-        .fb-docx-preview-content b, .fb-docx-preview-content strong { font-weight: bold; }
-        .fb-docx-preview-content i, .fb-docx-preview-content em { font-style: italic; }
-        .fb-docx-preview-content u { text-decoration: underline; }
-        .fb-docx-preview-content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
-        .fb-docx-preview-content th, .fb-docx-preview-content td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-        .fb-docx-preview-content th { background: #f5f5f5; font-weight: bold; }
-        .fb-docx-preview-content img { max-width: 100% !important; height: auto !important; }
-    </style>
-    
     <script src="js/main.js" defer></script>
     <script>
     // 本地 lib 前缀（npm 包拷贝到 ui/lib/）
@@ -1276,7 +1286,7 @@
         if (typeof Quill !== 'undefined') return Promise.resolve();
         window._quillPromise = Promise.all([
             window._loadScriptAsync(
-                window._LIB_PREFIX + 'quill/dist/quill.min.js',
+                window._LIB_PREFIX + 'quill/dist/quill.js',
                 'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js'
             ),
             window._loadStyleAsync(
@@ -1295,11 +1305,75 @@
         );
         return window._markedPromise;
     };
+    window._ensurePdfJs = function() {
+        if (window._pdfJsPromise) return window._pdfJsPromise;
+        if (typeof pdfjsLib !== 'undefined') return Promise.resolve();
+        window._pdfJsPromise = window._loadScriptAsync(
+            '/js/lib/pdf.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+        );
+        return window._pdfJsPromise;
+    };
+    window._renderPdfInContainer = async function(fileUrl, contentEl) {
+        try {
+            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">正在加载PDF...</div>';
+            await window._ensurePdfJs();
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/lib/pdf.worker.min.js';
+
+            var resp = await fetch(fileUrl);
+            if (!resp.ok) throw new Error('获取PDF失败 (HTTP ' + resp.status + ')');
+            var arrayBuffer = await resp.arrayBuffer();
+            var pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            var totalPages = pdfDoc.numPages;
+            var currentPage = 1;
+
+            contentEl.innerHTML =
+                '<div class="pdf-viewer-wrap" style="display:flex;flex-direction:column;height:100%;">' +
+                '  <div class="pdf-viewer-pages" style="flex:1;overflow:auto;text-align:center;padding:16px;background:#e8e8e8;display:flex;flex-direction:column;align-items:center;"></div>' +
+                '  <div class="pdf-viewer-bar" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:6px 12px;background:#f8f9fa;border-top:1px solid #ddd;flex-shrink:0;">' +
+                '    <button class="pdf-btn" data-page="prev" style="padding:4px 14px;cursor:pointer;border:1px solid #bbb;border-radius:4px;background:#fff;font-size:13px;color:#333;">&larr; 上一页</button>' +
+                '    <span class="pdf-page-info" style="font-size:13px;color:#555;user-select:none;">1 / ' + totalPages + '</span>' +
+                '    <button class="pdf-btn" data-page="next" style="padding:4px 14px;cursor:pointer;border:1px solid #bbb;border-radius:4px;background:#fff;font-size:13px;color:#333;">下一页 &rarr;</button>' +
+                '  </div>' +
+                '</div>';
+
+            var pagesEl = contentEl.querySelector('.pdf-viewer-pages');
+            var infoEl = contentEl.querySelector('.pdf-page-info');
+
+            function renderPage(num) {
+                return pdfDoc.getPage(num).then(function(page) {
+                    var viewport = page.getViewport({ scale: 1.5 });
+                    var canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    canvas.style.maxWidth = '100%';
+                    canvas.style.height = 'auto';
+                    canvas.style.boxShadow = '0 2px 12px rgba(0,0,0,0.15)';
+                    canvas.style.background = '#fff';
+                    canvas.style.borderRadius = '2px';
+                    pagesEl.innerHTML = '';
+                    pagesEl.appendChild(canvas);
+                    return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+                });
+            }
+
+            renderPage(1);
+
+            contentEl.querySelector('.pdf-btn[data-page="prev"]').addEventListener('click', function() {
+                if (currentPage > 1) { currentPage--; infoEl.textContent = currentPage + ' / ' + totalPages; renderPage(currentPage); }
+            });
+            contentEl.querySelector('.pdf-btn[data-page="next"]').addEventListener('click', function() {
+                if (currentPage < totalPages) { currentPage++; infoEl.textContent = currentPage + ' / ' + totalPages; renderPage(currentPage); }
+            });
+        } catch (e) {
+            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">PDF加载失败: ' + (e.message || '未知错误') + '</div>';
+        }
+    };
     window._ensureTurndown = function() {
         if (window._turndownPromise) return window._turndownPromise;
         if (typeof TurndownService !== 'undefined') return Promise.resolve();
         window._turndownPromise = window._loadScriptAsync(
-            window._LIB_PREFIX + 'turndown/dist/turndown.min.js',
+            window._LIB_PREFIX + 'turndown/dist/turndown.js',
             'https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js'
         );
         return window._turndownPromise;

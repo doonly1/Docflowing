@@ -141,7 +141,7 @@ def restore_from_trash():
         # 恢复已软删除的记录
         filebase_id = row['id']
         db.execute(
-            "UPDATE filebases SET status = 'active', local_path = ?, name = ?, is_synced_to_kb = 1, updated_at = ? WHERE id = ?",
+            "UPDATE filebases SET status = 'active', local_path = ?, name = ?, is_synced_to_kb = 0, updated_at = ? WHERE id = ?",
             (dst, name, now, filebase_id)
         )
         db.execute(
@@ -154,7 +154,7 @@ def restore_from_trash():
         # 兼容旧数据：无 DB 记录则新建
         filebase_id = str(uuid.uuid4())
         db.execute(
-            "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at) VALUES (?, ?, ?, 'local', ?, ?)",
+            "INSERT INTO filebases (id, name, owner_id, filebase_type, local_path, created_at, is_synced_to_kb) VALUES (?, ?, ?, 'local', ?, ?, 0)",
             (filebase_id, name, user_id, dst, now)
         )
         db.execute(

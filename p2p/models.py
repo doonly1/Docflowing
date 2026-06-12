@@ -9,8 +9,8 @@ logger = get_logger(__name__)
 
 
 def _get_p2p_data_dir():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(root, 'workspaces', 'data', 'p2p')
+    from server.workspace import _get_workspace_dir
+    data_dir = os.path.join(_get_workspace_dir(), 'data', 'p2p')
     os.makedirs(data_dir, exist_ok=True)
     return data_dir
 

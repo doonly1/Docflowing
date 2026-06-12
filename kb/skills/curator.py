@@ -279,7 +279,7 @@ def _build_curator_prompt(user_id: str, dry_run: bool = False) -> str:
 
 def run_llm_review(user_id: str, dry_run: bool = False) -> Dict[str, Any]:
     from ..llm import call_llm_with_tools, is_llm_available
-    from ..tools import ALL_TOOL_SCHEMAS, execute_tool_call
+    from ..agent_tools import ALL_TOOL_SCHEMAS, execute_tool_call
 
     now = datetime.now(timezone.utc)
     report: Dict[str, Any] = {

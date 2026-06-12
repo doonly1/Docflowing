@@ -1260,7 +1260,8 @@ var WikiKnowledge = {
         }
     },
     
-    _previewPdfFile: function(src) {
+    _previewPdfFile: async function(src) {
+        var self = this;
         var fileName = (src.fb_path || src.path).split('/').pop();
         var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
         var filePath = src.fb_path || src.path;
@@ -1275,14 +1276,22 @@ var WikiKnowledge = {
             '<span>📄 ' + safeName + '</span>' +
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
-            '<div class="fb-docx-preview-content" style="padding:0">' +
-            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;"></iframe>' +
+            '<div class="fb-docx-preview-content" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">' +
+            '<div style="text-align:center;padding:40px;color:#999;">正在加载PDF...</div>' +
             '</div>' +
             '</div>';
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) WikiKnowledge._closePreview();
+        });
         document.body.appendChild(overlay);
+        
+        // 使用 PDF.js 渲染（兼容 Electron 33+，移除的内置PDF插件）
+        var contentEl = overlay.querySelector('.fb-docx-preview-content');
+        await window._renderPdfInContainer(fileUrl, contentEl);
     },
     
-    _previewImageFile: function(src) {
+    _previewImageFile: async function(src) {
+        var self = this;
         var fileName = (src.fb_path || src.path).split('/').pop();
         var kbId = src.fb_id || (window.FileBase && FileBase.currentFbId) || 'default';
         var filePath = src.fb_path || src.path;
@@ -1298,10 +1307,24 @@ var WikiKnowledge = {
             '<button onclick="WikiKnowledge._closePreview()">✖</button>' +
             '</div>' +
             '<div class="fb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
-            '<img src="' + fileUrl + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
+            '<div style="padding:40px;color:#999;">加载中...</div>' +
             '</div>' +
             '</div>';
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) WikiKnowledge._closePreview();
+        });
         document.body.appendChild(overlay);
+        
+        try {
+            var resp = await fetch(fileUrl);
+            var blob = await resp.blob();
+            var blobUrl = URL.createObjectURL(blob);
+            var contentEl = overlay.querySelector('.fb-docx-preview-content');
+            contentEl.innerHTML = '<img src="' + blobUrl + '" style="max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">';
+        } catch(e) {
+            var contentEl = overlay.querySelector('.fb-docx-preview-content');
+            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">图片加载失败</div>';
+        }
     },
 
     openSidebar: function(title, contentHtml) {

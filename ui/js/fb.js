@@ -2110,6 +2110,8 @@ var FileBase = {
     },
 
     _onDragStart: function(e) {
+        this._nativeDragPaths = null;
+        this._draggedPaths = null;
         var row = e.target.closest('.fb-file-row');
         if (!row) { e.preventDefault(); return; }
         if (!row.classList.contains('selected')) {
@@ -2119,13 +2121,36 @@ var FileBase = {
         }
         var selected = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
         var paths = [];
+        var absolutePaths = [];
         for (var i = 0; i < selected.length; i++) {
             var p = selected[i].getAttribute('data-local-path');
             if (p) paths.push(p);
+            if (p && this.fbLocalPath) {
+                var absPath = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '') + '/' + p;
+                absolutePaths.push(absPath);
+            }
         }
         this._draggedPaths = paths;
+        this._nativeDragPaths = absolutePaths;
+
+        if (window.electronAPI && absolutePaths.length > 0) {
+            try { e.dataTransfer.setData('text/plain', JSON.stringify(paths)); } catch(ex) {}
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.preventDefault();
+            window.electronAPI.startDrag(absolutePaths);
+            return;
+        }
+
         try { e.dataTransfer.setData('text/plain', JSON.stringify(paths)); } catch(ex) {}
-        e.dataTransfer.effectAllowed = 'all';
+        if (absolutePaths.length > 0) {
+            try {
+                var uriList = absolutePaths.map(function(ap) {
+                    return 'file:///' + ap.replace(/\\/g, '/');
+                }).join('\r\n');
+                e.dataTransfer.setData('text/uri-list', uriList);
+            } catch(ex) {}
+        }
+        e.dataTransfer.effectAllowed = 'copyMove';
     },
 
     _onDragEnter: function(e) {
@@ -2144,6 +2169,11 @@ var FileBase = {
             folderRow.classList.add('fb-drop-target');
             return;
         }
+        if (this._nativeDragPaths && this._nativeDragPaths.length > 0) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+            return;
+        }
         if (this._hasExternalFiles(e)) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
@@ -2157,13 +2187,22 @@ var FileBase = {
 
     _onDrop: function(e) {
         e.preventDefault();
+        e.stopPropagation();
         this._clearDragHighlights();
+
+        var nativePaths = this._nativeDragPaths;
+        this._nativeDragPaths = null;
+
+        if (nativePaths && nativePaths.length > 0) {
+            this._handleNativeDragReentry(e, nativePaths);
+            return;
+        }
 
         if (this._hasExternalFiles(e)) {
             this._uploadDroppedFiles(e.dataTransfer);
-            this._draggedPaths = null;
             return;
         }
+
         var sources = this._draggedPaths;
         this._draggedPaths = null;
         if (!sources || sources.length === 0) return;
@@ -2177,6 +2216,28 @@ var FileBase = {
     _onDragEnd: function(e) {
         this._clearDragHighlights();
         this._draggedPaths = null;
+        // 注：不清理 _nativeDragPaths，因为原生拖拽的 drop 事件在 dragend 之后触发
+    },
+
+    /** 处理原生拖拽回拖：在文件库内移动到目标文件夹，无有效目标则不做任何操作 */
+    _handleNativeDragReentry: function(e, nativePaths) {
+        var targetRow = e.target.closest('.fb-file-row.fb-local-dir');
+        var targetLabel = e.target.closest('.fb-tree-label');
+        var targetEl = targetRow || targetLabel;
+        if (!targetEl) return;
+        if (targetRow && targetRow.classList.contains('selected')) return;
+        var destPath = targetEl.getAttribute('data-local-path') || '';
+
+        var libPath = this.fbLocalPath ? this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '') : '';
+        var sources = [];
+        for (var i = 0; i < nativePaths.length; i++) {
+            var absPath = nativePaths[i];
+            if (libPath && absPath.indexOf(libPath + '/') === 0) {
+                sources.push(absPath.substring(libPath.length + 1));
+            }
+        }
+        if (sources.length === 0) return;
+        this._doMoveOrCopy(sources, destPath, !!e.ctrlKey);
     },
 
     _clearDragHighlights: function() {
@@ -2217,8 +2278,18 @@ var FileBase = {
 
     _onTreeDrop: function(e) {
         e.preventDefault();
+        e.stopPropagation();
         this._hideUploadOverlay();
         this._clearDragHighlights();
+
+        var nativePaths = this._nativeDragPaths;
+        this._nativeDragPaths = null;
+
+        if (nativePaths && nativePaths.length > 0) {
+            this._handleNativeDragReentry(e, nativePaths);
+            return;
+        }
+
         var sources = this._draggedPaths;
         this._draggedPaths = null;
         if (!sources || sources.length === 0) return;
@@ -2359,25 +2430,25 @@ var FileBase = {
             return;
         }
 
-        // PDF 始终使用Web预览，不调用本地软件
-        if (ext === 'pdf') {
-            this.openPdfPreview(relPath);
-            return;
-        }
-        
         // 本地文件库 → 调用本地软件打开
         var fileName = relPath.split('/').pop();
-        var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);
-        fetch(url, { method: 'GET' })
-            .then(function(res) { return res.json(); })
-            .then(function(data) {
-                if (!data.success) {
-                    showToast(data.message || '打开失败', 'error');
-                }
-            })
-            .catch(function(e) {
-                showToast('打开失败: ' + e.message, 'error');
-            });
+        // Electron 下使用 shell.openPath，正确管理窗口焦点
+        if (window.electronAPI) {
+            var absPath = this.fbLocalPath + '\\' + relPath.replace(/\//g, '\\');
+            window.electronAPI.openFileWithOsApp(absPath);
+        } else {
+            var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);
+            fetch(url, { method: 'GET' })
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        showToast(data.message || '打开失败', 'error');
+                    }
+                })
+                .catch(function(e) {
+                    showToast('打开失败: ' + e.message, 'error');
+                });
+        }
     },
     
     openFilePreview: async function(relPath) {
@@ -2429,7 +2500,8 @@ var FileBase = {
         }
     },
     
-    openPdfPreview: function(relPath) {
+    openPdfPreview: async function(relPath) {
+        var self = this;
         var fileName = relPath.split('/').pop();
         var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath);
         
@@ -2441,14 +2513,22 @@ var FileBase = {
             '<span>📄 ' + escapeHtmlText(fileName) + '</span>' +
             '<button onclick="FileBase._closeDocxPreview()">✖</button>' +
             '</div>' +
-            '<div class="fb-docx-preview-content" style="padding:0">' +
-            '<iframe src="' + fileUrl + '" style="width:100%;height:100%;min-height:500px;border:none;" title="' + escapeHtmlText(fileName) + '"></iframe>' +
+            '<div class="fb-docx-preview-content" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">' +
+            '<div style="text-align:center;padding:40px;color:#999;">正在加载PDF...</div>' +
             '</div>' +
             '</div>';
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) FileBase._closeDocxPreview();
+        });
         document.body.appendChild(overlay);
+        
+        // 使用 PDF.js 渲染（兼容 Electron 33+，移除的内置PDF插件）
+        var contentEl = overlay.querySelector('.fb-docx-preview-content');
+        await window._renderPdfInContainer(fileUrl, contentEl);
     },
     
-    openImagePreview: function(relPath) {
+    openImagePreview: async function(relPath) {
+        var self = this;
         var fileName = relPath.split('/').pop();
         var fileUrl = '/api/fb/' + this.currentFbId + '/local-files/open?path=' + encodeURIComponent(relPath);
         
@@ -2461,10 +2541,24 @@ var FileBase = {
             '<button onclick="FileBase._closeDocxPreview()">✖</button>' +
             '</div>' +
             '<div class="fb-docx-preview-content" style="padding:16px;text-align:center;background:#f8f9fa;">' +
-            '<img src="' + fileUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">' +
+            '<div style="padding:40px;color:#999;">加载中...</div>' +
             '</div>' +
             '</div>';
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) FileBase._closeDocxPreview();
+        });
         document.body.appendChild(overlay);
+        
+        try {
+            var resp = await fetch(fileUrl);
+            var blob = await resp.blob();
+            var blobUrl = URL.createObjectURL(blob);
+            var contentEl = overlay.querySelector('.fb-docx-preview-content');
+            contentEl.innerHTML = '<img src="' + blobUrl + '" alt="' + escapeHtmlText(fileName) + '" style="max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">';
+        } catch(e) {
+            var contentEl = overlay.querySelector('.fb-docx-preview-content');
+            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">图片加载失败</div>';
+        }
     },
 
     openMarkdownEditor: async function(relPath) {

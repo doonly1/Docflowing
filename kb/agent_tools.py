@@ -481,10 +481,33 @@ TOOL_CREATE_SCHEMA = {
 }
 
 
+TOOL_APPROVE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "tool_approve",
+        "description": (
+            "审批通过一个用户自建工具，允许其执行。"
+            "仅当用户明确表示同意/允许执行某工具后，才调用此函数。"
+            "调用前必须先向用户展示工具名和功能描述，获得明确许可。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "用户自建工具的名称（创建时指定的 name）"
+                }
+            },
+            "required": ["name"]
+        }
+    }
+}
+
+
 def _load_user_tools():
     """加载用户自建工具并更新全局列表"""
     try:
-        from tools.user_tools.loader import load_user_tools
+        from kb.user_tools import load_user_tools
         return load_user_tools()
     except Exception as e:
         logger.warning("无法加载用户工具: %s", e)
@@ -500,7 +523,7 @@ ALL_TOOL_SCHEMAS = [
     WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA,
     FB_LIST_SCHEMA, FB_BROWSE_SCHEMA, FB_READ_SCHEMA,
     FB_SEARCH_SCHEMA, FB_CREATE_SCHEMA, FB_MOVE_RENAME_SCHEMA,
-    TOOL_CREATE_SCHEMA,
+    TOOL_CREATE_SCHEMA, TOOL_APPROVE_SCHEMA,
 ] + _USER_TOOL_SCHEMAS
 
 
@@ -923,7 +946,7 @@ def _reload_user_tools():
     """重新加载用户工具并更新全局变量"""
     global _USER_TOOL_SCHEMAS, _USER_TOOL_EXECUTORS, ALL_TOOL_SCHEMAS
     try:
-        from tools.user_tools.loader import reload_user_tools
+        from kb.user_tools import reload_user_tools
         schemas, executors = reload_user_tools()
         _USER_TOOL_SCHEMAS = schemas
         _USER_TOOL_EXECUTORS = executors
@@ -933,10 +956,95 @@ def _reload_user_tools():
             WEB_SEARCH_SCHEMA, WIKI_READ_SCHEMA, WIKI_SEARCH_SCHEMA,
             FB_LIST_SCHEMA, FB_BROWSE_SCHEMA, FB_READ_SCHEMA,
             FB_SEARCH_SCHEMA, FB_CREATE_SCHEMA, FB_MOVE_RENAME_SCHEMA,
-            TOOL_CREATE_SCHEMA,
+            TOOL_CREATE_SCHEMA, TOOL_APPROVE_SCHEMA,
         ] + schemas
     except Exception as e:
         logger.error("重新加载用户工具失败: %s", e)
+
+
+def _validate_tool_code_ast(execute_body: str) -> Optional[str]:
+    """用 AST 解析工具函数体，校验安全性（白名单 + 黑名单双层）。
+
+    规则：
+    - import X：X 必须在 _ALLOWED_MODULES 中
+    - from X import Y：X 的顶级模块不在 _BLOCKED_MODULES 中，
+      或属于 _FROM_ONLY_ALLOWED 的特殊豁免
+    - 禁止危险 builtins：__import__, open, exec, eval, compile, input
+    - 禁止 pathlib 写方法：unlink, write_text, mkdir 等
+
+    Returns: None 通过，str 错误信息
+    """
+    import ast
+
+    _BLOCKED_MODULES = {
+        'os', 'shutil', 'subprocess', 'socket', 'ctypes', 'importlib',
+        'pickle', 'sys', 'http', 'urllib', 'ssl', 'smtplib', 'ftplib',
+        'multiprocessing', 'threading', 'code', 'codeop',
+        'tempfile', 'atexit', 'signal', 'platform', 'inspect',
+        'dis', 'gc', 'sysconfig', 'pkgutil',
+    }
+    _FROM_ONLY_ALLOWED = {
+        'os': {'path'},                              # from os import path
+        'os.path': None,                              # from os.path import *
+    }
+    _ALLOWED_MODULES = {
+        'json', 're', 'datetime', 'collections', 'typing', 'math',
+        'itertools', 'functools', 'textwrap', 'string', 'numbers',
+        'decimal', 'fractions', 'random', 'statistics',
+        'hashlib', 'base64', 'binascii',
+        'time', 'calendar', 'copy', 'enum', 'dataclasses',
+        'csv', 'glob', 'fnmatch', 'difflib', 'uuid',
+    }
+    _PATHLIB_BLOCKED = {
+        'unlink', 'rmdir', 'chmod', 'symlink_to', 'hardlink_to',
+        'rename', 'replace', 'write_bytes', 'write_text', 'open',
+        'mkdir', 'touch', 'lchmod',
+    }
+    _BLOCKED_BUILTINS = {'__import__', 'open', 'exec', 'eval', 'compile', 'input', 'breakpoint'}
+
+    try:
+        tree = ast.parse(execute_body)
+    except SyntaxError as e:
+        return f"语法错误: {e}"
+
+    for node in ast.walk(tree):
+        # --- import X ---
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name
+                top = name.split('.')[0]
+                if top in _BLOCKED_MODULES:
+                    return f"禁止导入模块: {name}"
+                if name not in _ALLOWED_MODULES and top not in _ALLOWED_MODULES:
+                    return f"不允许导入模块: {name}"
+
+        # --- from X import Y ---
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ''
+            top = mod.split('.')[0]
+            if top in _BLOCKED_MODULES:
+                # 特殊豁免：from os import path
+                special = _FROM_ONLY_ALLOWED.get(mod) or _FROM_ONLY_ALLOWED.get(top, set())
+                if special is not None:
+                    for alias in node.names:
+                        if alias.name not in special:
+                            return f"禁止从 {mod} 导入 {alias.name}"
+                    continue
+                return f"禁止导入模块: {mod}"
+            # 非黑名单模块：顶级必须在白名单
+            if top not in _ALLOWED_MODULES and mod not in _ALLOWED_MODULES:
+                return f"不允许导入模块: {mod}"
+
+        # --- builtins 引用 ---
+        if isinstance(node, ast.Name) and node.id in _BLOCKED_BUILTINS:
+            return f"禁止使用内置函数: {node.id}"
+
+        # --- pathlib 危险方法调用 ---
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in _PATHLIB_BLOCKED:
+                return f"禁止调用写方法: {node.func.attr}"
+
+    return None
 
 
 def _execute_tool_create(args: Dict[str, Any], user_id: str) -> str:
@@ -966,23 +1074,12 @@ def _execute_tool_create(args: Dict[str, Any], user_id: str) -> str:
     if name in _USER_TOOL_EXECUTORS:
         return json.dumps({"success": False, "error": f"工具名 '{name}' 已存在，请先删除再重建"}, ensure_ascii=False)
 
-    # 安全校验：禁止危险导入
-    dangerous_keywords = [
-        "__import__", "eval(", "exec(", "compile(",  # 动态执行
-        "os.system", "os.popen", "subprocess",  # shell 执行
-        "shutil.rmtree", "os.remove", "os.unlink",  # 删除
-        "socket",  # 网络
-        "pickle.loads", "pickle.load",  # 反序列化
-    ]
-    execute_body_lower = execute_body.lower()
-    for kw in dangerous_keywords:
-        if kw in execute_body_lower:
-            return json.dumps({
-                "success": False,
-                "error": f"代码中包含禁止使用的关键字: '{kw}'"
-            }, ensure_ascii=False)
+    # 安全校验：AST 白名单解析（替代旧字符串黑名单，不可绕过）
+    ast_error = _validate_tool_code_ast(execute_body)
+    if ast_error:
+        return json.dumps({"success": False, "error": f"代码安全校验不通过: {ast_error}"}, ensure_ascii=False)
 
-    # 构建工具文件 — 先构建 SCHEMA 再序列化，避免 f-string 与 json 嵌套冲突
+    # 构建工具文件
     schema = {
         "type": "function",
         "function": {
@@ -1015,8 +1112,10 @@ def execute(args: dict, user_id: str) -> str:
 {indented_body}
 '''
 
-    # 写出文件
-    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools', 'user_tools')
+    # 写出文件到运行时目录 user_tools/（由 server.workspace 统一解析）
+    from server.workspace import _get_workspace_dir
+    base_dir = _get_workspace_dir()
+    tools_dir = os.path.join(base_dir, 'user_tools')
     os.makedirs(tools_dir, exist_ok=True)
     fpath = os.path.join(tools_dir, f'{name}.py')
 
@@ -1039,9 +1138,71 @@ def execute(args: dict, user_id: str) -> str:
 
     return json.dumps({
         "success": True,
-        "message": f"工具 '{name}' 已创建并可用",
+        "message": f"工具 '{name}' 已创建，需要用户审批通过后才能执行",
         "tool_name": name,
+        "pending_approval": True,
     }, ensure_ascii=False)
+
+
+# ==================== 用户工具审批系统 ====================
+
+_APPROVALS_FILE = None  # lazy init
+
+
+def _get_approvals_path():
+    global _APPROVALS_FILE
+    if _APPROVALS_FILE is None:
+        from server.workspace import _get_workspace_dir
+        base = _get_workspace_dir()
+        _APPROVALS_FILE = os.path.join(base, 'user_tools', '.approvals.json')
+        os.makedirs(os.path.dirname(_APPROVALS_FILE), exist_ok=True)
+    return _APPROVALS_FILE
+
+
+def _load_approvals() -> dict:
+    """加载审批状态文件"""
+    path = _get_approvals_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_approvals(data: dict):
+    """保存审批状态文件"""
+    path = _get_approvals_path()
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.exception("保存审批状态失败")
+
+
+def _is_tool_approved(tool_name: str) -> bool:
+    """检查用户工具是否已审批通过"""
+    data = _load_approvals()
+    entry = data.get(tool_name, {})
+    return entry.get('approved', False)
+
+
+def _approve_tool(tool_name: str, user_id: str):
+    """审批通过用户工具"""
+    data = _load_approvals()
+    data[tool_name] = {'approved': True, 'approved_at': __import__('time').time(), 'user_id': user_id[:16]}
+    _save_approvals(data)
+
+
+def _reject_tool(tool_name: str):
+    """拒绝用户工具"""
+    data = _load_approvals()
+    if tool_name in data:
+        data[tool_name]['approved'] = False
+    else:
+        data[tool_name] = {'approved': False, 'rejected_at': __import__('time').time()}
+    _save_approvals(data)
 
 
 def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str:
@@ -1072,7 +1233,21 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], user_id: str) -> str
             return _execute_fb_move_rename(args, user_id)
         elif tool_name == "tool_create":
             return _execute_tool_create(args, user_id)
+        elif tool_name == "tool_approve":
+            tool_name_approve = (args.get("name") or "").strip()
+            if not tool_name_approve:
+                return json.dumps({"success": False, "error": "缺少工具名"})
+            _approve_tool(tool_name_approve, user_id)
+            return json.dumps({"success": True, "message": f"工具 '{tool_name_approve}' 已审批通过，现在可以执行了"})
         elif tool_name in _USER_TOOL_EXECUTORS:
+            # 用户工具需要审批通过才能执行
+            if not _is_tool_approved(tool_name):
+                return json.dumps({
+                    "success": False,
+                    "error": f"工具 '{tool_name}' 需要审批通过后才能执行",
+                    "require_approval": True,
+                    "tool_name": tool_name,
+                }, ensure_ascii=False)
             return _USER_TOOL_EXECUTORS[tool_name](args, user_id)
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)

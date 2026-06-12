@@ -30,6 +30,7 @@ _INVISIBLE_CHARS = {
 
 
 def _get_user_kb_dir(user_id: str) -> str:
+    from server.workspace import _get_workspace_dir
     base = _get_workspace_dir(user_id)
     kb_dir = os.path.join(base, 'data', 'kb')
     os.makedirs(kb_dir, exist_ok=True)

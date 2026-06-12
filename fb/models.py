@@ -98,11 +98,10 @@ CREATE TABLE IF NOT EXISTS _migrations (
 )
 """
 
-# 旧迁移保留以支持现有部署
-MIGRATIONS = [
-    # v1: 新文件库默认不同步（旧数据库表默认值为 1）
-    "ALTER TABLE filebases ALTER COLUMN is_synced_to_kb SET DEFAULT 0",
-]
+# 注意：SQLite 不支持 ALTER COLUMN SET DEFAULT。
+# CREATE TABLE 已设置 DEFAULT 0，新文件库默认不同步；
+# 原有数据库表若 DEFAULT 为 1，已有记录的 is_synced_to_kb 值不受影响，表结构也不需修改。
+MIGRATIONS = []
 
 # 数据库迁移 SQL（按版本号递增）
 DB_MIGRATIONS = {
