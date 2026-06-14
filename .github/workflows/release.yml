@@ -24,6 +24,8 @@ jobs:
 
       - name: 构建 Python 后端
         run: python electron/build-backend.py
+        env:
+          PYTHONIOENCODING: utf-8
 
       - name: 设置 Node.js 20
         uses: actions/setup-node@v4
