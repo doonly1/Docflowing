@@ -23,12 +23,12 @@ def _get_runtime_dir():
     """返回运行时数据目录（绝对路径）。
 
     优先级：
-    1. 环境变量 DOCFLOW_DATA_DIR（开发者/测试手动指定）
-    2. 已打包 / 桌面运行： %APPDATA%\\DocFlow 或 ~/.docflow
-       （由 Electron 通过 DOCFLOW_RUNTIME_DIR 显式传递）
+    1. 环境变量 DOCFLOWING_DATA_DIR（开发者/测试手动指定）
+    2. 已打包 / 桌面运行： %APPDATA%\\Docflowing 或 ~/.docflowing
+       （由 Electron 通过 DOCFLOWING_RUNTIME_DIR 显式传递）
     3. 开发模式：项目根目录 /workspaces
     """
-    env_dir = os.environ.get('DOCFLOW_DATA_DIR') or os.environ.get('DOCFLOW_RUNTIME_DIR')
+    env_dir = os.environ.get('DOCFLOWING_DATA_DIR') or os.environ.get('DOCFLOWING_RUNTIME_DIR')
     if env_dir:
         d = os.path.abspath(env_dir)
         os.makedirs(d, exist_ok=True)
@@ -47,9 +47,9 @@ def _get_runtime_dir():
     # 否则使用用户目录
     if os.name == 'nt':
         appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
-        d = os.path.join(appdata, 'DocFlow')
+        d = os.path.join(appdata, 'Docflowing')
     else:
-        d = os.path.join(os.path.expanduser('~'), '.docflow')
+        d = os.path.join(os.path.expanduser('~'), '.docflowing')
     os.makedirs(d, exist_ok=True)
     return d
 

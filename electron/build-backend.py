@@ -1,5 +1,5 @@
 """
-DocFlow Python 后端构建脚本
+Docflowing Python 后端构建脚本
 用法: python electron/build-backend.py
 
 使用 PyInstaller 将 app_server.py 打包为 dist/backend/backend.exe

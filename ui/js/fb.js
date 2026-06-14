@@ -3158,7 +3158,7 @@ var FileBase = {
             h += '<div style="text-align:center;padding:20px;color:#999;background:#f8f9fa;border-radius:6px">';
             h += '<div style="font-size:32px;margin-bottom:8px">🌐</div>';
             h += '<div>未发现其他在线节点</div>';
-            h += '<div style="font-size:11px;color:#bbb;margin-top:4px">请确保其他 DocFlow 节点已在同一局域网启动</div>';
+            h += '<div style="font-size:11px;color:#bbb;margin-top:4px">请确保其他 Docflowing 节点已在同一局域网启动</div>';
             h += '</div>';
         } else {
             h += '<div style="margin-bottom:10px">';

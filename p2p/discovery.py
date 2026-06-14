@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-_SERVICE_TYPE = "_docflow-p2p._tcp.local."
+_SERVICE_TYPE = "_docflowing-p2p._tcp.local."
 _TTL = 120  # 节点存活时间（秒）
 _HEALTH_CHECK_INTERVAL = 30  # 健康检查间隔（秒）
 
@@ -167,7 +167,7 @@ class NodeDiscovery:
 
         self._service_info = ServiceInfo(
             type_=_SERVICE_TYPE,
-            name=f"{self.node_id}._docflow-p2p._tcp.local.",
+            name=f"{self.node_id}._docflowing-p2p._tcp.local.",
             addresses=[socket.inet_aton(addr) for addr in addresses],
             port=self.port,
             properties=props,

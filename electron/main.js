@@ -7,10 +7,10 @@ const { StringDecoder } = require('string_decoder');
 // ==================== 配置 ====================
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const IS_PACKAGED = app.isPackaged;
-const DEV_MODE = process.env.DOCFLOW_DEV === '1';
+const DEV_MODE = process.env.DOCFLOWING_DEV === '1';
 const OPEN_DEVTOOLS = DEV_MODE;
 const ROOT_DIR = IS_PACKAGED ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..');
-const APP_NAME = '文枢';
+const APP_NAME = '文澜';
 
 // ==================== 全局状态 ====================
 let mainWindow = null;
@@ -47,7 +47,7 @@ function startPythonBackend() {
         const env = {
             ...process.env,
             PORT: String(PORT),
-            DOCFLOW_RUNTIME_DIR: runtimeDir
+            DOCFLOWING_RUNTIME_DIR: runtimeDir
         };
 
         pythonProcess = spawn(cmd, args, {

@@ -1,11 +1,11 @@
 {
-  "name": "docflow",
+  "name": "docflowing",
   "version": "1.0.0",
-  "description": "文枢 DocFlow — 文档工作流桌面应用",
+  "description": "文澜 Docflowing — 文档工作流桌面应用",
   "main": "electron/main.js",
   "scripts": {
     "start": "chcp 65001 > NUL & electron .",
-    "dev": "chcp 65001 > NUL & cross-env DOCFLOW_DEV=1 electron .",
+    "dev": "chcp 65001 > NUL & cross-env DOCFLOWING_DEV=1 electron .",
     "postinstall": "node electron/copy-libs.js",
     "build:backend": "python electron/build-backend.py",
     "pack": "electron-builder --dir",
@@ -16,8 +16,8 @@
     "dist:portable": "npm run build:backend && electron-builder --win portable"
   },
   "build": {
-    "appId": "com.docflow.app",
-    "productName": "文枢",
+    "appId": "com.docflowing.app",
+    "productName": "文澜",
     "directories": {
       "output": "release"
     },
@@ -50,7 +50,7 @@
       "installerIcon": "ui/favicon.ico",
       "uninstallerIcon": "ui/favicon.ico",
       "installerHeaderIcon": "ui/favicon.ico",
-      "shortcutName": "文枢 DocFlow",
+      "shortcutName": "文澜 Docflowing",
       "unicode": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # 运行时目录：由 server.workspace._get_workspace_dir 统一解析
 # 开发模式 -> 项目根 /workspaces/user_tools
-# 打包模式 -> %APPDATA%/DocFlow/user_tools
+# 打包模式 -> %APPDATA%/Docflowing/user_tools
 from server.workspace import _get_workspace_dir
 _RUNTIME_DIR = _get_workspace_dir()
 _TOOLS_DIR = os.path.join(_RUNTIME_DIR, 'user_tools')

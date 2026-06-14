@@ -31,6 +31,10 @@ dist/
 # PyInstaller 中间文件
 build/
 
+# 构建日志
+build_log.txt
+error_log.txt
+
 # 其他
 electron/backend.spec
 /.*/

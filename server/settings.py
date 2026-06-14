@@ -130,7 +130,7 @@ def _is_autostart_enabled():
         import winreg
         key_path = r'Software\Microsoft\Windows\CurrentVersion\Run'
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
-            winreg.QueryValueEx(key, 'DocFlow')
+            winreg.QueryValueEx(key, 'Docflowing')
             return True
     except (FileNotFoundError, OSError):
         return False
@@ -148,10 +148,10 @@ def _set_autostart(enabled):
             script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app_desktop.py')
             cmd = f'"{python_exe}" "{script_path}"'
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, 'DocFlow', 0, winreg.REG_SZ, cmd)
+                winreg.SetValueEx(key, 'Docflowing', 0, winreg.REG_SZ, cmd)
         else:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.DeleteValue(key, 'DocFlow')
+                winreg.DeleteValue(key, 'Docflowing')
         return True
     except Exception:
         return False

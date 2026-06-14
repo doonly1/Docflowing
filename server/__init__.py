@@ -1,4 +1,4 @@
-"""DocFlow 后端服务 —— create_app 工厂入口"""
+"""Docflowing 后端服务 —— create_app 工厂入口"""
 
 import os
 import sys

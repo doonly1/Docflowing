@@ -1,4 +1,4 @@
-"""DocFlow 桌面版入口 — pywebview 壳（已废弃）
+"""Docflowing 桌面版入口 — pywebview 壳（已废弃）
 
 注意：此文件已迁移至 Electron，请使用 npm run dev 启动。
 保留此文件仅用于回退参考，未来版本将删除。
@@ -267,7 +267,7 @@ def main():
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui', 'favicon.ico')
 
     kwargs = {
-        'title': '文枢',
+        'title': '文澜',
         'url': server_url,
         'width': win_w,
         'height': win_h,

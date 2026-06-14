@@ -1,4 +1,4 @@
-"""DocFlow 服务端入口 — gunicorn / Flask 双模式
+"""Docflowing 服务端入口 — gunicorn / Flask 双模式
 
 用法：
   # 生产（推荐 gunicorn）
@@ -32,5 +32,5 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes')
 
-    print(f"DocFlow 服务启动 -> http://{host}:{port}")
+    print(f"Docflowing 服务启动 -> http://{host}:{port}")
     app.run(host=host, port=port, threaded=True, debug=debug)

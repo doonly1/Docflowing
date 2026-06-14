@@ -1,8 +1,8 @@
-# DocFlow · 文枢
+# Docflowing · 文澜
 
-> DocFlow——Document Workflow，公文处理与 AI 知识管理平台。
+> Docflowing——Document Workflow，公文处理与 AI 知识管理平台。
 
-DocFlow（文枢）是一个面向公文处理的 **桌面应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理，包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
+Docflowing（文澜）是一个面向公文处理的 **桌面应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理，包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
 
 基于 P2P 节点共享，局域网内多台机器可互相发现并共享文件库。
 
@@ -39,16 +39,16 @@ npm run dev
 npm run dist:win
 ```
 
-输出在 `release/` 目录下，生成 NSIS 安装包 `文枢-Setup-1.0.0.exe`。
+输出在 `release/` 目录下，生成 NSIS 安装包 `文澜-Setup-1.0.0.exe`。
 
 ## 下载安装
 
 ### 普通用户（无需编程环境）
 
-1. 前往 **[Releases](https://github.com/doonly1/DocFlow/releases)** 页面
-2. 找到最新版本，下载 `文枢-Setup-x.x.x.exe`
+1. 前往 **[Releases](https://github.com/doonly1/Docflowing/releases)** 页面
+2. 找到最新版本，下载 `文澜-Setup-x.x.x.exe`
 3. 双击运行安装程序
-   - 可选择安装目录（默认 `C:\Program Files\文枢`）
+   - 可选择安装目录（默认 `C:\Program Files\文澜`）
    - 自动创建桌面快捷方式
 4. 安装完成后，双击桌面图标启动
    - 首次启动会自动在安装目录下创建 `workspaces/` 数据文件夹
@@ -60,7 +60,7 @@ npm run dist:win
 
 ```bash
 # 克隆仓库
-git clone https://github.com/doonly1/DocFlow.git
+git clone https://github.com/doonly1/Docflowing.git
 cd DocFlow
 
 # 安装依赖

@@ -115,7 +115,7 @@ def migrate_owner_permissions():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("DocFlow 权限迁移脚本 v1.0")
+    print("Docflowing 权限迁移脚本 v1.0")
     print("=" * 50)
     r1 = migrate_permissions()
     r2 = migrate_owner_permissions()
