@@ -1,68 +1,13 @@
 {
   "name": "docflowing",
   "version": "1.0.0",
-  "description": "文澜 Docflowing — 文档工作流桌面应用",
-  "main": "electron/main.js",
+  "description": "文澜 Docflowing — 文档工作流桌面应用（pywebview）",
   "scripts": {
-    "start": "chcp 65001 > NUL & electron .",
-    "dev": "chcp 65001 > NUL & cross-env DOCFLOWING_DEV=1 electron .",
+    "start": "python desktop_app.py",
+    "dev": "set DOCFLOWING_DEV=1 && python desktop_app.py",
     "postinstall": "node electron/copy-libs.js",
-    "build:backend": "python electron/build-backend.py",
-    "pack": "electron-builder --dir",
-    "dist": "npm run build:backend && electron-builder",
-    "dist:win": "npm run build:backend && electron-builder --win",
-    "dist:quick": "electron-builder --win --dir",
-    "dist:full": "npm run build:backend && electron-builder --win",
-    "dist:portable": "npm run build:backend && electron-builder --win portable"
-  },
-  "build": {
-    "appId": "com.docflowing.app",
-    "productName": "文澜",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "ui/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "dist/backend",
-        "to": "backend",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "ui/favicon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "installerIcon": "ui/favicon.ico",
-      "uninstallerIcon": "ui/favicon.ico",
-      "installerHeaderIcon": "ui/favicon.ico",
-      "shortcutName": "文澜 Docflowing",
-      "unicode": true,
-      "artifactName": "${productName}-Setup-${version}.${ext}"
-    },
-    "portable": {
-      "artifactName": "${productName}-Portable-${version}.${ext}",
-      "splashImage": "ui/favicon.ico"
-    }
-  },
-  "devDependencies": {
-    "cross-env": "^7.0.3",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "build:desktop": "python electron/build-desktop.py",
+    "build:backend": "python electron/build-backend.py"
   },
   "dependencies": {
     "iconv-lite": "^0.7.2",

@@ -38,10 +38,48 @@ def get_p2p_discovery() -> NodeDiscovery | None:
 
 
 def create_app():
+    # PyInstaller 打包模式下，ui/ 在 _MEIPASS/ui/
+    # 开发模式下 ui/ 在项目根目录
+    import sys
+    # 检测是否处于 PyInstaller frozen 环境
+    is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    
+    if is_frozen:
+        # 检测是 Electron 打包（resources/backend/）还是 pywebview 独立打包
+        exe_dir = os.path.dirname(sys.executable)
+        if 'resources' + os.sep + 'backend' in exe_dir or exe_dir.endswith(os.path.join('resources', 'backend')):
+            # Electron 打包模式：backend.exe 在 resources/backend/
+            resources_dir = os.path.dirname(exe_dir)  # resources/
+            static_folder = 'ui'
+            template_folder = 'ui'
+            root_path = resources_dir
+            logger.info(f"Electron packaged mode: static_folder={static_folder}, root_path={root_path}, exe_dir={exe_dir}")
+        else:
+            # pywebview 独立打包或普通 PyInstaller 模式：静态文件在 _MEIPASS/ui/
+            static_folder = 'ui'
+            template_folder = 'ui'
+            root_path = sys._MEIPASS
+            logger.info(f"PyInstaller packaged mode: static_folder={static_folder}, root_path={root_path}, _MEIPASS={sys._MEIPASS}")
+    else:
+        # 还可以检测 Electron 环境变量（开发模式下 Electron 启动 Python 时设置）
+        is_electron_packaged = os.environ.get('DOCFLOWING_PACKAGED') == '1'
+        if is_electron_packaged:
+            exe_dir = os.path.dirname(sys.executable)  # resources/backend
+            resources_dir = os.path.dirname(exe_dir)    # resources/
+            static_folder = 'ui'
+            template_folder = 'ui'
+            root_path = resources_dir
+            logger.info(f"Electron dev mode detected: static_folder={static_folder}, root_path={root_path}")
+        else:
+            static_folder = 'ui'
+            template_folder = 'ui'
+            root_path = project_root
+            logger.info(f"Development mode: static_folder={static_folder}, root_path={root_path}")
+    
     app = Flask(__name__,
-                root_path=project_root,
-                template_folder='ui',
-                static_folder='ui',
+                root_path=root_path,
+                template_folder=template_folder,
+                static_folder=static_folder,
                 static_url_path='')
     CORS(app)
     app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE
@@ -49,10 +87,54 @@ def create_app():
     # 中间件
     setup_middleware(app)
 
-    # 首页
+    # CSP 策略（移至 Flask 端，不再依赖 Electron session）
+    @app.after_request
+    def add_security_headers(response):
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' ws:; "
+            "font-src 'self' data:; "
+            "object-src 'none'; "
+            "media-src 'self' blob:; "
+            "frame-src 'self' blob: data:; "
+            "form-action 'self'; "
+            "base-uri 'self'"
+        )
+        response.headers['Content-Security-Policy'] = csp
+        return response
+
+    # 首页（注入 pywebview 兼容 shim）
     @app.route('/')
     def index():
-        return app.send_static_file('index.html')
+        # 读取 index.html 并注入 pywebview 兼容层
+        import os
+        static_dir = app.static_folder or os.path.join(app.root_path, app.static_folder or 'ui')
+        index_path = os.path.join(static_dir, 'index.html')
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            return app.send_static_file('index.html')
+
+        shim = (
+            '<script>\n'
+            '(function() {\n'
+            '  function _checkPywebview() {\n'
+            '    if (window.pywebview && window.pywebview.api) {\n'
+            '      window.electronAPI = window.pywebview.api;\n'
+            '    } else {\n'
+            '      setTimeout(_checkPywebview, 50);\n'
+            '    }\n'
+            '  }\n'
+            '  _checkPywebview();\n'
+            '})();\n'
+            '</script>\n'
+        )
+        content = content.replace('</head>', shim + '</head>')
+        return app.response_class(content, mimetype='text/html; charset=utf-8')
 
     # 请求体过大处理
     @app.errorhandler(413)
