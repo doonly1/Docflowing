@@ -196,10 +196,7 @@ def para_fm(para_name, spc_bef, spc_af, line_spc, left_ind, right_ind, first_l_i
     if line_spc is not None:
         para_f.line_spacing = Pt(line_spc) if line_spc > 3 else line_spc
 
-    needs_ind = any(
-        isinstance(v, str) and v.endswith('ch')
-        for v in (left_ind, right_ind, first_l_ind) if v is not None
-    )
+    needs_ind = any(v is not None for v in (left_ind, right_ind, first_l_ind))
     if needs_ind:
         elem = para_f._element
         pPr = elem.find(qn('w:pPr'))

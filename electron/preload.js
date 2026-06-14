@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     windowClose: () => ipcRenderer.invoke('window-close'),
     windowShow: () => ipcRenderer.invoke('window-show'),
     setCloseAction: (action) => ipcRenderer.invoke('set-close-action', action),
+    setWordKeepAlive: (enabled) => ipcRenderer.invoke('set-word-keep-alive', enabled),
 
     // 窗口位置/大小
     windowGetPosition: () => ipcRenderer.invoke('window-get-position'),

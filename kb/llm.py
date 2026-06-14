@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -11,6 +12,48 @@ except ImportError:
     HAS_REQUESTS = False
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_STATUSES = (429, 500, 502, 503, 504)
+
+
+def _request_with_retry(
+    method, url, *, max_retries=3, base_delay=1.0, **kwargs
+):
+    """带指数退避的 HTTP 请求重试
+
+    对以下情况自动重试（最多 max_retries 次）：
+    - 网络超时 / 连接错误
+    - HTTP 429 (Rate Limit)
+    - HTTP 5xx 服务端错误
+    """
+    last_exception = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.request(method, url, **kwargs)
+            if resp.status_code in _RETRYABLE_STATUSES and attempt < max_retries:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "LLM 返回 %d，%.1fs 后重试 (第 %d/%d 次)",
+                    resp.status_code, delay, attempt, max_retries,
+                )
+                time.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "LLM 请求失败 (%s)，%.1fs 后重试 (第 %d/%d 次)",
+                    e, delay, attempt, max_retries,
+                )
+                time.sleep(delay)
+                continue
+            raise
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("LLM 请求重试耗尽")
 
 
 def _get_llm_config(user_id: str = None) -> Dict[str, Any]:
@@ -59,8 +102,8 @@ def call_llm(
         return None
 
     try:
-        resp = requests.post(
-            f"{base_url}/chat/completions",
+        resp = _request_with_retry(
+            "POST", f"{base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -73,14 +116,10 @@ def call_llm(
             },
             timeout=60,
         )
-        resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"]
-    except requests.exceptions.Timeout:
-        logger.error("LLM 调用超时 (60s)")
-        return None
     except Exception as e:
-        logger.error("LLM 调用失败: %s", e)
+        logger.error("LLM 调用失败 (重试耗尽): %s", e)
         return None
 
 
@@ -114,8 +153,8 @@ def call_llm_stream(
         return
 
     try:
-        resp = requests.post(
-            f"{base_url}/chat/completions",
+        resp = _request_with_retry(
+            "POST", f"{base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -130,7 +169,6 @@ def call_llm_stream(
             timeout=120,
             stream=True,
         )
-        resp.raise_for_status()
         for line in resp.iter_lines():
             if not line:
                 continue
@@ -148,7 +186,7 @@ def call_llm_stream(
                 except json.JSONDecodeError:
                     continue
     except Exception as e:
-        logger.error("LLM 流式调用失败: %s", e)
+        logger.error("LLM 流式调用失败 (重试耗尽): %s", e)
 
 
 _TITLE_PROMPT = (
@@ -247,8 +285,8 @@ def call_llm_with_tools(
             payload["tool_choice"] = "auto"
 
         try:
-            resp = requests.post(
-                f"{base_url}/chat/completions",
+            resp = _request_with_retry(
+                "POST", f"{base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -256,14 +294,9 @@ def call_llm_with_tools(
                 json=payload,
                 timeout=120,
             )
-            resp.raise_for_status()
             data = resp.json()
-        except requests.exceptions.Timeout:
-            logger.error("LLM 调用超时 (120s)")
-            result["error"] = "LLM 调用超时"
-            return result
         except Exception as e:
-            logger.error("LLM 调用失败: %s", e)
+            logger.error("LLM 调用失败 (重试耗尽): %s", e)
             result["error"] = f"LLM 调用失败: {e}"
             return result
 
@@ -384,8 +417,8 @@ def call_llm_with_tools_stream(
             payload["tool_choice"] = "auto"
 
         try:
-            resp = requests.post(
-                f"{base_url}/chat/completions",
+            resp = _request_with_retry(
+                "POST", f"{base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -394,9 +427,8 @@ def call_llm_with_tools_stream(
                 timeout=120,
                 stream=True,
             )
-            resp.raise_for_status()
         except Exception as e:
-            logger.error("LLM 流式调用失败: %s", e)
+            logger.error("LLM 流式调用失败 (重试耗尽): %s", e)
             yield {"type": "error", "message": f"LLM 调用失败: {e}"}
             return
 

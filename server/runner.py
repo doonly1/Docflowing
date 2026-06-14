@@ -8,7 +8,7 @@ import subprocess
 from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from server.workspace import _get_workspace_dir
-from tools.tool_defs import TOOL_SCRIPTS
+from tools.tool_defs import get_tool_script_path
 
 runner_bp = Blueprint('runner', __name__)
 
@@ -30,11 +30,10 @@ def api_run_tool_with_config():
     if not os.path.isdir(directory):
         return jsonify({'success': False, 'message': f'目录不存在: {directory}'})
 
-    if tool not in TOOL_SCRIPTS:
+    if tool not in ['to_docx', 'to_index', 'to_compare', 'to_pdf', 'to_pageNum', 'to_redhead']:
         return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
 
-    script = TOOL_SCRIPTS[tool]
-    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), script)
+    script_path = get_tool_script_path(tool)
 
     if not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'脚本不存在: {script}'})

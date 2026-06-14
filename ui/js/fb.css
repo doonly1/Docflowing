@@ -653,9 +653,11 @@ body.fb-resizing {
     justify-content: center;
     opacity: 0;
     transition: opacity 0.2s ease;
+    pointer-events: none;
 }
 .fb-modal-overlay.show {
     opacity: 1;
+    pointer-events: auto;
 }
 
 .fb-modal {
@@ -742,6 +744,13 @@ body.fb-resizing {
 .fb-modal .fb-modal-actions .fb-btn-primary:hover {
     background: #d63850;
     border-color: #d63850;
+}
+
+/* 预设权限按钮选中态 */
+.fb-preset-btn.active {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 1px #fff;
 }
 
 .fb-member-table {

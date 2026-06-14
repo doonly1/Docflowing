@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.decorators import _require_fb_permission, require_fb_perm, _get_node_identity
+from fb.decorators import _require_fb_permission, require_fb_perm, _get_node_identity, ROLE_TEMPLATES
 from server import get_p2p_discovery
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,14 @@ def share_filebase(filebase_id):
     data = request.get_json() or {}
     target_nodes = data.get('nodes', [])
     permission = (data.get('permission') or 'view').strip()
+    perm_mask = data.get('perm_mask')
 
     if not target_nodes:
         return jsonify({'success': False, 'message': '请选择目标节点'})
-    if permission not in ('view', 'edit', 'manage'):
+    if perm_mask is not None:
+        if not isinstance(perm_mask, int) or perm_mask < 1 or perm_mask > 255:
+            return jsonify({'success': False, 'message': '无效的权限位掩码'})
+    elif permission not in ('view', 'edit', 'manage'):
         return jsonify({'success': False, 'message': '无效的权限级别'})
 
     db = get_db()
@@ -56,7 +60,7 @@ def share_filebase(filebase_id):
         try:
             import requests
             notify_url = f'http://{node_addr}/p2p/share/notify'
-            resp = requests.post(notify_url, json={
+            payload = {
                 'fb_id': filebase_id,
                 'fb_name': fb_name,
                 'owner_addr': owner_full_addr,
@@ -64,15 +68,24 @@ def share_filebase(filebase_id):
                 'node_id': identity.node_id,
                 'node_name': identity.display_name,
                 'node_public_key': identity.get_public_key_b64()
-            }, timeout=10)
+            }
+            if perm_mask is not None:
+                payload['perm_mask'] = perm_mask
+            resp = requests.post(notify_url, json=payload, timeout=10)
             if resp.ok:
                 success_count += 1
         except Exception as e:
             logger.warning("Failed to notify node %s: %s", node_addr, e)
 
         db.execute(
-            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (filebase_id, node_id, node_name, node_addr, permission, now)
+            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, perm_mask, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (filebase_id, node_id, node_name, node_addr, permission, perm_mask, now)
+        )
+        # 同步写入 filebase_perm_v2，使 P2P 权限校验可识别远程节点
+        final_mask = perm_mask if perm_mask is not None else ROLE_TEMPLATES.get(permission, 1)
+        db.execute(
+            "INSERT OR REPLACE INTO filebase_perm_v2 (filebase_id, user_id, perm_mask, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (filebase_id, node_id, final_mask, now, now)
         )
 
     db.commit()
@@ -92,7 +105,7 @@ def list_shared_nodes(filebase_id):
     """获取文件库已共享的节点列表"""
     db = get_db()
     rows = db.execute(
-        "SELECT node_id, node_name, node_addr, permission_level, created_at FROM shared_nodes WHERE filebase_id = ? ORDER BY created_at DESC",
+        "SELECT node_id, node_name, node_addr, permission_level, perm_mask, created_at FROM shared_nodes WHERE filebase_id = ? ORDER BY created_at DESC",
         (filebase_id,)
     ).fetchall()
 
@@ -103,6 +116,7 @@ def list_shared_nodes(filebase_id):
             'node_name': r['node_name'],
             'node_addr': r['node_addr'],
             'permission': r['permission_level'],
+            'perm_mask': r['perm_mask'],
             'created_at': r['created_at']
         })
 
@@ -143,6 +157,7 @@ def batch_share():
     data = request.get_json() or {}
     fb_id = data.get('fb_id', '')
     permission = (data.get('permission') or 'view').strip()
+    perm_mask = data.get('perm_mask')
     all_nodes = data.get('all_nodes', [])
 
     if not fb_id or not all_nodes:
@@ -173,7 +188,7 @@ def batch_share():
             import requests
             host = node_addr.split(':')[0] if ':' in node_addr else node_addr
             notify_url = f'http://{node_addr}/p2p/share/notify'
-            resp = requests.post(notify_url, json={
+            payload = {
                 'fb_id': fb_id,
                 'fb_name': fb_name,
                 'owner_addr': f'{host}:{identity.port}',
@@ -181,15 +196,23 @@ def batch_share():
                 'node_id': identity.node_id,
                 'node_name': identity.display_name,
                 'node_public_key': identity.get_public_key_b64()
-            }, timeout=10)
+            }
+            if perm_mask is not None:
+                payload['perm_mask'] = perm_mask
+            resp = requests.post(notify_url, json=payload, timeout=10)
             if resp.ok:
                 success_count += 1
         except Exception as e:
             logger.warning("batch share failed for %s: %s", node_addr, e)
 
         db.execute(
-            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (fb_id, node_id, node_name, node_addr, permission, now)
+            "INSERT OR REPLACE INTO shared_nodes (filebase_id, node_id, node_name, node_addr, permission_level, perm_mask, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (fb_id, node_id, node_name, node_addr, permission, perm_mask, now)
+        )
+        final_mask = perm_mask if perm_mask is not None else ROLE_TEMPLATES.get(permission, 1)
+        db.execute(
+            "INSERT OR REPLACE INTO filebase_perm_v2 (filebase_id, user_id, perm_mask, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (fb_id, node_id, final_mask, now, now)
         )
     db.commit()
 

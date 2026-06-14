@@ -85,7 +85,12 @@ def get_visible_fb_ids(user_id, is_admin=False):
         return [r['id'] for r in rows]
     db = get_db()
     ids = set()
-    rows = db.execute("SELECT filebase_id FROM filebase_permissions WHERE user_id = ?", (user_id,)).fetchall()
+    rows = db.execute(
+        "SELECT p.filebase_id FROM filebase_permissions p "
+        "JOIN filebases f ON f.id = p.filebase_id "
+        "WHERE p.user_id = ? AND COALESCE(f.status, 'active') != 'trashed'",
+        (user_id,)
+    ).fetchall()
     for r in rows:
         ids.add(r['filebase_id'])
     rows = db.execute("SELECT id FROM filebases WHERE owner_id = ? AND COALESCE(status, 'active') != 'trashed'", (user_id,)).fetchall()

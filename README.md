@@ -2,7 +2,7 @@
 
 > Docflowing——Document Workflow，公文处理与 AI 知识管理平台。
 
-Docflowing（文澜）是一个面向公文处理的 **桌面应用 + 工具集**，深度整合传统文档处理与 AI 驱动的知识管理，包括：知识库 Wiki、对话式 AI 助手、持久记忆系统、智能技能管理、使用洞察分析等。
+Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会话、公文处理**的桌面及服务节点应用，整合传统文档处理与 AI 驱动的知识管理，包括：文件库、知识库、工具集、P2P共享，以及AI会话、持久记忆系统、技能管理等。
 
 基于 P2P 节点共享，局域网内多台机器可互相发现并共享文件库。
 
@@ -127,6 +127,25 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 | **LLM 配置** | `config.py` | OpenAI 兼容 API，Fernet 加密存储密钥 |
 | **同步管理** | `sync_worker.py` + `sync_converters.py` | 文件库→KB 自动同步，增量同步（mtime），并发控制，多格式转 Markdown（markitdown） |
 
+### ⚡ 技能管理系统
+
+技能（Skill）是 AI 助手的指令模板，定义了助手在特定场景下的行为方式。
+
+**技能生命周期：**
+- **Active**（活跃）：对话中使用过的技能，近期有效
+- **Stale**（过期）：长时间未使用的技能，标记为过期
+- **Archived**（归档）：彻底不再使用的技能，由 LLM 审查器自动归档
+
+**管理方式：**
+- 对话中 AI 助手自动识别并提取技能
+- 用户可通过知识库 UI 手动创建/编辑/删除技能
+- 技能审查器定期扫描所有技能，自动合并内容重叠的技能
+
+**内置系统技能（12 个）：**
+`caveman` / `diagnose` / `edit-article` / `grill-me` / `grill-with-docs` / `handoff` / `improve-codebase-architecture` / `prototype` / `tdd` / `to-prd` / `write-a-skill` / `zoom-out`
+
+每个技能为一个目录，包含 `SKILL.md`（YAML frontmatter + Markdown 指令），可附带辅助文档。
+
 ### 🔐 认证
 
 单用户桌面版，本机 localhost 自动放行。P2P 层使用 Ed25519 签名验证节点身份。
@@ -217,14 +236,20 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 ├── ui/                          # 前端 SPA（按需加载）
 │   ├── index.html               # 主页面
 │   ├── js/
-│   │   ├── main.js              # 核心逻辑 + 工具页
+│   │   ├── utils.js             # 公共工具（error capture、dialog、apiFetch、withLoading）
+│   │   ├── tools.js             # 工具定义（tools 对象、selectTool、getSelectedDirectory）
+│   │   ├── tab-manager.js       # 标签管理器（多标签页、窗口控制、会话管理）
+│   │   ├── main.js              # 核心逻辑（文件面板、配置管理、初始化、文件库选择器）
 │   │   ├── fb.js / fb.css       # 文件库管理器（按需加载）
 │   │   └── kb.js / kb.css       # 知识库聊天/文件浏览（按需加载）
 │   └── lib/                     # 第三方前端库
 │       ├── marked/              # Markdown 渲染
 │       ├── quill/               # 富文本编辑器
 │       └── turndown/            # HTML 转 Markdown
-├── tests/                       # 测试
+├── tests/                       # 单元测试
+│   ├── __init__.py
+│   ├── test_llm.py              # LLM 调用重试与退避机制测试
+│   └── test_auth.py             # 认证系统（X-Forwarded-For）测试
 ├── requirements.txt             # Python 依赖
 └── README.md                    # 本文件
 ```

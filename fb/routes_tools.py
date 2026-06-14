@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity
-from tools.tool_defs import TOOL_SCRIPTS
+from tools.tool_defs import get_tool_script_path
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
@@ -38,10 +38,10 @@ def run_tool_on_fb(filebase_id):
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
 
-    if tool not in TOOL_SCRIPTS:
+    if tool not in ['to_docx', 'to_index', 'to_compare', 'to_pdf', 'to_pageNum', 'to_redhead']:
         return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
 
-    script_path = TOOL_SCRIPTS[tool]
+    script_path = get_tool_script_path(tool)
     if not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'脚本不存在: {tool}'})
 

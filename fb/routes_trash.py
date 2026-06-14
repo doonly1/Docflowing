@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, g
 
 from server.auth import login_required
 from fb.database import get_db
-from fb.routes_base import _get_user_workspace, _get_trash_dir
+from fb.routes_base import _get_user_workspace, _get_trash_dir, _list_fb_cache
 from fb.routes_sync import _update_kb_path_prefix
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
@@ -162,6 +162,7 @@ def restore_from_trash():
             (filebase_id, user_id, 'manage')
         )
     db.commit()
+    _list_fb_cache.pop(f"list_fb:{user_id}", None)
 
     return jsonify({'success': True, 'fb': {'id': filebase_id, 'name': name, 'owner_id': user_id, 'created_at': now, 'filebase_type': 'local', 'local_path': dst}})
 

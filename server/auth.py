@@ -26,13 +26,22 @@ def _get_node_id() -> str:
     return _node_id
 
 
+def _get_real_ip() -> str:
+    """获取真实客户端 IP，优先从 X-Forwarded-For 解析（反向代理场景）"""
+    xff = request.headers.get('X-Forwarded-For', '').strip()
+    if xff:
+        # X-Forwarded-For 格式: client_ip, proxy1_ip, proxy2_ip, ...
+        return xff.split(',')[0].strip()
+    return request.remote_addr or ''
+
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if request.method == 'OPTIONS':
             return f(*args, **kwargs)
 
-        remote_ip = request.remote_addr or ''
+        remote_ip = _get_real_ip()
         if remote_ip in ('127.0.0.1', '::1', 'localhost'):
             g.user_id = _get_node_id()
             return f(*args, **kwargs)

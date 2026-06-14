@@ -120,9 +120,24 @@ function pollServer(resolve, reject, attempt = 0) {
     });
 }
 
+function getAppSettings() {
+    const wsDir = IS_PACKAGED ? app.getPath('userData') : path.join(ROOT_DIR, 'workspaces');
+    const settingsPath = path.join(wsDir, 'config', 'app_settings.json');
+    try {
+        return JSON.parse(require('fs').readFileSync(settingsPath, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
 function startWordKeepAlive() {
     if (process.platform !== 'win32') return;
-    if (IS_PACKAGED) return;  // 打包模式下无系统 python 环境
+
+    const settings = getAppSettings();
+    if (settings.word_keep_alive === false) {
+        console.log('[WordKeepAlive] 配置已禁用，跳过启动');
+        return;
+    }
 
     const scriptPath = path.join(ROOT_DIR, 'tools', 'WordKeepAlive.py');
     if (!require('fs').existsSync(scriptPath)) return;
@@ -183,14 +198,16 @@ function createWindow() {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
                     "default-src 'self'; " +
-                    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-                    "style-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+                    "script-src 'self' 'unsafe-inline'; " +
+                    "style-src 'self' 'unsafe-inline'; " +
                     "img-src 'self' data: blob:; " +
                     "connect-src 'self'; " +
                     "font-src 'self' data:; " +
-                    "object-src 'self'; " +
+                    "object-src 'none'; " +
                     "media-src 'self' blob:; " +
-                    "frame-src 'self' blob: data:"
+                    "frame-src 'self' blob: data:; " +
+                    "form-action 'self'; " +
+                    "base-uri 'self'"
                 ]
             }
         });
@@ -317,6 +334,35 @@ ipcMain.handle('set-close-action', (_event, action) => {
     if (action === 'exit' || action === 'minimize') {
         closeAction = action;
         console.log('[Electron] 关闭行为已更新:', closeAction);
+    }
+});
+
+// 接收前端传来的 WordKeepAlive 开关
+ipcMain.handle('set-word-keep-alive', (_event, enabled) => {
+    console.log('[Electron] WordKeepAlive 开关:', enabled ? '开启' : '关闭');
+    if (!enabled) {
+        const { spawn } = require('child_process');
+        const stopScript = path.join(ROOT_DIR, 'tools', 'WordKeepAlive.py');
+        if (require('fs').existsSync(stopScript)) {
+            const proc = spawn('python', [stopScript, '--stop'], {
+                stdio: 'ignore',
+                windowsHide: true,
+                shell: true
+            });
+            proc.unref();
+        }
+    } else {
+        // 重新启动
+        const scriptPath = path.join(ROOT_DIR, 'tools', 'WordKeepAlive.py');
+        if (require('fs').existsSync(scriptPath)) {
+            const child = spawn('python', [scriptPath, '--silent'], {
+                cwd: ROOT_DIR,
+                stdio: 'ignore',
+                windowsHide: true,
+                shell: true
+            });
+            child.unref();
+        }
     }
 });
 

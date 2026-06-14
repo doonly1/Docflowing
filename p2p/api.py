@@ -10,7 +10,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, se
 from .auth import p2p_auth_required
 from .models import TrustStore, RemoteFilebaseStore
 from logging_config import get_logger
-from tools.tool_defs import TOOL_SCRIPTS, TOOL_EXTENSIONS
+from tools.tool_defs import get_tool_script_path, TOOL_EXTENSIONS
 
 logger = get_logger(__name__)
 
@@ -606,7 +606,7 @@ def p2p_run_tool(fb_id):
     if not tool:
         return jsonify({'success': False, 'message': '未指定工具'})
 
-    script_path = TOOL_SCRIPTS.get(tool)
+    script_path = get_tool_script_path(tool) if tool else None
     if not script_path or not os.path.exists(script_path):
         return jsonify({'success': False, 'message': f'工具脚本不存在: {tool}'})
 
@@ -790,7 +790,8 @@ def p2p_share_list():
     rows = db.execute(
         "SELECT f.id, f.name, f.filebase_type FROM filebases f "
         "JOIN filebase_permissions p ON f.id = p.filebase_id "
-        "WHERE p.user_id = ? AND p.permission_level IN ('view', 'edit', 'manage')",
+        "WHERE p.user_id = ? AND p.permission_level IN ('view', 'edit', 'manage') "
+        "AND COALESCE(f.status, 'active') != 'trashed'",
         (g.remote_node_id,)
     ).fetchall()
 
@@ -800,7 +801,8 @@ def p2p_share_list():
     v2_rows = db.execute(
         "SELECT f.id, f.name, f.filebase_type FROM filebases f "
         "JOIN filebase_perm_v2 p ON f.id = p.filebase_id "
-        "WHERE p.user_id = ? AND p.perm_mask > 0",
+        "WHERE p.user_id = ? AND p.perm_mask > 0 "
+        "AND COALESCE(f.status, 'active') != 'trashed'",
         (g.remote_node_id,)
     ).fetchall()
     existing_ids = {r['id'] for r in rows}

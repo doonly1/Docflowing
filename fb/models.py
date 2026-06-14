@@ -108,6 +108,7 @@ DB_MIGRATIONS = {
     # 去掉 NOT NULL，兼容 3.31 以下版本的 SQLite；有 DEFAULT 新记录值仍是确定的
     1: "ALTER TABLE filebases ADD COLUMN status TEXT DEFAULT 'active'",
     2: "ALTER TABLE filebases ADD COLUMN fb_agent_enabled INTEGER DEFAULT 1",
+    3: "ALTER TABLE shared_nodes ADD COLUMN perm_mask INTEGER",
 }
 
 CREATE_INDEX_SHARED = [

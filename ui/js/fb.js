@@ -2753,6 +2753,7 @@ var FileBase = {
         var ov = document.getElementById('fb-modal-overlay');
         if (ov) {
             ov.classList.remove('show');
+            ov.style.pointerEvents = 'none';
             setTimeout(function() { if (ov.parentNode) ov.remove(); }, 200);
         }
     },
@@ -2882,6 +2883,25 @@ var FileBase = {
         this.closeModal();
         var self = this;
 
+        var allItems = await this._fetchTrashItems();
+
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:580px">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+        h += '<h3 style="margin:0">回收站</h3>';
+        h += '<button onclick="FileBase.closeModal()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#999;padding:0;line-height:1">✖</button>';
+        h += '</div>';
+        h += '<div class="trash-items-list">' + this._buildTrashItemsHtml(allItems) + '</div>';
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
+        h += '<button class="fb-btn-primary" onclick="FileBase.clearTrash()">清空</button>';
+        h += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+    },
+
+    /** 获取回收站数据（文件库 + 文件级别），返回排序后的 items 数组 */
+    _fetchTrashItems: async function() {
         var res = await this.api('/api/fb/trash-list', 'GET');
         var fbItems = res.success ? (res.items || []) : [];
 
@@ -2901,50 +2921,51 @@ var FileBase = {
             allItems.push(fbItems[i]);
         }
         allItems.sort(function(a, b) { return b.mtime - a.mtime; });
+        return allItems;
+    },
 
-        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:580px">';
-        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-        h += '<h3 style="margin:0">回收站</h3>';
-        h += '<button onclick="FileBase.closeModal()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#999;padding:0;line-height:1">✖</button>';
-        h += '</div>';
-
+    /** 构建回收站列表 HTML */
+    _buildTrashItemsHtml: function(allItems) {
         if (allItems.length === 0) {
-            h += '<div style="text-align:center;padding:40px 0;color:#bbb;font-size:14px">回收站为空</div>';
-        } else {
-            h += '<div style="max-height:55vh;overflow-y:auto;margin:0 -24px;padding:0 24px">';
-            for (var i = 0; i < allItems.length; i++) {
-                var it = allItems[i];
-                var escName = it.name.replace(/'/g, "\\'");
-                var displayName = it.original_path || it.name;
-                var restoreFn = it._isFileItem ? 'FileBase.restoreFileTrashItem' : 'FileBase.restoreTrashItem';
-                var deleteFn = it._isFileItem ? 'FileBase.deleteFileTrashItem' : 'FileBase.deleteTrashItem';
-                h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0">';
-                h += '<div style="min-width:0;flex:1;font-size:13px">';
-                h += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtmlText(displayName) + '</span>';
-                h += '<span style="font-size:11px;color:#888;margin-left:8px">' + (it.size !== undefined ? formatFileSize(it.size) + ' · ' : '') + new Date(it.mtime * 1000).toLocaleString('zh-CN') + '</span>';
-                h += '</div>';
-                h += '<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px">';
-                h += '<button onclick="' + restoreFn + '(\'' + escName + '\')" style="padding:3px 10px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:4px;cursor:pointer;font-size:12px">恢复</button>';
-                h += '<button onclick="' + deleteFn + '(\'' + escName + '\')" style="padding:3px 10px;border:1px solid #ddd;background:#fff;color:#999;border-radius:4px;cursor:pointer;font-size:11px;transition:all 0.15s" onmouseover="this.style.color=\'#dc3545\';this.style.borderColor=\'#dc3545\'" onmouseout="this.style.color=\'#999\';this.style.borderColor=\'#ddd\'">彻底删除</button>';
-                h += '</div></div>';
-            }
-            h += '</div>';
+            return '<div style="text-align:center;padding:40px 0;color:#bbb;font-size:14px">回收站为空</div>';
         }
+        var h = '<div style="max-height:55vh;overflow-y:auto;margin:0 -24px;padding:0 24px">';
+        for (var i = 0; i < allItems.length; i++) {
+            var it = allItems[i];
+            var escName = it.name.replace(/'/g, "\\'");
+            var displayName = it.original_path || it.name;
+            var restoreFn = it._isFileItem ? 'FileBase.restoreFileTrashItem' : 'FileBase.restoreTrashItem';
+            var deleteFn = it._isFileItem ? 'FileBase.deleteFileTrashItem' : 'FileBase.deleteTrashItem';
+            h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0">';
+            h += '<div style="min-width:0;flex:1;font-size:13px">';
+            h += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtmlText(displayName) + '</span>';
+            h += '<span style="font-size:11px;color:#888;margin-left:8px">' + (it.size !== undefined ? formatFileSize(it.size) + ' · ' : '') + new Date(it.mtime * 1000).toLocaleString('zh-CN') + '</span>';
+            h += '</div>';
+            h += '<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px">';
+            h += '<button onclick="' + restoreFn + '(\'' + escName + '\')" style="padding:3px 10px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:4px;cursor:pointer;font-size:12px">恢复</button>';
+            h += '<button onclick="' + deleteFn + '(\'' + escName + '\')" style="padding:3px 10px;border:1px solid #ddd;background:#fff;color:#999;border-radius:4px;cursor:pointer;font-size:11px;transition:all 0.15s" onmouseover="this.style.color=\'#dc3545\';this.style.borderColor=\'#dc3545\'" onmouseout="this.style.color=\'#999\';this.style.borderColor=\'#ddd\'">彻底删除</button>';
+            h += '</div></div>';
+        }
+        h += '</div>';
+        return h;
+    },
 
-        h += '<div class="fb-modal-actions">';
-        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
-        h += '<button class="fb-btn-primary" onclick="FileBase.clearTrash()">清空</button>';
-        h += '</div></div></div>';
-        document.body.insertAdjacentHTML('beforeend', h);
-        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
-        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
+    /** 就地刷新回收站列表（不关闭/重建 modal，避免冻结） */
+    _refreshTrashContent: async function() {
+        var items = await this._fetchTrashItems();
+        var container = document.querySelector('.fb-modal .trash-items-list');
+        if (container) {
+            container.innerHTML = this._buildTrashItemsHtml(items);
+        }
     },
 
     restoreTrashItem: async function(name) {
         var res = await this.api('/api/fb/trash-restore', 'POST', { name: name });
         if (res.success) {
             showToast('已恢复', 'success');
-            await this.showTrash();
+            this.closeModal();
+            this.currentFbId = null;
+            await this.renderKbList();
         } else {
             showToast(res.message || '恢复失败', 'error');
         }
@@ -2954,13 +2975,13 @@ var FileBase = {
         if (!(await showConfirm('确定彻底删除 "' + name + '" 吗？此操作不可恢复！'))) return;
         var url = '/api/fb/trash-item?name=' + encodeURIComponent(name);
         await fetch(url, { method: 'DELETE' });
-        await this.showTrash();
+        await this._refreshTrashContent();
     },
 
     clearTrash: async function() {
         if (!(await showConfirm('确定清空回收站吗？此操作不可恢复！'))) return;
         await this.api('/api/fb/trash', 'DELETE');
-        await this.showTrash();
+        await this._refreshTrashContent();
     },
 
     restoreFileTrashItem: async function(name) {
@@ -2968,7 +2989,7 @@ var FileBase = {
         var res = await this.api('/api/fb/' + this.currentFbId + '/local-files/trash-restore', 'POST', { name: name });
         if (res.success) {
             showToast('已恢复', 'success');
-            await this.showTrash();
+            await this._refreshTrashContent();
         } else {
             showToast(res.message || '恢复失败', 'error');
         }
@@ -2980,7 +3001,7 @@ var FileBase = {
         var url = '/api/fb/' + this.currentFbId + '/local-files/trash-item?name=' + encodeURIComponent(name);
         var res = await fetch(url, { method: 'DELETE' }).then(function(r) { return r.json(); }).catch(function() { return { success: false }; });
         if (res.success) {
-            await this.showTrash();
+            await this._refreshTrashContent();
         } else {
             showToast(res.message || '删除失败', 'error');
         }
@@ -3150,15 +3171,18 @@ var FileBase = {
     showShareDialog: function(fbId, fbName) {
         var self = this;
         var nodes = this._cachedDiscoveredNodes || [];
+        // 尝试读取之前保存的默认共享权限
+        var savedMask = this._lsGet('docflow_share_perm_' + fbId);
+        var defaultMask = savedMask ? parseInt(savedMask) : 7;  // view+create+edit = 7
+
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:480px">';
         h += '<h3>🔗 共享文件库</h3>';
-        h += '<p style="font-size:13px;color:#666;margin-bottom:12px">选择要共享的节点和权限：<strong>' + escapeHtmlText(fbName) + '</strong></p>';
+        h += '<p style="font-size:13px;color:#666;margin-bottom:12px">设置 <strong>' + escapeHtmlText(fbName) + '</strong> 的共享权限（应用于<b>所有节点</b>）</p>';
 
         if (nodes.length === 0) {
-            h += '<div style="text-align:center;padding:20px;color:#999;background:#f8f9fa;border-radius:6px">';
-            h += '<div style="font-size:32px;margin-bottom:8px">🌐</div>';
-            h += '<div>未发现其他在线节点</div>';
-            h += '<div style="font-size:11px;color:#bbb;margin-top:4px">请确保其他 Docflowing 节点已在同一局域网启动</div>';
+            h += '<div style="text-align:center;padding:12px;color:#999;background:#f8f9fa;border-radius:6px;margin-bottom:10px">';
+            h += '<div style="font-size:13px">🌐 未发现其他在线节点</div>';
+            h += '<div style="font-size:11px;color:#bbb;margin-top:4px">可预设共享权限，有节点加入后自动预填</div>';
             h += '</div>';
         } else {
             h += '<div style="margin-bottom:10px">';
@@ -3176,24 +3200,53 @@ var FileBase = {
             }
             h += '</div>';
             h += '</div>';
-            h += '<div style="margin-bottom:10px">';
-            h += '<label style="display:block;font-size:12px;color:#888;margin-bottom:4px">权限级别</label>';
-            h += '<select id="fb-share-perm" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">';
-            h += '<option value="view">查看（可浏览和下载文件）</option>';
-            h += '<option value="edit" selected>编辑（可修改文件）</option>';
-            h += '<option value="manage">管理（可管理文件库）</option>';
-            h += '</select>';
-            h += '</div>';
             h += '<div style="display:flex;gap:8px;margin-bottom:4px">';
             h += '<button class="fb-share-all-btn" onclick="FileBase._selectAllShareNodes()">全选</button>';
             h += '<button class="fb-share-all-btn" onclick="FileBase._deselectAllShareNodes()">取消全选</button>';
             h += '</div>';
         }
 
+        // 权限选择区域始终显示
+        h += '<div style="margin-bottom:10px">';
+        h += '<label style="display:block;font-size:12px;color:#888;margin-bottom:6px">权限</label>';
+        // 计算初始哪个按钮应高亮
+        var activePreset = (defaultMask === 1) ? 1 : (defaultMask === 127) ? 127 : (defaultMask === 255) ? 255 : 0;
+        var btnCls = ' class="fb-preset-btn" style="flex:1;padding:4px 8px;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px"';
+        var btnActive = ' class="fb-preset-btn active" style="flex:1;padding:4px 8px;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600"';
+        h += '<div style="display:flex;gap:6px;margin-bottom:6px">';
+        h += '<button type="button" data-bg="' + (activePreset === 1 ? '#e2e6ea' : '#f8f9fa') + '"' + (activePreset === 1 ? btnActive : btnCls) + ' style="' + (activePreset === 1 ? 'background:#e2e6ea;' : 'background:#f8f9fa;') + '" onclick="FileBase._setPresetPerm(1,this)">👁️ 查看</button>';
+        h += '<button type="button" data-bg="' + (activePreset === 127 ? '#c8e6c9' : '#e8f5e9') + '"' + (activePreset === 127 ? btnActive : btnCls) + ' style="' + (activePreset === 127 ? 'background:#c8e6c9;color:#1b5e20;border-color:#28a745;' : 'background:#e8f5e9;color:#28a745;border-color:#28a745;') + '" onclick="FileBase._setPresetPerm(127,this)">✏️ 编辑</button>';
+        h += '<button type="button" data-bg="' + (activePreset === 255 ? '#f8bbd0' : '#fde8ec') + '"' + (activePreset === 255 ? btnActive : btnCls) + ' style="' + (activePreset === 255 ? 'background:#f8bbd0;color:#b71c1c;border-color:#e94560;' : 'background:#fde8ec;color:#e94560;border-color:#e94560;') + '" onclick="FileBase._setPresetPerm(255,this)">⚙️ 管理</button>';
+        h += '</div>';
+        h += '<div class="fb-perm-checkboxes" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;background:#fafafa;border:1px solid #eee;border-radius:4px">';
+        var permDefs = [
+            { mask: 1, label: '查看', title: '浏览和下载文件' },
+            { mask: 2, label: '创建', title: '创建新文件/目录' },
+            { mask: 4, label: '编辑', title: '修改文件内容' },
+            { mask: 8, label: '重命名', title: '重命名文件/目录' },
+            { mask: 16, label: '移动', title: '移动文件/目录' },
+            { mask: 32, label: '复制', title: '复制文件/目录' },
+            { mask: 64, label: '删除', title: '删除文件/目录' },
+            { mask: 128, label: '管理', title: '管理文件库设置和共享' },
+        ];
+        for (var pi = 0; pi < permDefs.length; pi++) {
+            var pd = permDefs[pi];
+            var checked = (defaultMask & pd.mask) ? ' checked' : '';
+            h += '<label style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;cursor:pointer;font-size:12px;border-radius:3px;background:#fff;border:1px solid #e8e8e8" title="' + pd.title + '">';
+            h += '<input type="checkbox" class="fb-perm-chk" data-mask="' + pd.mask + '"' + checked + ' style="margin:0">';
+            h += pd.label;
+            h += '</label>';
+        }
+        h += '</div>';
+        h += '</div>';
+
+        var escFbId = fbId.replace(/'/g, "\\'");
         h += '<div class="fb-modal-actions">';
         if (nodes.length > 0) {
-            h += '<button class="fb-btn-primary" onclick="FileBase._doShare(\'' + fbId.replace(/'/g, "\\'") + '\')">🔗 共享</button>';
-            h += '<button class="fb-btn-primary" onclick="FileBase._doShareAll(\'' + fbId.replace(/'/g, "\\'") + '\')" title="共享给所有在线节点">📡 共享给全部</button>';
+            h += '<button class="fb-btn-primary" onclick="FileBase._doShare(\'' + escFbId + '\')">🔗 共享</button>';
+            h += '<button class="fb-btn-primary" onclick="FileBase._doShareAll(\'' + escFbId + '\')" title="共享给所有在线节点">📡 共享给全部</button>';
+        } else {
+            h += '<button class="fb-btn-primary" onclick="FileBase._saveDefaultPerm(\'' + escFbId + '\')">保存默认权限</button>';
         }
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
@@ -3214,6 +3267,43 @@ var FileBase = {
         for (var i = 0; i < chks.length; i++) chks[i].checked = false;
     },
 
+    /** 设置预设角色权限（选中对应的复选框，高亮选中按钮） */
+    _setPresetPerm: function(mask, btn) {
+        var chks = document.querySelectorAll('.fb-perm-chk');
+        for (var i = 0; i < chks.length; i++) {
+            chks[i].checked = (parseInt(chks[i].getAttribute('data-mask')) & mask) !== 0;
+        }
+        // 高亮选中的按钮，恢复其他按钮的样式
+        var allBtns = document.querySelectorAll('.fb-preset-btn');
+        for (var i = 0; i < allBtns.length; i++) {
+            allBtns[i].classList.remove('active');
+            allBtns[i].style.fontWeight = '';
+            allBtns[i].style.background = allBtns[i].getAttribute('data-bg') || '';
+        }
+        if (btn) {
+            btn.classList.add('active');
+            btn.style.fontWeight = '600';
+        }
+    },
+
+    /** 从复选框计算当前选中的 perm_mask */
+    _getPermMask: function() {
+        var mask = 0;
+        var chks = document.querySelectorAll('.fb-perm-chk:checked');
+        for (var i = 0; i < chks.length; i++) {
+            mask |= parseInt(chks[i].getAttribute('data-mask'));
+        }
+        return mask;
+    },
+
+    /** 保存当前权限为文件库的默认共享权限 */
+    _saveDefaultPerm: function(fbId) {
+        var mask = this._getPermMask();
+        this._lsSet('docflow_share_perm_' + fbId, mask);
+        showToast('默认共享权限已保存', 'success');
+        this.closeModal();
+    },
+
     _doShare: async function(fbId) {
         var chks = document.querySelectorAll('.fb-share-node-chk:checked');
         var nodes = [];
@@ -3228,13 +3318,15 @@ var FileBase = {
             showToast('请至少选择一个节点', 'error');
             return;
         }
-        var perm = document.getElementById('fb-share-perm').value;
+        var permMask = this._getPermMask();
         this.closeModal();
         var res = await this.api('/api/fb/' + fbId + '/share', 'POST', {
             nodes: nodes,
-            permission: perm
+            permission: 'custom',
+            perm_mask: permMask
         });
         if (res.success) {
+            this._lsSet('docflow_share_perm_' + fbId, permMask);
             showToast(res.message || '共享成功', 'success');
         } else {
             showToast(res.message || '共享失败', 'error');
@@ -3247,7 +3339,7 @@ var FileBase = {
             showToast('没有在线节点', 'error');
             return;
         }
-        var perm = document.getElementById('fb-share-perm').value;
+        var permMask = this._getPermMask();
         this.closeModal();
         var shareNodes = [];
         for (var i = 0; i < nodes.length; i++) {
@@ -3260,10 +3352,12 @@ var FileBase = {
         }
         var res = await this.api('/api/fb/share-batch', 'POST', {
             fb_id: fbId,
-            permission: perm,
+            permission: 'custom',
+            perm_mask: permMask,
             all_nodes: shareNodes
         });
         if (res.success) {
+            this._lsSet('docflow_share_perm_' + fbId, permMask);
             showToast(res.message || '共享成功', 'success');
         } else {
             showToast(res.message || '共享失败', 'error');

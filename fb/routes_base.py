@@ -263,7 +263,7 @@ def list_fb():
         _cleanup_synced_data(owner_id, fb_id)
 
     if is_admin:
-        visible_rows = db.execute("SELECT * FROM filebases").fetchall()
+        visible_rows = db.execute("SELECT * FROM filebases WHERE COALESCE(status, 'active') != 'trashed'").fetchall()
     else:
         visible_ids = get_visible_fb_ids(user_id, False)
         visible_rows = []
@@ -515,16 +515,18 @@ def delete_fb(filebase_id):
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
         _cleanup_synced_data(row['owner_id'], filebase_id)
+        _list_fb_cache.pop(f"list_fb:{row['owner_id']}", None)
         return jsonify({'success': True, 'message': '网络文件库已移至回收站'})
 
     # 已标记 trashed 的彻底删除（从回收站清空过来）
-    if row.get('status') == 'trashed' or local_path.startswith(trash_dir):
+    if row['status'] == 'trashed' or local_path.startswith(trash_dir):
         if os.path.isdir(local_path):
             shutil.rmtree(local_path)
         _cleanup_synced_data(row['owner_id'], filebase_id)
         db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (filebase_id,))
         db.execute("DELETE FROM filebases WHERE id = ?", (filebase_id,))
         db.commit()
+        _list_fb_cache.pop(f"list_fb:{row['owner_id']}", None)
         return jsonify({'success': True, 'message': '文件库已彻底删除'})
 
     # 正常删除：移到回收站，软标记
@@ -552,6 +554,7 @@ def delete_fb(filebase_id):
         import logging
         logging.getLogger(__name__).warning(f"Failed to hide KB data for {filebase_id}: {e}")
 
+    _list_fb_cache.pop(f"list_fb:{row['owner_id']}", None)
     return jsonify({'success': True, 'message': '文件库已移至回收站'})
 
 

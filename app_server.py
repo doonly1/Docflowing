@@ -1,11 +1,13 @@
-"""Docflowing 服务端入口 — gunicorn / Flask 双模式
+"""Docflowing 服务端入口 — 使用 Flask 内置 Server
+
+作为单用户桌面应用，Flask 内置的 threaded server 完全足够，
+不需要额外安装 gunicorn 等 WSGI 服务器。
 
 用法：
-  # 生产（推荐 gunicorn）
-  gunicorn -w 1 -b 127.0.0.1:5000 app_server:app
-
-  # 开发 / 调试
+  # 直接运行（推荐）
   python app_server.py
+
+  # 或通过 Electron 自动启动（npm start）
 """
 
 import os

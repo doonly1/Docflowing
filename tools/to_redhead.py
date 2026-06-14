@@ -5,7 +5,7 @@ from docx.oxml.ns import qn
 
 from mystyle import add_my_styles, para_fm, run_fm, set_page
 from float_picture import parse_xml, nsdecls, add_float_picture
-from load_config import load_user_config
+from load_config import load_user_config, _get_workspace_dir
 from doc_process import save_docx
 from logging_config import setup_logging, get_logger
 
@@ -150,10 +150,9 @@ def get_stamp_path(sign_text):
     config = load_user_config()
     if not config:
         return None
-    
-    # 获取项目根目录（脚本所在目录）
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
+    ws_dir = _get_workspace_dir()
+
     # 遍历配置，查找匹配的公司名称或简称
     for company, info in config.items():
         if not isinstance(info, dict):
@@ -162,13 +161,13 @@ def get_stamp_path(sign_text):
             # 优先使用配置中的印章位置
             stamp_path = info.get('印章位置')
             if stamp_path:
-                # 如果是相对路径，基于项目根目录
+                # 相对路径基于 workspaces 目录
                 if not os.path.isabs(stamp_path):
-                    stamp_path = os.path.join(script_dir, stamp_path)
+                    stamp_path = os.path.join(ws_dir, stamp_path)
                 return stamp_path
-            # 如果没有配置印章位置，使用默认方式
-            return os.path.join(script_dir, 'config', sign_text + '.png')
-    
+            # 默认：workspaces/config/公司名.png
+            return os.path.join(ws_dir, 'config', f'{sign_text}.png')
+
     return None
 
 

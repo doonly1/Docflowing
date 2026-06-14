@@ -33,6 +33,7 @@ _DEFAULT_DOC_CONFIG = {
 _DEFAULT_APP_SETTINGS = {
     'autostart': False,
     'close_action': 'exit',
+    'word_keep_alive': True,
 }
 
 # ==================== 配置路径 / 初始化 ====================
