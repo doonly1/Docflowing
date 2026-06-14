@@ -17,6 +17,7 @@ let mainWindow = null;
 let pythonProcess = null;
 let appTray = null;
 let isQuitting = false;
+let closeAction = 'exit'; // 默认与后端 settings.py 一致
 
 // ==================== Python 后端管理 ====================
 function getPythonCommand() {
@@ -65,7 +66,7 @@ function startPythonBackend() {
                 const trimmed = text.trim();
                 if (trimmed) console.log(`[Python] ${trimmed}`);
             } catch (e) {
-                console.log(`[Python] ${String(data).trim()}`);
+                console.log(`[Python] ${data.toString().trim()}`);
             }
         });
 
@@ -75,7 +76,7 @@ function startPythonBackend() {
                 const trimmed = text.trim();
                 if (trimmed) console.error(`[Python] ${trimmed}`);
             } catch (e) {
-                console.error(`[Python] ${String(data).trim()}`);
+                console.error(`[Python] ${data.toString().trim()}`);
             }
         });
 
@@ -121,6 +122,7 @@ function pollServer(resolve, reject, attempt = 0) {
 
 function startWordKeepAlive() {
     if (process.platform !== 'win32') return;
+    if (IS_PACKAGED) return;  // 打包模式下无系统 python 环境
 
     const scriptPath = path.join(ROOT_DIR, 'tools', 'WordKeepAlive.py');
     if (!require('fs').existsSync(scriptPath)) return;
@@ -141,6 +143,9 @@ function stopPythonBackend() {
         if (process.platform === 'win32') {
             spawn('taskkill', ['/pid', String(pythonProcess.pid), '/f', '/t']);
         } else {
+            // 先尝试通过 process group 杀死所有子进程
+            try { process.kill(-pythonProcess.pid, 'SIGTERM'); } catch (_) {}
+            // 兜底：杀死父进程
             pythonProcess.kill('SIGTERM');
         }
     } catch (e) {
@@ -208,18 +213,30 @@ function createWindow() {
         mainWindow = null;
     });
 
-    // 关闭按钮→隐藏到托盘
+    // 关闭按钮→根据设置决定行为
     mainWindow.on('close', (event) => {
         if (!isQuitting) {
-            event.preventDefault();
-            mainWindow.hide();
+            if (closeAction === 'exit') {
+                // 用户设置"退出应用"→ 真正关闭窗口
+                isQuitting = true;
+                // 不阻止事件，窗口正常关闭
+            } else {
+                // 用户设置"最小化到托盘"→ 隐藏到托盘
+                event.preventDefault();
+                mainWindow.hide();
+            }
         }
+        // isQuitting 为 true（托盘"退出"或 IPC 已设置）→ 不阻止，窗口正常关闭
     });
 }
 
 // ==================== 系统托盘 ====================
 function createTray() {
     const iconPath = path.join(ROOT_DIR, 'ui', 'favicon.ico');
+    if (!require('fs').existsSync(iconPath)) {
+        console.warn('[Electron] 托盘图标文件不存在:', iconPath);
+        return;
+    }
     let icon = nativeImage.createFromPath(iconPath);
     // Windows 托盘要求 16x16 或 32x32，缩小后更清晰
     icon = icon.resize({ width: 16, height: 16 });
@@ -284,7 +301,23 @@ ipcMain.handle('window-is-maximized', () => {
 });
 
 ipcMain.handle('window-close', () => {
-    if (mainWindow && !isQuitting) mainWindow.hide();
+    if (!mainWindow) return;
+    if (closeAction === 'exit') {
+        // 用户设置"退出应用"→ 触发窗口关闭流程
+        isQuitting = true;
+        mainWindow.close();
+    } else {
+        // 用户设置"最小化到托盘"→ 隐藏到托盘
+        if (!isQuitting) mainWindow.hide();
+    }
+});
+
+// 接收前端传来的关闭行为设置
+ipcMain.handle('set-close-action', (_event, action) => {
+    if (action === 'exit' || action === 'minimize') {
+        closeAction = action;
+        console.log('[Electron] 关闭行为已更新:', closeAction);
+    }
 });
 
 // 从托盘恢复窗口（给前端用的「关闭按钮→隐藏」反馈
@@ -344,14 +377,19 @@ ipcMain.handle('get-app-version', () => {
 });
 
 // 原生文件拖拽（拖拽文件到外部应用）
+// 注意：不可与 HTML5 内部拖拽同时使用（Electron startDrag 会接管整个拖拽流程）
 ipcMain.on('start-drag', (event, filePaths) => {
     if (!filePaths || filePaths.length === 0) return;
-    var dragIcon = nativeImage.createFromPath(path.join(ROOT_DIR, 'ui', 'favicon.ico'));
-    dragIcon = dragIcon.resize({ width: 16, height: 16 });
-    event.sender.startDrag({
-        files: filePaths,
-        icon: dragIcon
-    });
+    try {
+        var dragIcon = nativeImage.createFromPath(path.join(ROOT_DIR, 'ui', 'favicon.ico'));
+        dragIcon = dragIcon.resize({ width: 16, height: 16 });
+        event.sender.startDrag({
+            files: filePaths,
+            icon: dragIcon
+        });
+    } catch (e) {
+        console.error('[start-drag] error:', e.message);
+    }
 });
 
 // 用 OS 默认软件打开文件（自动管理窗口焦点）
@@ -366,6 +404,18 @@ ipcMain.handle('open-file-with-app', async (_event, absolutePath) => {
         return { success: true };
     } catch (e) {
         console.error('[Electron] shell.openPath exception:', e.message);
+        return { success: false, message: e.message };
+    }
+});
+
+// 在 OS 文件管理器中定位并选中文件
+ipcMain.handle('show-item-in-folder', async (_event, absolutePath) => {
+    const { shell } = require('electron');
+    try {
+        shell.showItemInFolder(absolutePath);
+        return { success: true };
+    } catch (e) {
+        console.error('[Electron] shell.showItemInFolder exception:', e.message);
         return { success: false, message: e.message };
     }
 });
@@ -401,9 +451,11 @@ app.whenReady().then(async () => {
     }
 });
 
-// 关闭窗口时隐藏到托盘，不退出应用
+// 所有窗口关闭时：macOS 保持运行，其他平台退出
 app.on('window-all-closed', () => {
-    // macOS 不退出是标准行为，Windows 下隐藏到托盘
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
 });
 
 app.on('activate', () => {
@@ -414,9 +466,9 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
     isQuitting = true;
-    stopPythonBackend();
-});
-
-app.on('will-quit', () => {
+    if (appTray) {
+        appTray.destroy();
+        appTray = null;
+    }
     stopPythonBackend();
 });

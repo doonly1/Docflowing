@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
     windowClose: () => ipcRenderer.invoke('window-close'),
     windowShow: () => ipcRenderer.invoke('window-show'),
+    setCloseAction: (action) => ipcRenderer.invoke('set-close-action', action),
 
     // 窗口位置/大小
     windowGetPosition: () => ipcRenderer.invoke('window-get-position'),
@@ -37,5 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // 用 OS 默认软件打开文件（自动管理窗口焦点）
-    openFileWithOsApp: (absolutePath) => ipcRenderer.invoke('open-file-with-app', absolutePath)
+    openFileWithOsApp: (absolutePath) => ipcRenderer.invoke('open-file-with-app', absolutePath),
+
+    // 在 OS 文件管理器中定位文件
+    showItemInFolder: (absolutePath) => ipcRenderer.invoke('show-item-in-folder', absolutePath),
 });

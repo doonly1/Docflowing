@@ -336,6 +336,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
         setTimeout(function() { document.getElementById('fb-local-name').focus(); }, 100);
     },
@@ -378,6 +379,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
         setTimeout(function() { document.getElementById('fb-net-path').focus(); }, 100);
     },
@@ -1368,15 +1370,14 @@ var FileBase = {
         if (this.hasPerm(this.PERM_RENAME) || this.hasPerm(this.PERM_COPY) || this.hasPerm(this.PERM_MOVE)) {
             h += '<div class="fb-menu-divider"></div>';
         }
-        if (this.hasPerm(this.PERM_EDIT)) {
-            h += '<div class="fb-menu-item" onclick="FileBase.contextLockFile(\'' + escPath + '\')"><span class="icon">🔒</span> 锁定</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.contextUnlockFile(\'' + escPath + '\')"><span class="icon">🔓</span> 解锁</div>';
-        }
-        if (this.hasPerm(this.PERM_EDIT) && this.hasPerm(this.PERM_DELETE)) {
-            h += '<div class="fb-menu-divider"></div>';
-        }
         if (this.hasPerm(this.PERM_DELETE)) {
             h += '<div class="fb-menu-item" onclick="FileBase.contextDeleteOne(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4h8l-.8 8a1 1 0 01-1 .9H4.8a1 1 0 01-1-.9L3 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 3.5h10M5.5 2h3a1 1 0 011 1v.5h-5V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 删除</div>';
+        }
+        if (this.fbLocalPath) {
+            if (this.hasPerm(this.PERM_DELETE)) {
+                h += '<div class="fb-menu-divider"></div>';
+            }
+            h += '<div class="fb-menu-item" onclick="FileBase.contextOpenLocalPath(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 11.5l4-4-4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 本地路径</div>';
         }
         h += '<div class="fb-menu-divider"></div>';
         h += '<div class="fb-menu-item" onclick="FileBase.showProperties(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="5" r=".8" fill="currentColor"/><path d="M6.5 7h1v3h-1z" fill="currentColor"/></svg></span> 属性</div>';
@@ -1393,13 +1394,6 @@ var FileBase = {
         }
         h += '<div class="fb-menu-item" onclick="FileBase.downloadAction();FileBase.hideContextMenu()"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v7M4 6l3 3.5L10 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 下载</div>';
         if (this.hasPerm(this.PERM_COPY) || this.hasPerm(this.PERM_MOVE)) {
-            h += '<div class="fb-menu-divider"></div>';
-        }
-        if (this.hasPerm(this.PERM_EDIT)) {
-            h += '<div class="fb-menu-item" onclick="FileBase.contextLockSelected()"><span class="icon">🔒</span> 锁定选中</div>';
-            h += '<div class="fb-menu-item" onclick="FileBase.contextUnlockSelected()"><span class="icon">🔓</span> 解锁选中</div>';
-        }
-        if ((this.hasPerm(this.PERM_EDIT) && this.hasPerm(this.PERM_DELETE))) {
             h += '<div class="fb-menu-divider"></div>';
         }
         if (this.hasPerm(this.PERM_DELETE)) {
@@ -1585,6 +1579,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         this.fbMoveDest = '';
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
@@ -1663,69 +1658,14 @@ var FileBase = {
 
     // ──────────── 文件锁 右键菜单 ────────────
 
-    contextLockFile: async function(path) {
+    contextOpenLocalPath: function(path) {
         this.hideContextMenu();
-        var res = await this.api('/api/fb/' + this.currentFbId + '/locks', 'POST', { path: path });
-        if (res.success) {
-            showToast('已锁定: ' + path.split('/').pop(), 'success');
+        var absolutePath = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '') + '/' + path.replace(/\\/g, '/');
+        absolutePath = absolutePath.replace(/\\/g, '/');
+        if (window.electronAPI && window.electronAPI.showItemInFolder) {
+            window.electronAPI.showItemInFolder(absolutePath);
         } else {
-            showToast(res.message || '锁定失败', 'error');
-        }
-    },
-
-    contextUnlockFile: async function(path) {
-        this.hideContextMenu();
-        if (!(await showConfirm('确定解锁 "' + path.split('/').pop() + '" 吗？'))) return;
-        var res = await this.api('/api/fb/' + this.currentFbId + '/locks?path=' + encodeURIComponent(path), 'DELETE');
-        if (res.success) {
-            showToast('已解锁: ' + path.split('/').pop(), 'success');
-            await this.renderDetail();
-        } else {
-            showToast(res.message || '解锁失败', 'error');
-        }
-    },
-
-    contextLockSelected: async function() {
-        this.hideContextMenu();
-        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
-        var paths = [];
-        for (var i = 0; i < rows.length; i++) {
-            var p = rows[i].getAttribute('data-local-path');
-            if (p) paths.push(p);
-        }
-        if (paths.length === 0) { showToast('没有选中的文件', 'error'); return; }
-        var ok = 0, fail = 0, lastErr = '';
-        for (var i = 0; i < paths.length; i++) {
-            var res = await this.api('/api/fb/' + this.currentFbId + '/locks', 'POST', { path: paths[i] });
-            if (res.success) { ok++; } else { fail++; lastErr = res.message || '锁定失败'; }
-        }
-        if (fail === 0) {
-            showToast('已锁定 ' + ok + ' 个文件', 'success');
-        } else {
-            showToast('锁定完成：' + ok + ' 成功，' + fail + ' 失败' + (lastErr ? '（' + lastErr + '）' : ''), fail === 0 ? 'success' : 'error');
-        }
-    },
-
-    contextUnlockSelected: async function() {
-        this.hideContextMenu();
-        var rows = document.querySelectorAll('#fb-file-body .fb-file-row.selected');
-        var paths = [];
-        for (var i = 0; i < rows.length; i++) {
-            var p = rows[i].getAttribute('data-local-path');
-            if (p) paths.push(p);
-        }
-        if (paths.length === 0) { showToast('没有选中的文件', 'error'); return; }
-        if (!(await showConfirm('确定解锁选中的 ' + paths.length + ' 个文件吗？'))) return;
-        var ok = 0, fail = 0, lastErr = '';
-        for (var i = 0; i < paths.length; i++) {
-            var res = await this.api('/api/fb/' + this.currentFbId + '/locks?path=' + encodeURIComponent(paths[i]), 'DELETE');
-            if (res.success) { ok++; } else { fail++; lastErr = res.message || '解锁失败'; }
-        }
-        if (fail === 0) {
-            showToast('已解锁 ' + ok + ' 个文件', 'success');
-            await this.renderDetail();
-        } else {
-            showToast('解锁完成：' + ok + ' 成功，' + fail + ' 失败' + (lastErr ? '（' + lastErr + '）' : ''), 'error');
+            showToast('仅在桌面版可用', 'error');
         }
     },
 
@@ -1821,6 +1761,7 @@ var FileBase = {
             '<button class="fb-btn-primary" onclick="FileBase.closeModal()">确定</button>' +
             '</div></div>';
         document.body.appendChild(overlay);
+        requestAnimationFrame(function() { overlay.classList.add('show'); });
         overlay.addEventListener('click', function(e) { if (e.target === overlay) self.closeModal(); });
     },
 
@@ -1844,6 +1785,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         this.fbMoveDest = '';
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
@@ -2133,14 +2075,7 @@ var FileBase = {
         this._draggedPaths = paths;
         this._nativeDragPaths = absolutePaths;
 
-        if (window.electronAPI && absolutePaths.length > 0) {
-            try { e.dataTransfer.setData('text/plain', JSON.stringify(paths)); } catch(ex) {}
-            e.dataTransfer.effectAllowed = 'copyMove';
-            e.preventDefault();
-            window.electronAPI.startDrag(absolutePaths);
-            return;
-        }
-
+        // 设置标准 HTML5 DataTransfer（用于文件库内部拖拽移动）
         try { e.dataTransfer.setData('text/plain', JSON.stringify(paths)); } catch(ex) {}
         if (absolutePaths.length > 0) {
             try {
@@ -2432,23 +2367,18 @@ var FileBase = {
 
         // 本地文件库 → 调用本地软件打开
         var fileName = relPath.split('/').pop();
-        // Electron 下使用 shell.openPath，正确管理窗口焦点
-        if (window.electronAPI) {
-            var absPath = this.fbLocalPath + '\\' + relPath.replace(/\//g, '\\');
-            window.electronAPI.openFileWithOsApp(absPath);
-        } else {
-            var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);
-            fetch(url, { method: 'GET' })
-                .then(function(res) { return res.json(); })
-                .then(function(data) {
-                    if (!data.success) {
-                        showToast(data.message || '打开失败', 'error');
-                    }
-                })
-                .catch(function(e) {
-                    showToast('打开失败: ' + e.message, 'error');
-                });
-        }
+        // 统一走后端 API，由 os.path.normpath + os.startfile 处理路径，跨平台最可靠
+        var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);
+        fetch(url, { method: 'GET' })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    showToast(data.message || '打开失败', 'error');
+                }
+            })
+            .catch(function(e) {
+                showToast('打开失败: ' + e.message, 'error');
+            });
     },
     
     openFilePreview: async function(relPath) {
@@ -2784,6 +2714,9 @@ var FileBase = {
         h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
+        var self = this;
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
 
         // 异步加载 agent 开关状态
         (async function() {
@@ -2818,7 +2751,10 @@ var FileBase = {
 
     closeModal: function() {
         var ov = document.getElementById('fb-modal-overlay');
-        if (ov) ov.remove();
+        if (ov) {
+            ov.classList.remove('show');
+            setTimeout(function() { if (ov.parentNode) ov.remove(); }, 200);
+        }
     },
 
     _toggleAgentAccess: async function(fbId, enabled) {
@@ -2874,6 +2810,7 @@ var FileBase = {
         h += '<div class="fb-modal-actions"><button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button></div>';
         h += '</div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         var self = this;
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
@@ -2999,6 +2936,7 @@ var FileBase = {
         h += '<button class="fb-btn-primary" onclick="FileBase.clearTrash()">清空</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
     },
 
@@ -3152,6 +3090,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">关闭</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
             if (e.target.id === 'fb-modal-overlay') self.closeModal();
         });
@@ -3259,6 +3198,7 @@ var FileBase = {
         h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
         h += '</div></div></div>';
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
             if (e.target.id === 'fb-modal-overlay') self.closeModal();
         });
@@ -3418,6 +3358,7 @@ var FileBase = {
         h += '</div></div></div>';
 
         document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
         document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
             if (e.target.id === 'fb-modal-overlay') self.closeModal();
         });

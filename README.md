@@ -142,72 +142,91 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 ## 项目结构
 
 ```
-├── config/                     # 静态配置模板
-├── server/                     # Flask 后端服务核心
-│   ├── __init__.py             # App 工厂、P2P 初始化（后台线程）、全局错误处理
-│   ├── auth.py                 # 本机 localhost 自动放行（30 行）
-│   ├── middleware.py           # 请求 ID 中间件
-│   ├── runner.py               # 工具脚本 SSE 流式执行
-│   ├── settings.py             # 用户配置持久化
-│   └── workspace.py            # 工作区管理、文件上传/下载
-├── fb/                         # 文件库管理
-│   ├── models.py               # 数据库模型 / 表结构
-│   └── routes.py               # 文件库 CRUD、回收站、文件操作、权限、工具执行、KB 同步
-├── kb/                         # 知识库系统（进化 Wiki）
-│   ├── routes.py               # 核心 API（文件 CRUD、搜索、权限）
-│   ├── routes_session.py       # 会话管理 API
-│   ├── routes_memory.py        # 持久记忆 API
-│   ├── routes_insights.py      # 洞察分析 API
-│   ├── routes_skills.py        # 技能管理 API
-│   ├── config.py               # LLM 配置加载与密钥加密
-│   ├── database.py             # 知识库数据库（FTS5）
-│   ├── models.py               # 库表模型
-│   ├── session_db.py           # 会话消息数据库
-│   ├── search.py               # FTS5 全文搜索
-│   ├── sync_converters.py      # 同步文件格式转换器（策略模式）
-│   ├── sync_worker.py          # 文件库→KB 后台同步线程
-│   ├── memory.py               # 持久记忆存储（安全扫描）
-│   ├── llm.py                  # LLM 调用（OpenAI 兼容）
-│   ├── context_compressor.py   # 上下文压缩
-│   ├── context_fence.py        # 记忆上下文 fence 标签
-│   ├── file_safety.py          # 文件写入安全路径
-│   ├── file_lock.py            # 跨平台文件锁
-│   ├── auto_extract.py         # 对话自动提取记忆/技能
-│   ├── insights.py             # 使用数据洞察分析引擎
-│   ├── tools.py                # LLM Function Calling 工具定义
-│   └── skills/                 # 技能管理子系统
-│       ├── manager.py          # 技能 CRUD
-│       ├── curator.py          # 技能审查器（合并与归档）
-│       └── usage.py            # 技能使用统计
-├── tools/                      # 文档处理命令行脚本
-│   ├── doc_process.py          # 文档基础处理
-│   ├── mystyle.py              # 公文样式库
-│   ├── to_compare.py           # 文档比对（77KB 最大模块）
-│   ├── to_docx.py              # 多格式转 DOCX
-│   ├── to_redhead.py           # 红头文件生成
-│   ├── to_index.py             # 目录索引
-│   ├── to_pageNum.py           # 批量添加页码
-│   ├── to_pdf.py               # 批量转 PDF
-│   ├── float_picture.py        # 浮动图片处理
-│   ├── load_config.py          # 配置加载器
-│   └── logging_config.py       # 日志配置
-├── p2p/                        # P2P 节点发现与认证
-│   ├── node.py                 # 节点身份管理（Ed25519 密钥对）
-│   ├── discovery.py            # zeroconf mDNS 服务发现
-│   ├── auth.py                 # 签名验证装饰器
-│   ├── api.py                  # P2P 远程文件操作 API
-│   └── models.py               # TrustStore + RemoteFilebaseStore
-├── ui/                         # 前端 SPA（按需加载）
-│   ├── index.html              # 主页面（点击导航时动态加载 fb.js/kb.js）
-│   └── js/
-│       ├── main.js             # 核心逻辑 + 工具页
-│       ├── fb.js / fb.css      # 文件库管理器（按需加载）
-│       └── kb.js / kb.css      # 知识库聊天/文件浏览（按需加载）
-├── tests/                      # 测试
-│   ├── test_sync.py            # FB 同步功能测试
-│   └── test_p2p.py             # P2P mDNS 发现测试
-├── requirements.txt            # Python 依赖
-└── README.md                   # 本文件
+├── electron/                    # Electron 桌面壳
+│   ├── main.js                  # 主进程（窗口管理、后端进程启动）
+│   ├── preload.js               # 预加载脚本（安全上下文桥接）
+│   ├── build-backend.py         # 后端 PyInstaller 打包脚本
+│   └── copy-libs.js             # 构建时复制依赖
+├── server/                      # Flask 后端服务核心
+│   ├── __init__.py              # App 工厂、P2P 初始化（后台线程）、全局错误处理
+│   ├── auth.py                  # 本机 localhost 自动放行（30 行）
+│   ├── middleware.py            # 请求 ID 中间件
+│   ├── runner.py                # 工具脚本 SSE 流式执行
+│   ├── settings.py              # 用户配置持久化
+│   └── workspace.py             # 工作区管理、文件上传/下载
+├── fb/                          # 文件库管理
+│   ├── models.py                # 数据库模型 / 表结构
+│   ├── routes_base.py           # 文件库 CRUD（创建/删除/重命名/回收站）
+│   ├── routes_files.py          # 文件操作（上传/下载/重命名/移动）
+│   ├── routes_files_edit.py     # 文件编辑/删除（移入回收站）
+│   ├── routes_files_ops.py      # 文件批量操作（复制/移动/替换）
+│   ├── routes_trash.py          # 回收站列表/恢复/清空
+│   ├── routes_locks.py          # 文件锁管理
+│   ├── routes_search.py         # 文件搜索
+│   ├── routes_tools.py          # 工具集成（SSE 流式执行）
+│   ├── routes_sync.py           # KB 同步管理
+│   ├── routes_p2p.py            # P2P 远程文件操作
+│   ├── routes.py                # 路由汇总导入
+│   ├── decorators.py            # 权限装饰器
+│   └── database.py              # 文件库数据库
+├── kb/                          # 知识库系统（进化 Wiki）
+│   ├── routes.py                # 核心 API（文件 CRUD、搜索、权限）
+│   ├── routes_session.py        # 会话管理 API
+│   ├── routes_memory.py         # 持久记忆 API
+│   ├── routes_insights.py       # 洞察分析 API
+│   ├── routes_skills.py         # 技能管理 API
+│   ├── config.py                # LLM 配置加载与密钥加密
+│   ├── database.py              # 知识库数据库（FTS5）
+│   ├── models.py                # 库表模型
+│   ├── session_db.py            # 会话消息数据库
+│   ├── search.py                # FTS5 全文搜索
+│   ├── sync_converters.py       # 同步文件格式转换器（策略模式）
+│   ├── sync_worker.py           # 文件库→KB 后台同步线程
+│   ├── memory.py                # 持久记忆存储（安全扫描）
+│   ├── llm.py                   # LLM 调用（OpenAI 兼容）
+│   ├── context_compressor.py    # 上下文压缩
+│   ├── context_fence.py         # 记忆上下文 fence 标签
+│   ├── file_safety.py           # 文件写入安全路径
+│   ├── file_lock.py             # 跨平台文件锁
+│   ├── auto_extract.py          # 对话自动提取记忆/技能
+│   ├── insights.py              # 使用数据洞察分析引擎
+│   ├── tools.py                 # LLM Function Calling 工具定义
+│   └── skills/                  # 技能管理子系统
+│       ├── manager.py           # 技能 CRUD
+│       ├── curator.py           # 技能审查器（合并与归档）
+│       └── usage.py             # 技能使用统计
+├── tools/                       # 文档处理命令行脚本
+│   ├── doc_process.py           # 文档基础处理
+│   ├── mystyle.py               # 公文样式库
+│   ├── to_compare.py            # 文档比对（77KB 最大模块）
+│   ├── to_docx.py               # 多格式转 DOCX
+│   ├── to_redhead.py            # 红头文件生成
+│   ├── to_index.py              # 目录索引
+│   ├── to_pageNum.py            # 批量添加页码
+│   ├── to_pdf.py                # 批量转 PDF
+│   ├── float_picture.py         # 浮动图片处理
+│   ├── load_config.py           # 配置加载器
+│   └── logging_config.py        # 日志配置
+├── p2p/                         # P2P 节点发现与认证
+│   ├── node.py                  # 节点身份管理（Ed25519 密钥对）
+│   ├── discovery.py             # zeroconf mDNS 服务发现
+│   ├── auth.py                  # 签名验证装饰器
+│   ├── api.py                   # P2P 远程文件操作 API
+│   ├── models.py                # TrustStore + RemoteFilebaseStore
+│   └── proxy.py                 # P2P 请求代理转发
+├── ui/                          # 前端 SPA（按需加载）
+│   ├── index.html               # 主页面
+│   ├── js/
+│   │   ├── main.js              # 核心逻辑 + 工具页
+│   │   ├── fb.js / fb.css       # 文件库管理器（按需加载）
+│   │   └── kb.js / kb.css       # 知识库聊天/文件浏览（按需加载）
+│   └── lib/                     # 第三方前端库
+│       ├── marked/              # Markdown 渲染
+│       ├── quill/               # 富文本编辑器
+│       └── turndown/            # HTML 转 Markdown
+├── tests/                       # 测试
+├── requirements.txt             # Python 依赖
+└── README.md                    # 本文件
 ```
 
 ---

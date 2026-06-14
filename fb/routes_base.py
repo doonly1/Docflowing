@@ -188,8 +188,8 @@ def copy_folder():
     })
 
 
-_list_fb_cache = {}
-_list_fb_cache_time = 0
+_list_fb_cache = {}          # cache_key -> data
+_list_fb_cache_time = {}     # cache_key -> timestamp
 _LIST_FB_CACHE_TTL = 5
 
 
@@ -197,12 +197,11 @@ _LIST_FB_CACHE_TTL = 5
 @login_required
 def list_fb():
     """获取文件库列表"""
-    global _list_fb_cache_time
     user_id = g.user_id
 
     cache_key = f"list_fb:{user_id}"
     now = time.time()
-    if cache_key in _list_fb_cache and now - _list_fb_cache_time < _LIST_FB_CACHE_TTL:
+    if cache_key in _list_fb_cache and now - _list_fb_cache_time.get(cache_key, 0) < _LIST_FB_CACHE_TTL:
         return jsonify(_list_fb_cache[cache_key])
 
     is_admin = _is_admin(user_id)
@@ -250,14 +249,18 @@ def list_fb():
                 if row['filebase_type'] != 'net' and row['name'] != entry_name:
                     db.execute("UPDATE filebases SET name = ? WHERE id = ?", (entry_name, row['id']))
 
+    cleanup_entries = []
     for path in local_existing_paths - fs_paths:
         row = db_kbs[path]
         if path.startswith(ws + os.sep) or path == ws:
-            # 目录被 OS 删除，清理 KB 同步数据后删除 DB 记录
-            _cleanup_synced_data(row['owner_id'], row['id'])
+            # 先执行 DB 删除
             db.execute("DELETE FROM filebase_permissions WHERE filebase_id = ?", (row['id'],))
             db.execute("DELETE FROM filebases WHERE id = ?", (row['id'],))
+            cleanup_entries.append((row['owner_id'], row['id']))
     db.commit()
+    # 清理同步数据（DB 已提交，无残留风险）
+    for owner_id, fb_id in cleanup_entries:
+        _cleanup_synced_data(owner_id, fb_id)
 
     if is_admin:
         visible_rows = db.execute("SELECT * FROM filebases").fetchall()
@@ -298,7 +301,7 @@ def list_fb():
             perm_row['permission_level'] if perm_row else 'view'
         )
 
-        owner_username = row['owner_id'][:8]
+        owner_username = (row['owner_id'] or '')[:8]
 
         local_path = row['local_path']
         display_path = local_path
@@ -347,7 +350,7 @@ def list_fb():
 
     result = {'success': True, 'kbs': kbs}
     _list_fb_cache[cache_key] = result
-    _list_fb_cache_time = now
+    _list_fb_cache_time[cache_key] = now
     return jsonify(result)
 
 
@@ -553,7 +556,8 @@ def delete_fb(filebase_id):
 
 
 def _get_trash_dir():
-    """获取回收站目录"""
-    trash_dir = os.path.join(os.path.expanduser('~'), '.trash')
+    """获取回收站目录（位于运行时数据目录下）"""
+    from server.workspace import _get_runtime_dir
+    trash_dir = os.path.join(_get_runtime_dir(), 'trash')
     os.makedirs(trash_dir, exist_ok=True)
     return trash_dir

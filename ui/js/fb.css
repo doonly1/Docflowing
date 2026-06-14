@@ -651,6 +651,11 @@ body.fb-resizing {
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.fb-modal-overlay.show {
+    opacity: 1;
 }
 
 .fb-modal {
@@ -662,6 +667,11 @@ body.fb-resizing {
     max-height: 80vh;
     overflow-y: auto;
     box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+    transform: scale(0.95);
+    transition: transform 0.2s ease;
+}
+.fb-modal-overlay.show .fb-modal {
+    transform: scale(1);
 }
 
 .fb-modal h3 {

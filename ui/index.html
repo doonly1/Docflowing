@@ -20,6 +20,7 @@
             display: flex;
             padding: 0;
             margin: 0;
+            border: 1px solid #d0d0d0;
         }
 
 
@@ -638,7 +639,7 @@
             align-items: center;
             z-index: 1000;
             opacity: 0;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.2s ease;
         }
 
         .modal-overlay.show {
@@ -658,7 +659,7 @@
             flex-direction: column;
             border: 1px solid rgba(0,0,0,0.08);
             transform: scale(0.95);
-            transition: transform 0.25s ease;
+            transition: transform 0.2s ease;
         }
 
         .modal-overlay.show .modal {
@@ -897,7 +898,7 @@
             z-index: 9999;
             pointer-events: none;
             opacity: 0;
-            transition: opacity 0.25s ease, transform 0.25s ease;
+            transition: opacity 0.2s ease, transform 0.2s ease;
             white-space: nowrap;
             max-width: 80vw;
             overflow: hidden;
@@ -1112,21 +1113,24 @@
     </div>
 
     <!-- 关于弹窗 overlay -->
-    <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
+    <div id="aboutOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.2s ease;"></div>
 
     <nav class="sidebar">
         <div class="sidebar-section">
             <div class="sidebar-nav-item" data-view="fb" data-label="文件库" onclick="tabManager.openOrCreateTab('fb')" onauxclick="if(event.button===1)tabManager.openOrCreateTab('fb',true)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </div>
-        </div>
-        <div class="sidebar-spacer"></div>
-        <div class="sidebar-bottom" id="sidebar-sessions-btn" onclick="if(typeof WikiKnowledge!=='undefined')WikiKnowledge.showSessions()" title="历史会话">
-            <div class="sidebar-nav-item" data-label="历史会话">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2-5.3"/><path d="M3 3v6h6"/><polyline points="12 7 12 12 16 14"/></svg>
+            <div class="sidebar-nav-item" data-view="tools" data-label="工具" onclick="navigateTo('tools')">
+                <svg width="19" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8z"/><polyline points="15 2 15 8 21 8"/></svg>
+            </div>
             </div>
         </div>
-        <div class="sidebar-bottom" id="sidebar-more-btn" onclick="toggleSidebarMenu(event)">
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-bottom">
+            <div class="sidebar-nav-item" data-label="历史会话" onclick="if(window.tabManager)tabManager.showSessions()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div id="sidebar-more-btn" onclick="toggleSidebarMenu(event)">
             <div class="sidebar-nav-item" data-label="更多">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </div>
@@ -1397,6 +1401,6 @@
     </div>
 
     <!-- 应用设置弹窗 -->
-    <div id="settingsOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.25s ease;"></div>
+    <div id="settingsOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.2s ease;"></div>
 </body>
 </html>

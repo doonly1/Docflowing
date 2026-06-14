@@ -47,10 +47,12 @@
                 overlay.querySelector('.custom-dialog-btn-confirm').onclick = function() { closeAndResolve(true); };
                 overlay.querySelector('.custom-dialog-btn-cancel').onclick = function() { closeAndResolve(false); };
                 overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAndResolve(false); });
-                setTimeout(function() {
-                    var btn = overlay.querySelector('.custom-dialog-btn-confirm');
-                    if (btn) btn.focus();
-                }, 100);
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                        var btn = overlay.querySelector('.custom-dialog-btn-confirm');
+                        if (btn) btn.focus();
+                    });
+                });
             });
         }
 
@@ -597,14 +599,19 @@
         window.openConfig = async function() {
             const modal = document.getElementById('configModal');
             modal.style.display = 'flex';
-            requestAnimationFrame(() => { modal.classList.add('show'); });
+            requestAnimationFrame(() => {
+                modal.classList.add('show');
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) closeConfig();
+                }, { once: true });
+            });
             await loadUserConfig();
         };
 
         window.closeConfig = function() {
             const modal = document.getElementById('configModal');
             modal.classList.remove('show');
-            setTimeout(() => { modal.style.display = 'none'; }, 250);
+            setTimeout(() => { modal.style.display = 'none'; }, 200);
         };
 
         window.switchConfigTab = async function(tabName) {
@@ -977,7 +984,7 @@
             const overlay = document.getElementById('aboutOverlay');
             overlay.style.display = 'flex';
             overlay.innerHTML = `
-                <div style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;">
+                <div id="about-dialog" style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;transform:scale(0.95);transition:transform 0.2s ease;">
                     <div style="text-align:center;margin-bottom:12px;">
                         <h2 style="margin:6px 0 2px;font-size:18px;color:#1a1a2e;">文枢</h2>
                         <div style="font-size:11px;color:#999;">DocFlow · 文档工作流</div>
@@ -988,14 +995,18 @@
                     </div>
                 </div>
             `;
-            requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+            requestAnimationFrame(() => {
+                overlay.style.opacity = '1';
+                var dialog = document.getElementById('about-dialog');
+                if (dialog) dialog.style.transform = 'scale(1)';
+            });
             overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAbout(); });
         };
 
         window.closeAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
             overlay.style.opacity = '0';
-            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 250);
+            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 200);
         };
 
         // ==================== 应用设置 ====================
@@ -1012,6 +1023,10 @@
                 const data = await response.json();
                 if (data.success) {
                     appSettings = data.settings;
+                    // 同步关闭行为到 Electron 主进程
+                    if (window.electronAPI && window.electronAPI.setCloseAction) {
+                        window.electronAPI.setCloseAction(appSettings.close_action || 'exit');
+                    }
                 }
             } catch (e) {
                 console.log('加载设置失败:', e);
@@ -1020,7 +1035,7 @@
             const overlay = document.getElementById('settingsOverlay');
             overlay.style.display = 'flex';
             overlay.innerHTML = `
-                <div style="background:#fff;border-radius:12px;padding:18px 20px;max-width:380px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);transform:scale(0.95);transition:transform 0.25s ease;">
+                <div style="background:#fff;border-radius:12px;padding:18px 20px;max-width:380px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);transform:scale(0.95);transition:transform 0.2s ease;">
                     <h2 style="margin:0 0 14px;font-size:16px;color:#1a1a2e;border-bottom:1px solid #eee;padding-bottom:8px;">应用设置</h2>
 
                     <div style="margin-bottom:14px;">
@@ -1063,7 +1078,7 @@
             const overlay = document.getElementById('settingsOverlay');
             overlay.style.opacity = '0';
             overlay.querySelector('div').style.transform = 'scale(0.95)';
-            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 250);
+            setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 200);
         };
 
         window.saveAppSettings = async function() {
@@ -1084,6 +1099,10 @@
                 const data = await response.json();
                 if (data.success) {
                     appSettings = newSettings;
+                    // 同步关闭行为到 Electron 主进程
+                    if (window.electronAPI && window.electronAPI.setCloseAction) {
+                        window.electronAPI.setCloseAction(newSettings.close_action || 'exit');
+                    }
                     closeAppSettings();
                 } else {
                     showToast('保存设置失败: ' + (data.message || '未知错误'), 'error');
@@ -1227,7 +1246,7 @@ function navigateTo(view) {
     } else if (view === 'about') {
         if (typeof showAbout !== 'undefined') showAbout();
     } else if (view === 'tools') {
-        if (typeof tabManager !== 'undefined') tabManager.createTab('tools', true);
+        if (typeof tabManager !== 'undefined') tabManager.openOrCreateTab('tools');
     } else {
         if (typeof tabManager !== 'undefined') tabManager.openOrCreateTab(view);
     }
@@ -1281,7 +1300,7 @@ window.tabManager = {
             case 'fb':
                 return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>';
             case 'tools':
-                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>';
+                return '<span class="tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8z"/><polyline points="15 2 15 8 21 8"/></svg></span>';
             default:
                 return '';
         }
@@ -1651,6 +1670,130 @@ window.tabManager = {
             wd.addEventListener('dragover', function(e) { e.preventDefault(); });
             wd.addEventListener('drop', function(e) { e.preventDefault(); });
         }
+    },
+
+    // ==================== 会话管理弹窗 ====================
+
+    showSessions: async function() {
+        var self = this;
+        // 关闭可能存在的旧弹窗
+        var oldOv = document.getElementById('fb-modal-overlay');
+        if (oldOv) oldOv.remove();
+
+        try {
+            var resp = await apiFetch('/api/kb/sessions?limit=50', { method: 'GET' });
+            var data = await resp.json();
+        } catch (e) {
+            showToast('加载历史会话失败', 'error');
+            return;
+        }
+
+        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:580px">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+        h += '<h3 style="margin:0">历史会话</h3>';
+        h += '<button onclick="tabManager.closeSessionsModal()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#999;padding:0;line-height:1">✖</button>';
+        h += '</div>';
+
+        if (!data.success || !data.sessions || data.sessions.length === 0) {
+            h += '<div style="text-align:center;padding:40px 0;color:#bbb;font-size:14px">暂无会话</div>';
+        } else {
+            h += '<div style="max-height:55vh;overflow-y:auto;margin:0 -24px;padding:0 24px">';
+            for (var i = 0; i < data.sessions.length; i++) {
+                var s = data.sessions[i];
+                var isActive = (typeof WikiKnowledge !== 'undefined') && s.id === WikiKnowledge.sessionId;
+                var timeStr = '';
+                if (s.last_active) {
+                    var d = new Date(s.last_active * 1000);
+                    timeStr = d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                }
+                var escId = s.id.replace(/'/g, "\\'");
+                h += '<div style="display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="tabManager._onSessionClick(\'' + escId + '\')">';
+                h += '<span style="margin-right:8px">💬</span>';
+                h += '<div style="min-width:0;flex:1;font-size:13px">';
+                h += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:' + (isActive ? '600' : '400') + '">' + (typeof WikiKnowledge !== 'undefined' ? WikiKnowledge._escapeHtml(s.title || '新对话') : s.title || '新对话') + '</div>';
+                h += '<div style="font-size:11px;color:#888;margin-top:2px">' + timeStr + '</div>';
+                h += '</div>';
+                h += '<button onclick="event.stopPropagation(); tabManager._onDeleteSession(\'' + escId + '\')" style="padding:3px 10px;border:1px solid #ddd;background:#fff;color:#999;border-radius:4px;cursor:pointer;font-size:11px;transition:all 0.15s" onmouseover="this.style.color=\'#dc3545\';this.style.borderColor=\'#dc3545\'" onmouseout="this.style.color=\'#999\';this.style.borderColor=\'#ddd\'">删除</button>';
+                h += '</div>';
+            }
+            h += '</div>';
+        }
+
+        h += '<div class="fb-modal-actions">';
+        h += '<button class="fb-btn-cancel" onclick="tabManager.closeSessionsModal()">关闭</button>';
+        h += '<button class="fb-btn-primary" onclick="tabManager._onClearAllSessions()">清除所有会话</button>';
+        h += '</div></div></div>';
+
+        document.body.insertAdjacentHTML('beforeend', h);
+        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
+        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) {
+            if (e.target.id === 'fb-modal-overlay') tabManager.closeSessionsModal();
+        });
+    },
+
+    closeSessionsModal: function() {
+        var ov = document.getElementById('fb-modal-overlay');
+        if (ov) {
+            ov.classList.remove('show');
+            setTimeout(function() { if (ov.parentNode) ov.remove(); }, 200);
+        }
+    },
+
+    _onSessionClick: function(sessionId) {
+        if (typeof WikiKnowledge !== 'undefined') {
+            WikiKnowledge.switchSession(sessionId);
+            navigateTo('home');
+        }
+    },
+
+    _onDeleteSession: function(sessionId) {
+        var self = this;
+        if (typeof WikiKnowledge !== 'undefined' && WikiKnowledge.sessionId === sessionId) {
+            WikiKnowledge.sessionId = null;
+            WikiKnowledge._saveSessionId();
+            WikiKnowledge.messages = [];
+        }
+        apiFetch('/api/kb/session/' + sessionId, { method: 'DELETE' }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.success) {
+                self.showSessions();
+            } else {
+                showToast('删除失败', 'error');
+            }
+        }).catch(function() {
+            showToast('删除失败', 'error');
+        });
+    },
+
+    _onClearAllSessions: function() {
+        var self = this;
+        showConfirm('确定要清除所有会话吗？此操作不可恢复！').then(function(ok) {
+            if (!ok) return;
+            apiFetch('/api/kb/sessions', { method: 'DELETE' }).then(function(resp) {
+                return resp.json();
+            }).then(function(data) {
+                if (data.success) {
+                    if (typeof WikiKnowledge !== 'undefined') {
+                        WikiKnowledge.sessionId = null;
+                        WikiKnowledge._saveSessionId();
+                        WikiKnowledge.messages = [];
+                    }
+                    self.showSessions();
+                } else {
+                    showToast('清除失败', 'error');
+                }
+            }).catch(function() {
+                showToast('清除失败', 'error');
+            });
+        });
+    },
+
+    _refreshSessionList: function() {
+        var overlay = document.getElementById('fb-modal-overlay');
+        if (overlay) {
+            this.showSessions();
+        }
     }
 };
 
@@ -1670,7 +1813,12 @@ window.showKbSelector = async function() {
     var modal = document.getElementById('kbSelectorModal');
     if (!modal) return;
     modal.style.display = 'flex';
-    requestAnimationFrame(function() { modal.classList.add('show'); });
+    requestAnimationFrame(function() {
+        modal.classList.add('show');
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) closeKbSelector();
+        }, { once: true });
+    });
 
     kbSelectorState.selectedKbId = null;
     kbSelectorState.selectedSubdir = '';
@@ -1683,7 +1831,7 @@ window.closeKbSelector = function() {
     var modal = document.getElementById('kbSelectorModal');
     if (!modal) return;
     modal.classList.remove('show');
-    setTimeout(function() { modal.style.display = 'none'; }, 250);
+    setTimeout(function() { modal.style.display = 'none'; }, 200);
 };
 
 async function loadKbSelectorList() {
@@ -1754,17 +1902,17 @@ function renderKbSelectorItem(kb) {
     var disabledClass = canEdit ? '' : ' disabled';
     var title = canEdit ? (kb.name + ' (' + (kb.permission === 'manage' ? '管理' : '编辑') + ')') : (kb.name + ' (只读)');
     var selClass = (kbSelectorState.selectedKbId === kb.id) ? ' selected' : '';
-    var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + kb.id.replace(/'/g, "\\'") + '\')" ondblclick="selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
+    var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + kb.id.replace(/'/g, "\\'") + '\', event)" ondblclick="selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
     return '<div class="fb-selector-item' + disabledClass + selClass + '"' + clickHandler + ' title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
 }
 
-window.markKbSelected = function(kbId) {
+window.markKbSelected = function(kbId, event) {
     kbSelectorState.selectedKbId = kbId;
     var items = document.querySelectorAll('.fb-selector-item');
     for (var i = 0; i < items.length; i++) {
         items[i].classList.remove('selected');
     }
-    event.currentTarget.classList.add('selected');
+    if (event && event.currentTarget) event.currentTarget.classList.add('selected');
 
     // 同步更新显示路径
     var allKbs = kbSelectorState.kbList || [];
@@ -1842,13 +1990,13 @@ function renderKbSubdirView(categories) {
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
             var selClass = (kbSelectorState.selectedSubdir === cat.path) ? ' selected' : '';
-            h += '<div class="fb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\')" ondblclick="enterKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
+            h += '<div class="fb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\', event)" ondblclick="enterKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
             h += '<span>📁 ' + escapeHtml(cat.name) + '</span>';
             h += '</div>';
         }
     } else {
         var rootSelected = (kbSelectorState.selectedSubdir === '');
-        h += '<div class="fb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\')">';
+        h += '<div class="fb-subdir-item' + (rootSelected ? ' selected' : '') + '" onclick="selectKbSubdir(\'\', event)">';
         h += '<span>📂 根目录</span>';
         h += '</div>';
     }
@@ -1879,7 +2027,7 @@ window.enterKbSubdir = function(subdir, name) {
     loadKbSubdirs(subdir);
 };
 
-window.selectKbSubdir = function(subdir) {
+window.selectKbSubdir = function(subdir, event) {
     kbSelectorState.selectedSubdir = subdir || '';
 
     if (subdir) {
@@ -1934,7 +2082,7 @@ window.confirmKbSelection = function() {
     closeKbSelector();
 
     var workdirInput = document.getElementById('workdir');
-    if (currentTool && workdirInput) loadFileList(workdirInput.value, currentTool);
+    if (currentTool && workdirInput) loadFileList(null, currentTool);
 };
 
 // ==================== 文件库选择器 ====================
