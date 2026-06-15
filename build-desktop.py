@@ -1,8 +1,9 @@
 """
-Docflowing Python 后端构建脚本
-用法: python electron/build-backend.py
+Docflowing 桌面应用构建脚本（pywebview 版本）
+用法: python build-desktop.py
 
-使用 PyInstaller 将 app_server.py 打包为 dist/backend/backend.exe
+使用 PyInstaller 将 desktop_app.py 打包为单个 exe，
+包含 pywebview 桌面壳 + Flask 后端 + 前端 UI。
 """
 import os
 import sys
@@ -16,21 +17,27 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIST_DIR = os.path.join(ROOT, 'dist', 'backend')
-SPEC_NAME = os.path.join(ROOT, 'electron', 'backend.spec')
+SPEC_NAME = os.path.join(ROOT, 'desktop.spec')
+DIST_DIR = os.path.join(ROOT, 'dist', 'desktop')
+OUTPUT_NAME = '文澜'
 
 
 def create_spec():
-    """生成 PyInstaller .spec 文件"""
+    """生成 PyInstaller .spec 文件（onedir 模式）"""
+    ui_dir = os.path.join(ROOT, 'ui')
+
     spec = f"""# -*- mode: python ; coding: utf-8 -*-
 import sys
 sys.setrecursionlimit(10000)
 
 a = Analysis(
-    [r'{ROOT}/app_server.py'],
-    pathex=[r'{ROOT}'],
+    [r'{ROOT}/desktop_app.py'],
+    pathex=[r'{ROOT}', r'{ROOT}/tools'],
     binaries=[],
-    datas=[],
+    datas=[
+        # 前端 UI 文件
+        (r'{ui_dir}', 'ui'),
+    ],
     hiddenimports=[
         # KB 模块
         'kb.auto_extract',
@@ -74,7 +81,9 @@ a = Analysis(
         'server.runner',
         'server.settings',
         'server.workspace',
-        # Tools（在 app_server.py 中通过 sys.path 引入）
+        # pywebview 及其依赖
+        'webview',
+        # Tools
         'logging_config',
         'doc_process',
         'mystyle',
@@ -86,7 +95,7 @@ a = Analysis(
         'to_pdf',
         'float_picture',
         'load_config',
-        # 第三方
+        # 第三方隐式依赖
         'flask',
         'flask_cors',
         'zeroconf',
@@ -99,6 +108,11 @@ a = Analysis(
         'openpyxl',
         'docx',
         'pptx',
+        'pystray',
+        'PIL',
+        'PIL._tkinter_finder',
+        'appdirs',
+        'cefpython3',
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -121,7 +135,6 @@ a = Analysis(
         'IPython',
         'numpy.testing',
         'pandas',
-        'PIL',
     ],
     noarchive=False,
 )
@@ -134,7 +147,7 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='backend',
+    name='{OUTPUT_NAME}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -149,25 +162,21 @@ exe = EXE(
     entitlements_file=None,
     contents_directory='.',
 )
-"""
-    # 设置环境变量避免 GBK 编码问题
-    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
+# onedir 模式（保持目录结构便于调试）
+# 如果需要单文件模式，将 EXE 改为 COLLECT + EXE with onefile=True
+"""
     with open(SPEC_NAME, 'w', encoding='utf-8') as f:
         f.write(spec)
-    print(f'[build-backend] OK 已生成 spec 文件: {SPEC_NAME}')
+    print(f'[build-desktop] OK 已生成 spec 文件: {SPEC_NAME}')
 
 
 def clean():
     """清理旧的构建输出"""
-    if os.path.exists(DIST_DIR):
-        shutil.rmtree(DIST_DIR)
-        print(f'[build-backend] OK 已清理: {DIST_DIR}')
-
-    build_dir = os.path.join(ROOT, 'build')
-    if os.path.exists(build_dir):
-        shutil.rmtree(build_dir)
-        print(f'[build-backend] OK 已清理: {build_dir}')
+    for d in [DIST_DIR, os.path.join(ROOT, 'build')]:
+        if os.path.exists(d):
+            shutil.rmtree(d)
+            print(f'[build-desktop] OK 已清理: {d}')
 
 
 def build():
@@ -184,23 +193,26 @@ def build():
         SPEC_NAME,
     ]
 
-    print('[build-backend] ... 开始构建 Python 后端 ...')
+    print('[build-desktop] ... 开始构建桌面应用 ...')
     result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
     if result.returncode != 0:
-        print('[build-backend] ERROR 构建失败:')
-        print(result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr)
+        print('[build-desktop] ERROR 构建失败:')
+        print(result.stderr[-3000:] if len(result.stderr) > 3000 else result.stderr)
         sys.exit(1)
 
-    # 创建 dist/backend/ 目录并将 exe 移入（匹配 electron-builder extraResources 配置）
-    built_exe = os.path.join(ROOT, 'dist', 'backend.exe')
-    if os.path.exists(built_exe):
-        os.makedirs(DIST_DIR, exist_ok=True)
-        shutil.move(built_exe, os.path.join(DIST_DIR, 'backend.exe'))
-        print(f'[build-backend] OK 已移动 exe 到: {DIST_DIR}')
+    exe_path = os.path.join(ROOT, 'dist', f'{OUTPUT_NAME}.exe')
+    if os.path.exists(exe_path):
+        print(f'[build-desktop] OK 构建成功: {exe_path}')
+    else:
+        # onedir 模式
+        dir_path = os.path.join(ROOT, 'dist', OUTPUT_NAME)
+        if os.path.isdir(dir_path):
+            print(f'[build-desktop] OK 构建成功: {dir_path}')
+        else:
+            print('[build-desktop] WARNING 输出文件未找到，请检查 dist/ 目录')
 
-    print(f'[build-backend] OK 构建成功: {DIST_DIR}')
-    print(f'[build-backend] => {os.path.join(DIST_DIR, "backend.exe")}')
+    print('[build-desktop] 完成')
 
 
 if __name__ == '__main__':

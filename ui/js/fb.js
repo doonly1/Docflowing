@@ -242,8 +242,8 @@ var FileBase = {
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '<span class="fb-toolbar-spacer"></span>';
             h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
-            h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px">🗑️</button>';
-            h += '<button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置">⚙️</button>';
+            h += '<button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
+            h += '<button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>';
             h += '</div>';
             h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"><div class="fb-empty">刷新中...</div></div>';
             h += '</div></div></div>';
@@ -678,7 +678,7 @@ var FileBase = {
             h += '</div>';
             h += '<button onclick="FileBase.downloadAction()">下载</button>';
             h += '<button onclick="FileBase.showLockManager()" class="fb-lock-btn" title="文件锁管理">🔒 锁</button>';
-            h += '<button onclick="FileBase.showTrash()" title="回收站" style="border:none;background:transparent;font-size:15px;padding:2px 6px;cursor:pointer;color:#888;transition:color 0.15s" onmouseover="this.style.color=\'#e94560\'" onmouseout="this.style.color=\'#888\'">🗑️</button>';
+            h += '<button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
             h += '<input type="file" id="fb-file-upload-input" multiple style="display:none" onchange="FileBase.handleFileUpload(this)">';
             h += '<input type="file" id="fb-folder-upload-input" webkitdirectory style="display:none" onchange="FileBase.handleFolderUpload(this)">';
             h += '<input type="file" id="fb-replace-input" style="display:none" onchange="FileBase.handleReplace(this)">';
@@ -767,7 +767,8 @@ var FileBase = {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
             }
             h += '<div class="fb-tree-node">';
-            h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + (n.path || '').replace(/'/g, "\\'") + '\')" oncontextmenu="FileBase.showTreeContextMenu(event, \'' + (n.path || '').replace(/'/g, "\\'") + '\')" data-local-path="' + (n.path || '').replace(/'/g, "\\'") + '">';
+            var normNodePath = (n.path || '').replace(/\\/g, '/').replace(/'/g, "\\'");
+            h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + normNodePath + '\')" oncontextmenu="FileBase.showTreeContextMenu(event, \'' + normNodePath + '\')" data-local-path="' + normNodePath + '">';
             if (hasChildren) {
                 h += '<span class="fb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();FileBase.toggleTreeNode(this)"></span>';
             } else {
@@ -887,8 +888,8 @@ var FileBase = {
 
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
-            var catEscPathAttr = cat.path.replace(/'/g, "\\'");
-            h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catEscPathAttr + '" data-row-index="' + i + '" draggable="true">';
+            var catNormPath = cat.path.replace(/\\/g, '/').replace(/'/g, "\\'");
+            h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catNormPath + '" data-row-index="' + i + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
             h += '<td class="col-name"><div class="fb-file-name">' + escapeHtmlText(cat.name) + '</div></td>';
             h += '<td class="col-date"></td>';
@@ -904,17 +905,16 @@ var FileBase = {
             var size = self.formatSize(f.size);
             var date = self.formatDate(f.mtime);
             var fname = escapeHtmlText(f.name);
-            var escPath = f.path.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
-            var escPathAttr = f.path.replace(/'/g, "\\'");
+            var normPath = f.path.replace(/\\/g, '/').replace(/'/g, "\\'");
 
-            h += '<tr class="fb-file-row" data-local-path="' + escPath + '" data-doc-name="' + fname + '" data-row-index="' + (categories.length + i) + '" draggable="true">';
+            h += '<tr class="fb-file-row" data-local-path="' + normPath + '" data-doc-name="' + fname + '" data-row-index="' + (categories.length + i) + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">' + icon + '</span></td>';
             h += '<td class="col-name"><div class="fb-file-name">' + fname + '<span class="fb-file-type-tag">' + ext + '</span></div></td>';
             h += '<td class="col-date"><span class="fb-file-date">' + date + '</span></td>';
             h += '<td class="col-type">' + ext + '</td>';
             h += '<td class="col-size"><span class="fb-file-size">' + size + '</span></td>';
             h += '<td class="col-actions"><span class="fb-file-actions">';
-            h += '<a href="#" onclick="FileBase.triggerReplace(\'' + escPathAttr + '\');return false">替换</a>';
+            h += '<a href="#" onclick="FileBase.triggerReplace(\'' + normPath + '\');return false">替换</a>';
             h += '</span></td></tr>';
         }
         h += '</tbody></table>';
@@ -2183,15 +2183,15 @@ var FileBase = {
     /* ── Tree panel drag targets ── */
 
     _onTreeDragOver: function(e) {
+        e.preventDefault();  // 始终允许释放，避免未对准标签时浏览器禁止 drop
+        e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
         var label = e.target.closest('.fb-tree-label');
         if (!label) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
         label.classList.add('fb-drop-target');
 
         var treeNode = label.parentElement;
         if (!label.classList.contains('active')) {
-            var sub = treeNode ? treeNode.querySelector('.fb-tree-sub') : null;
+            var sub = treeNode ? treeNode.querySelector('.fb-tree-children') : null;
             if (sub && sub.style.display === 'none' && !this._treeExpandTimer) {
                 var self = this;
                 this._treeExpandTimer = setTimeout(function() {
@@ -2214,24 +2214,27 @@ var FileBase = {
     _onTreeDrop: function(e) {
         e.preventDefault();
         e.stopPropagation();
-        this._hideUploadOverlay();
         this._clearDragHighlights();
 
+        // ★ 优先处理内部拖拽路径（_draggedPaths 比 _nativeDragPaths 更直接可靠）
+        var sources = this._draggedPaths;
+        this._draggedPaths = null;
+        if (sources && sources.length > 0) {
+            var label = e.target.closest('.fb-tree-label');
+            // 未对准具体目录时默认放到根目录
+            var destPath = label ? (label.getAttribute('data-local-path') || '') : '';
+            this._doMoveOrCopy(sources, destPath, !!e.ctrlKey);
+            this._nativeDragPaths = null;
+            return;
+        }
+
+        // 再处理原生路径回拖（从 OS 文件管理器拖入本应用的文件）
         var nativePaths = this._nativeDragPaths;
         this._nativeDragPaths = null;
 
         if (nativePaths && nativePaths.length > 0) {
             this._handleNativeDragReentry(e, nativePaths);
-            return;
         }
-
-        var sources = this._draggedPaths;
-        this._draggedPaths = null;
-        if (!sources || sources.length === 0) return;
-        var label = e.target.closest('.fb-tree-label');
-        if (!label) return;
-        var destPath = label.getAttribute('data-local-path') || '';
-        this._doMoveOrCopy(sources, destPath, !!e.ctrlKey);
     },
 
     /* ── Dropped file upload ── */
@@ -2888,7 +2891,7 @@ var FileBase = {
         var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:580px">';
         h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
         h += '<h3 style="margin:0">回收站</h3>';
-        h += '<button onclick="FileBase.closeModal()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#999;padding:0;line-height:1">✖</button>';
+        h += '<button onclick="FileBase.closeModal()" title="关闭" class="fb-p2p-settings-btn" style="font-size:18px;padding:0;line-height:1;color:#999!important">✕</button>';
         h += '</div>';
         h += '<div class="trash-items-list">' + this._buildTrashItemsHtml(allItems) + '</div>';
         h += '<div class="fb-modal-actions">';

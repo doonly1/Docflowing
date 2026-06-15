@@ -25,8 +25,6 @@ def _get_runtime_dir():
     优先级：
     1. 环境变量 DOCFLOWING_DATA_DIR（开发者/测试手动指定）
     2. 已打包 / 桌面运行： %APPDATA%\\Docflowing 或 ~/.docflowing
-       （由 Electron 通过 DOCFLOWING_RUNTIME_DIR 显式传递）
-    3. 开发模式：项目根目录 /workspaces
     """
     env_dir = os.environ.get('DOCFLOWING_DATA_DIR') or os.environ.get('DOCFLOWING_RUNTIME_DIR')
     if env_dir:

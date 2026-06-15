@@ -62,6 +62,8 @@ def api_run_tool_with_config():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding='utf-8',  # 显式 UTF-8，避免 Windows cp936 导致解码报错
+                errors='replace',  # 非法字符用 � 替换，不中断流
                 bufsize=1,
                 cwd=directory,
                 env=env
@@ -71,6 +73,8 @@ def api_run_tool_with_config():
             for line in iter(process.stdout.readline, ''):
                 if line:
                     content = line.rstrip()
+                    # 工具输出中路径统一正斜杠，保持和 API 路径格式一致
+                    content = content.replace('\\', '/')
                     output_lines.append(content)
                     yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
 

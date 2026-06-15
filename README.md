@@ -2,7 +2,7 @@
 
 > Docflowing——Document Workflow，公文处理与 AI 知识管理平台。
 
-Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会话、公文处理**的桌面及服务节点应用，整合传统文档处理与 AI 驱动的知识管理，包括：文件库、知识库、工具集、P2P共享，以及AI会话、持久记忆系统、技能管理等。
+Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会话、公文处理**的桌面及服务节点应用，基于 **pywebview** 桌面壳 + **Python Flask** 后端 + **Vanilla JS** 前端，整合传统文档处理与 AI 驱动的知识管理，包括：文件库、知识库、工具集、P2P共享，以及AI会话、持久记忆系统、技能管理等。
 
 基于 P2P 节点共享，局域网内多台机器可互相发现并共享文件库。
 
@@ -13,66 +13,50 @@ Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会�
 ### 安装依赖
 
 ```bash
-# Python 后端依赖
 pip install -r requirements.txt
-
-# Node.js 前端依赖
-npm install
 ```
 
-### 开发模式（推荐）
+### 开发模式
 
 ```bash
-# 1. 启动 Python 后端
-python app_server.py
-
-# 2. 另开终端，启动 Electron 桌面壳
-npm run dev
+# 一条命令启动桌面应用（内嵌 Flask 后端 + pywebview 前端壳）
+python desktop_app.py
 ```
 
-默认打开一个 1100×700 的无边框窗口，自动居中显示。开发模式下会自动打开 DevTools。
+默认打开一个 1100×700 的无边框窗口，自动居中显示。
 
 ### 生产构建
 
 ```bash
-# 完整构建（编译 Python 后端 + 打包 Electron 安装包）
-npm run dist:win
+# 编译为单 exe（PyInstaller）
+python build-desktop.py
 ```
 
-输出在 `release/` 目录下，生成 NSIS 安装包 `文澜-Setup-1.0.0.exe`。
+输出在 `dist/` 目录下。
 
 ## 下载安装
 
 ### 普通用户（无需编程环境）
 
 1. 前往 **[Releases](https://github.com/doonly1/Docflowing/releases)** 页面
-2. 找到最新版本，下载 `文澜-Setup-x.x.x.exe`
-3. 双击运行安装程序
-   - 可选择安装目录（默认 `C:\Program Files\文澜`）
-   - 自动创建桌面快捷方式
-4. 安装完成后，双击桌面图标启动
-   - 首次启动会自动在安装目录下创建 `workspaces/` 数据文件夹
-   - 所有知识库、文件库、配置数据均保存在此目录
-
-> **注意**：安装包包含编译好的 Python 后端（约 60MB），首次启动无需额外配置。
+2. 找到最新版本，下载安装包
+3. 双击运行
+   - 自动创建运行数据目录
+   - 所有知识库、文件库、配置数据均保存在用户数据目录
 
 ### 开发者
 
 ```bash
-# 克隆仓库
 git clone https://github.com/doonly1/Docflowing.git
-cd DocFlow
+cd Docflowing
 
-# 安装依赖
 pip install -r requirements.txt
-npm install
 
-# 开发模式
-python app_server.py       # 终端1：启动后端
-npm run dev                # 终端2：启动 Electron
+# 开发模式（一条命令启动）
+python desktop_app.py
 
 # 生产打包
-npm run dist:win           # 输出到 release/ 目录
+python build-desktop.py
 ```
 
 ### 自动发布流程
@@ -83,8 +67,6 @@ npm run dist:win           # 输出到 release/ 目录
 git tag v1.0.0
 git push origin v1.0.0
 ```
-
----
 
 ## 功能模块
 
@@ -161,12 +143,9 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 ## 项目结构
 
 ```
-├── electron/                    # Electron 桌面壳
-│   ├── main.js                  # 主进程（窗口管理、后端进程启动）
-│   ├── preload.js               # 预加载脚本（安全上下文桥接）
-│   ├── build-backend.py         # 后端 PyInstaller 打包脚本
-│   └── copy-libs.js             # 构建时复制依赖
-├── server/                      # Flask 后端服务核心
+├── desktop_app.py                # 桌面入口（pywebview + 内嵌 Flask）
+├── build-desktop.py               # PyInstaller 打包桌面版
+├── server/                       # Flask 后端服务核心
 │   ├── __init__.py              # App 工厂、P2P 初始化（后台线程）、全局错误处理
 │   ├── auth.py                  # 本机 localhost 自动放行（30 行）
 │   ├── middleware.py            # 请求 ID 中间件
@@ -247,9 +226,9 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 │       ├── quill/               # 富文本编辑器
 │       └── turndown/            # HTML 转 Markdown
 ├── tests/                       # 单元测试
-│   ├── __init__.py
 │   ├── test_llm.py              # LLM 调用重试与退避机制测试
-│   └── test_auth.py             # 认证系统（X-Forwarded-For）测试
+│   ├── test_auth.py             # 认证系统（X-Forwarded-For）测试
+│   └── test_pywebview.py        # pywebview 迁移测试（CSP/shim/API/集成）
 ├── requirements.txt             # Python 依赖
 └── README.md                    # 本文件
 ```
@@ -289,8 +268,8 @@ workspaces/
 ## 环境要求
 
 - **Python** 3.9+
-- **Windows**：完整功能（DOC 转换 / PDF 转换需 Microsoft Word）
-- **Linux/macOS**：除 win32com 依赖功能外皆可使用
+- **Windows 10+**：完整功能（Edge WebView2 运行时可自动安装，DOC 转换需 Microsoft Word）
+- **Linux/macOS**：部分功能可用（无 pywebview 桌面壳，需自行启动 Flask）
 
 ## 版权声明
 
@@ -302,6 +281,8 @@ Copyright © 2026 doonly1. Licensed under the AGPL-3.0 (see [LICENSE](./LICENSE)
 
 | 组件 | 许可证 | 用途 |
 |------|--------|------|
+| [pywebview](https://github.com/r0x0r/pywebview) | BSD-3-Clause | 桌面壳（CEF/Edge WebView2） |
+| [pystray](https://github.com/moses-palmer/pystray) | LGPL-3.0 | 系统托盘图标 |
 | [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) | MIT | 知识库模块代码逻辑（上下文压缩、技能审查、会话洞察、文件安全等） |
 | [mattpocock/skills](https://github.com/mattpocock/skills) | MIT | 系统级技能（诊断、TDD、原型设计、代码审查等） |
 | [zeroconf](https://github.com/jstasiak/python-zeroconf) | LGPL-2.1 | P2P 节点 mDNS 发现 |

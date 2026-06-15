@@ -191,12 +191,28 @@
                     if (currentTool) {
                         await loadFileList({type: 'local', path: path}, currentTool);
                     }
+                    // 持久化最后选择的目录
+                    saveLastWorkdir(path);
                 }
             } catch (e) {
                 console.error('selectDirectory error:', e);
                 showToast('选择目录失败', 'error');
             }
         };
+
+        /** 将 last_workdir 保存到服务端配置（非阻塞） */
+        function saveLastWorkdir(dir) {
+            if (!userConfig) userConfig = {};
+            userConfig.last_workdir = dir;
+            localStorage.setItem('userConfig', JSON.stringify(userConfig));
+            // 静默保存到服务端，不阻塞 UI
+            apiFetch('/save_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({config: userConfig}),
+                showError: false
+            }).catch(function() {});
+        }
 
         // 下载结果（打包 ZIP）
         window.downloadResults = async function() {
@@ -343,7 +359,7 @@
         }
 
         // ==================== 配置管理 ====================
-        let userConfig = null;
+        var userConfig = null;
 
         // 打开配置弹窗
         window.openConfig = async function() {
@@ -727,19 +743,16 @@
         }
 
         // ==================== 关于弹窗 ====================
-        // <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:12px;color:#666;line-height:2;">
-        //     <div style="display:flex;gap:6px;"><span style="width:16px;text-align:center;">🏠</span><a href="https://github.com/doonly1/" style="color:#e94560;text-decoration:none;" target="_blank">github.com/doonly1</a></div>
-        // </div>
+
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
             overlay.style.display = 'flex';
             overlay.innerHTML = `
                 <div id="about-dialog" style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;transform:scale(0.95);transition:transform 0.2s ease;">
                     <div style="text-align:center;margin-bottom:12px;">
-                        <h2 style="margin:6px 0 2px;font-size:18px;color:#1a1a2e;">文澜</h2>
-                        <div style="font-size:11px;color:#999;">Docflowing · 文档工作流</div>
+                        <h2 style="margin:6px 0 2px;font-size:18px;"><a href="https://github.com/doonly1/" target="_blank" style="color:#1a1a2e;text-decoration:none;">文澜</a></h2>
+                        <div style="font-size:11px;color:#999;">Docflowing · 文涌清澜</div>
                     </div>
-
                     <div style="text-align:center;margin-top:14px;">
                         <button onclick="closeAbout()" style="padding:5px 24px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
                     </div>

@@ -18,15 +18,18 @@ temp*
 # 工作区（含运行时用户配置、P2P 身份、图标等）
 workspaces/
 
-# Node.js
+# Node.js（迁移到 pywebview 后不再需要）
 node_modules/
+package-lock.json
+.npmrc
 
 # 前端 lib（由 postinstall 自动生成）
 ui/lib/
 
-# Electron 构建输出
+# 桌面壳构建输出（pywebview）
 release/
 dist/
+build/
 
 # PyInstaller 中间文件
 build/

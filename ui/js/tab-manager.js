@@ -191,7 +191,7 @@ window.tabManager = {
                 var workdirEl = document.getElementById('workdir');
                 var selDir = getSelectedDirectory();
                 tab.state = {
-                    currentTool: currentTool || 'to_docx',
+                    currentTool: currentTool || 'to_compare',
                     workdirValue: workdirEl ? workdirEl.value : '',
                     fbId: workdirEl ? workdirEl.getAttribute('data-fb-id') : null,
                     fbSubdir: workdirEl ? workdirEl.getAttribute('data-fb-subdir') : '',
@@ -349,7 +349,11 @@ window.tabManager = {
         container.innerHTML =
             '<div class="container" id="tools-view">' +
             '<div class="card">' +
-            '<h2>选择功能</h2>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e94560;padding-bottom:6px;margin-bottom:10px">' +
+            '<h2 style="margin:0;border:none;padding:0">选择功能</h2>' +
+            '<button onclick="openConfig()" title="配置" style="background:none;border:none;cursor:pointer;color:#888;padding:4px;border-radius:4px;display:flex;align-items:center" onmouseover="this.style.background=\'#e5e5e5\'" onmouseout="this.style.background=\'none\'">' +
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' +
+            '</button></div>' +
             '<div class="tools-grid">' +
             '<div class="tool-item" onclick="selectTool(\'to_docx\')">' +
             '<div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2b5797" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></div>' +
@@ -391,7 +395,7 @@ window.tabManager = {
             '<div id="result"></div></div>';
 
         // 恢复工具状态
-        var savedTool = (tab.state && tab.state.currentTool) || 'to_docx';
+        var savedTool = (tab.state && tab.state.currentTool) || 'to_compare';
         if (tab.state && tab.state.workdirValue) {
             var wd = document.getElementById('workdir');
             if (wd) {
@@ -400,6 +404,15 @@ window.tabManager = {
                     wd.setAttribute('data-fb-id', tab.state.fbId);
                     wd.setAttribute('data-fb-subdir', tab.state.fbSubdir || '');
                 }
+            }
+        }
+        // 无 tab 状态时，从持久化配置恢复 last_workdir
+        if (!tab.state || !tab.state.workdirValue) {
+            var wd = document.getElementById('workdir');
+            if (wd && typeof window.userConfig !== 'undefined' && window.userConfig && window.userConfig.last_workdir) {
+                wd.value = window.userConfig.last_workdir;
+                wd.removeAttribute('data-fb-id');
+                wd.removeAttribute('data-fb-subdir');
             }
         }
         // 从右键菜单带入文件库路径

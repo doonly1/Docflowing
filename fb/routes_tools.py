@@ -94,6 +94,7 @@ def run_tool_on_fb(filebase_id):
             for line in iter(process.stdout.readline, ''):
                 if line:
                     content = line.rstrip()
+                    content = content.replace('\\', '/')
                     output_lines.append(content)
                     yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
 

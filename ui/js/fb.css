@@ -1061,6 +1061,9 @@ body.fb-resizing {
 }
 
 .fb-p2p-settings-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     padding: 2px 6px !important;
     border: none !important;
     background: transparent !important;
@@ -1068,11 +1071,13 @@ body.fb-resizing {
     font-size: 15px !important;
     border-radius: 4px;
     line-height: 1;
+    color: #888 !important;
     transition: background 0.15s;
 }
 
 .fb-p2p-settings-btn:hover {
     background: #e0e0e0 !important;
+    color: #888 !important;
 }
 
 .fb-toolbar-spacer {
