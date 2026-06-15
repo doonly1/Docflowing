@@ -31,7 +31,11 @@ import sys
 sys.setrecursionlimit(10000)
 
 a = Analysis(
+<<<<<<<< HEAD:build-desktop.py
     [r'{ROOT}/desktop_app.py'],
+========
+    [r'{ROOT}/app_server.py'],
+>>>>>>>> 3ee6a23b3093710a065564ce5128f9f44a860172:electron/build-backend.py
     pathex=[r'{ROOT}', r'{ROOT}/tools'],
     binaries=[],
     datas=[
