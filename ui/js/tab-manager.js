@@ -262,7 +262,7 @@ window.tabManager = {
         // 渲染 KB 会话界面作为首页
         var contentDiv = document.createElement('div');
         contentDiv.id = 'content-view';
-        contentDiv.style.cssText = 'height:100%;min-height:400px;';
+        contentDiv.style.cssText = 'height:100%;min-height:400px;display:flex;flex-direction:column;';
         container.appendChild(contentDiv);
 
         var self = this;
@@ -296,7 +296,7 @@ window.tabManager = {
     _renderFb: function(tab, container) {
         var contentDiv = document.createElement('div');
         contentDiv.id = 'content-view';
-        contentDiv.style.cssText = 'height:100%;min-height:400px;';
+        contentDiv.style.cssText = 'height:100%;min-height:400px;display:flex;flex-direction:column;';
         container.appendChild(contentDiv);
 
         // 恢复 FB 状态
@@ -351,7 +351,7 @@ window.tabManager = {
             '<div class="card">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e94560;padding-bottom:6px;margin-bottom:10px">' +
             '<h2 style="margin:0;border:none;padding:0">选择功能</h2>' +
-            '<button onclick="openConfig()" title="配置" style="background:none;border:none;cursor:pointer;color:#888;padding:4px;border-radius:4px;display:flex;align-items:center" onmouseover="this.style.background=\'#e5e5e5\'" onmouseout="this.style.background=\'none\'">' +
+            '<button onclick="openConfig()" title="配置" style="background:none;border:none;cursor:pointer;color:#888;padding:4px 6px;border-radius:4px;display:flex;align-items:center" onmouseover="this.style.background=\'#e5e5e5\'" onmouseout="this.style.background=\'none\'">' +
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' +
             '</button></div>' +
             '<div class="tools-grid">' +

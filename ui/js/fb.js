@@ -232,18 +232,14 @@ var FileBase = {
             }
 
             var h = '<div class="fb-explorer">';
-            h += '<div class="fb-breadcrumb"><span class="fb-bc-current">🏠 文件库</span></div>';
-            h += '<div class="fb-explorer-body" style="border-radius:6px;border:1px solid #e1e4e8;background:#fff">';
+            h += '<div class="fb-breadcrumb"><span class="fb-bc-current">🏠 文件库</span><span style="flex:1"></span><span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span><button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button><button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button></div>';
+            h += '<div class="fb-explorer-body" style="border-radius:6px">';
             h += '<div class="fb-file-pane" style="width:100%">';
             h += '<div class="fb-file-toolbar">';
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
             h += '<button onclick="FileBase.search()">🔍</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
-            h += '<span class="fb-toolbar-spacer"></span>';
-            h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
-            h += '<button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
-            h += '<button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>';
             h += '</div>';
             h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"><div class="fb-empty">刷新中...</div></div>';
             h += '</div></div></div>';
@@ -678,7 +674,6 @@ var FileBase = {
             h += '</div>';
             h += '<button onclick="FileBase.downloadAction()">下载</button>';
             h += '<button onclick="FileBase.showLockManager()" class="fb-lock-btn" title="文件锁管理">🔒 锁</button>';
-            h += '<button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
             h += '<input type="file" id="fb-file-upload-input" multiple style="display:none" onchange="FileBase.handleFileUpload(this)">';
             h += '<input type="file" id="fb-folder-upload-input" webkitdirectory style="display:none" onchange="FileBase.handleFolderUpload(this)">';
             h += '<input type="file" id="fb-replace-input" style="display:none" onchange="FileBase.handleReplace(this)">';
@@ -722,6 +717,10 @@ var FileBase = {
                 h += '<span class="fb-bc-current">' + escapeHtmlText(p.name) + '</span>';
             }
         }
+        h += '<span style="flex:1"></span>';
+        h += '<span id="fb-online-nodes"><span class="fb-p2p-indicator fb-p2p-offline" title="扫描中...">◉</span></span>';
+        h += '<button onclick="FileBase.showTrash()" title="回收站" class="fb-p2p-settings-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
+        h += '<button class="fb-p2p-settings-btn" onclick="FileBase.showP2PSettings()" title="P2P 节点设置"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>';
         el.innerHTML = h;
     },
 

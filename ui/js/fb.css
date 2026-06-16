@@ -3,14 +3,19 @@
     flex-direction: column;
     height: 100%;
     min-height: 100%;
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 10px;
+    overflow: hidden;
 }
 
 .fb-breadcrumb {
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 4px 12px 8px;
-    background: #f0f2f5;
+    padding: 12px 12px;
+    background: transparent;
     border-radius: 6px;
     font-size: 13px;
     margin-bottom: 0;
@@ -55,9 +60,7 @@
     flex: 1;
     overflow: hidden;
     min-height: 0;
-    border-radius: 6px;
-    border: 1px solid #e1e4e8;
-    background: #fff;
+    background: transparent;
 }
 
 .fb-body-row {
@@ -74,7 +77,7 @@
     border-right: 1px solid #e1e4e8;
     overflow: hidden;
     padding: 4px 0;
-    background: #fafbfc;
+    background: transparent;
     position: relative;
 }
 
@@ -225,10 +228,10 @@ body.fb-resizing {
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
-    border-bottom: 1px solid #e1e4e8;
-    background: #fafbfc;
+    background: transparent;
     flex-shrink: 0;
     flex-wrap: wrap;
+    border-bottom: 1px solid #e1e4e8;
 }
 
 .fb-file-toolbar input[type="text"] {
@@ -317,7 +320,7 @@ body.fb-resizing {
     flex: 1;
     overflow-y: auto;
     position: relative;
-    background: #fafbfc;
+    background: transparent;
 }
 
 .fb-file-body-list {
@@ -413,6 +416,7 @@ body.fb-resizing {
     align-items: center;
     justify-content: center;
     vertical-align: middle;
+    width: 16px;
 }
 
 /* 文件类型图标 */
@@ -553,15 +557,15 @@ body.fb-resizing {
     align-content: start;
     align-items: start;
     min-height: 0;
-    background: #fafbfc;
+    background: transparent;
     overflow-y: auto;
 }
 
 .fb-card {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.85);
     border-radius: 8px;
     padding: 16px;
-    border: 1px solid #eee;
+    border: 1px solid rgba(255, 255, 255, 0.6);
     cursor: pointer;
     transition: box-shadow 0.2s, transform 0.15s;
 }
