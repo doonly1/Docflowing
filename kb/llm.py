@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 try:
     import requests
@@ -16,8 +17,42 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUSES = (429, 500, 502, 503, 504)
 
 
+def _validate_base_url(url: str) -> Optional[str]:
+    """校验 LLM base_url 安全性，失败时返回错误消息，成功时返回 None。
+
+    - 必须为 http 或 https 协议（阻止 file://, gopher://, ftp:// 等 SSRF 载体）
+    - 不允许用户配置指向回环地址的本地敏感服务（可选，localhost 作为本地模型是常见的用途）
+    - 必须是合法的 URL 格式
+    """
+    if not url:
+        return "base_url 不能为空"
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return f"base_url 协议 '{parsed.scheme}' 不受支持，仅允许 http/https"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return "base_url 缺少主机名"
+
+    # 阻止一些典型的 SSRF 协议滥用
+    return None
+
+
+def _safe_request_url(base_url: str, path: str) -> str:
+    """拼接 base_url + path，并做基本安全性校验。失败时抛出 ValueError。"""
+    if not base_url:
+        raise ValueError("LLM base_url 未配置")
+
+    # 规范化：移除尾部斜杠
+    base = base_url.rstrip('/')
+    # 确保 path 以 / 开头
+    clean_path = path if path.startswith('/') else '/' + path
+    return base + clean_path
+
+
 def _request_with_retry(
-    method, url, *, max_retries=3, base_delay=1.0, **kwargs
+    method, url, *, max_retries=3, base_delay=1.0, timeout=30, **kwargs
 ):
     """带指数退避的 HTTP 请求重试
 
@@ -29,7 +64,7 @@ def _request_with_retry(
     last_exception = None
     for attempt in range(1, max_retries + 1):
         try:
-            resp = requests.request(method, url, **kwargs)
+            resp = requests.request(method, url, timeout=timeout, **kwargs)
             if resp.status_code in _RETRYABLE_STATUSES and attempt < max_retries:
                 delay = base_delay * (2 ** (attempt - 1))
                 logger.warning(
@@ -86,6 +121,11 @@ def call_llm(
 
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
+    # 基础 URL 安全校验：只允许 http/https，拒绝 file:///gopher:// 等
+    err = _validate_base_url(base_url)
+    if err:
+        logger.warning("LLM base_url 校验失败：%s", err)
+        return None
     model = cfg['model']
     temperature = temperature if temperature is not None else cfg.get('temperature', 0.7)
     max_tokens = max_tokens if max_tokens is not None else cfg.get('max_tokens', 4096)
@@ -103,7 +143,7 @@ def call_llm(
 
     try:
         resp = _request_with_retry(
-            "POST", f"{base_url}/chat/completions",
+            "POST", _safe_request_url(base_url, "/chat/completions"),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -137,6 +177,11 @@ def call_llm_stream(
     cfg = _get_llm_config(user_id)
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
+    # 基础 URL 安全校验：只允许 http/https，拒绝 file:///gopher:// 等
+    err = _validate_base_url(base_url)
+    if err:
+        logger.warning("LLM base_url 校验失败：%s", err)
+        return None
     model = cfg['model']
     temperature = temperature if temperature is not None else cfg.get('temperature', 0.7)
     max_tokens = max_tokens if max_tokens is not None else cfg.get('max_tokens', 4096)
@@ -154,7 +199,7 @@ def call_llm_stream(
 
     try:
         resp = _request_with_retry(
-            "POST", f"{base_url}/chat/completions",
+            "POST", _safe_request_url(base_url, "/chat/completions"),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -251,6 +296,11 @@ def call_llm_with_tools(
     cfg = _get_llm_config(user_id)
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
+    # 基础 URL 安全校验：只允许 http/https，拒绝 file:///gopher:// 等
+    err = _validate_base_url(base_url)
+    if err:
+        logger.warning("LLM base_url 校验失败：%s", err)
+        return None
     model = cfg['model']
     temperature = temperature if temperature is not None else cfg.get('temperature', 0.7)
     max_tokens = max_tokens if max_tokens is not None else cfg.get('max_tokens', 4096)
@@ -286,7 +336,7 @@ def call_llm_with_tools(
 
         try:
             resp = _request_with_retry(
-                "POST", f"{base_url}/chat/completions",
+                "POST", _safe_request_url(base_url, "/chat/completions"),
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -382,6 +432,11 @@ def call_llm_with_tools_stream(
     cfg = _get_llm_config(user_id)
     api_key = cfg['api_key']
     base_url = cfg['base_url'].rstrip('/')
+    # 基础 URL 安全校验：只允许 http/https，拒绝 file:///gopher:// 等
+    err = _validate_base_url(base_url)
+    if err:
+        logger.warning("LLM base_url 校验失败：%s", err)
+        return None
     model = cfg['model']
     temperature = temperature if temperature is not None else cfg.get('temperature', 0.7)
     max_tokens = max_tokens if max_tokens is not None else cfg.get('max_tokens', 4096)
@@ -418,7 +473,7 @@ def call_llm_with_tools_stream(
 
         try:
             resp = _request_with_retry(
-                "POST", f"{base_url}/chat/completions",
+                "POST", _safe_request_url(base_url, "/chat/completions"),
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",

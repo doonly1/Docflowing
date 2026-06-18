@@ -2,6 +2,7 @@
 
 import os
 import io
+import re
 import shutil
 import zipfile
 from flask import Blueprint, request, jsonify, send_file, g
@@ -15,15 +16,47 @@ fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 
 def _resolve_local_path(db, filebase_id, subdir=''):
-    """解析本地路径"""
+    """解析本地路径。确保 target 严格位于 local_path 目录下，防止路径越权。
+
+    - 对 subdir 中的 .. 路径片段做剥离
+    - 使用 Path.resolve() + relative_to 进行最终的路径归属校验
+    """
     kb_row = db.execute("SELECT local_path FROM filebases WHERE id = ?", (filebase_id,)).fetchone()
     if not kb_row:
         return None, None
-    local_path = kb_row['local_path']
-    target = os.path.join(local_path, subdir) if subdir else local_path
-    target = os.path.normpath(target)
-    if not target.startswith(os.path.normpath(local_path)):
+    local_path_raw = kb_row['local_path']
+    if not local_path_raw:
         return None, None
+    local_path = os.path.abspath(local_path_raw)
+
+    # 规范化 subdir：剥离 .. 段
+    if subdir:
+        cleaned_parts = []
+        for part in subdir.replace('\\', '/').split('/'):
+            if part == '' or part == '.':
+                continue
+            if part == '..':
+                # 不允许向上跳转，直接丢弃（也可在此处直接拒绝）
+                continue
+            cleaned_parts.append(part)
+        subdir_clean = '/'.join(cleaned_parts)
+        target = os.path.join(local_path, subdir_clean) if subdir_clean else local_path
+    else:
+        target = local_path
+
+    target = os.path.normpath(target)
+
+    # 使用 os.path.commonpath + Path.resolve() 做最终归属校验
+    try:
+        resolved_target = os.path.realpath(target)
+        resolved_local = os.path.realpath(local_path)
+        # 精确匹配：必须落在 local_path 目录下
+        if not (resolved_target == resolved_local or
+                resolved_target.startswith(resolved_local + os.sep)):
+            return None, None
+    except Exception:
+        return None, None
+
     return local_path, target
 
 
@@ -79,16 +112,26 @@ def upload_local_files(filebase_id):
         os.makedirs(target_dir, exist_ok=True)
 
     uploaded = []
+    _bad_chars = re.compile(r'[<>:"|?*\\/]')
     for key in request.files:
         for f in request.files.getlist(key):
             if not f.filename:
                 continue
             safe_filename = f.filename
-            safe_filename = safe_filename.replace('..', '')
-            if safe_filename.startswith('/') or safe_filename.startswith('\\'):
-                safe_filename = safe_filename[1:]
+            # 多层防护：先剥离路径分隔符和非法字符
+            safe_filename = _bad_chars.sub('_', safe_filename)
+            # 去掉所有 '..' 段（循环去除，避免单次替换绕过）
+            while '..' in safe_filename:
+                safe_filename = safe_filename.replace('..', '_')
+            # 最终兜底：只保留文件名部分，舍弃任何目录层级
+            safe_filename = os.path.basename(safe_filename)
+            if not safe_filename:
+                continue
             file_path = os.path.join(target_dir, safe_filename)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # 最终校验：确保落点仍在文件库目录内
+            file_path = os.path.normpath(file_path)
+            if not file_path.startswith(os.path.normpath(local_path) + os.sep):
+                continue
             f.save(file_path)
             stat = os.stat(file_path)
             uploaded.append({
@@ -295,7 +338,7 @@ def list_local_files(filebase_id):
     target_path = os.path.join(local_path, subdir) if subdir else local_path
     target_path = os.path.normpath(target_path)
 
-    if not target_path.startswith(os.path.normpath(local_path)):
+    if not target_path.startswith(os.path.normpath(local_path) + os.sep) and target_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isdir(target_path):
@@ -364,7 +407,7 @@ def list_local_categories(filebase_id):
     target_path = os.path.join(local_path, subdir) if subdir else local_path
     target_path = os.path.normpath(target_path)
 
-    if not target_path.startswith(os.path.normpath(local_path)):
+    if not target_path.startswith(os.path.normpath(local_path) + os.sep) and target_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'categories': []})
 
     categories = _scan_categories(target_path, local_path)

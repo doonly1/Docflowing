@@ -1,3 +1,17 @@
+function escapeJsForHtmlAttr(str) {
+    if (str === undefined || str === null) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // ==================== 侧边栏折叠 ====================
 function toggleSidebarCollapse() {
     document.body.classList.toggle('sidebar-collapsed');
@@ -221,8 +235,8 @@ window.tabManager = {
             var t = this.tabs[i];
             var isActive = t.id === this.activeTabId;
             var cls = 'tab-item' + (isActive ? ' active' : '');
-            var closeBtn = '<span class="tab-close" onclick="event.stopPropagation();tabManager.closeTab(\'' + t.id + '\')">✕</span>';
-            centerHtml += '<div class="' + cls + '" onclick="tabManager.switchTab(\'' + t.id + '\')" title="' + this._getTabTitle(t) + '">' +
+            var closeBtn = '<span class="tab-close" onclick="event.stopPropagation();tabManager.closeTab(\'' + escapeJsForHtmlAttr(t.id) + '\')">✕</span>';
+            centerHtml += '<div class="' + cls + '" onclick="tabManager.switchTab(\'' + escapeJsForHtmlAttr(t.id) + '\')" title="' + this._getTabTitle(t) + '">' +
                 this._getTabIcon(t.type) +
                 '<span>' + this._getTabTitle(t) + '</span>' +
                 closeBtn +
@@ -240,7 +254,7 @@ window.tabManager = {
             '<svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="2" x2="10" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="2" x2="2" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
     },
 
-    _renderContent: function(id) {
+    _renderContent: async function(id) {
         var tab = this._findById(id);
         if (!tab) return;
 
@@ -253,7 +267,7 @@ window.tabManager = {
         switch (tab.type) {
             case 'home': this._renderHome(tab, mc); break;
             case 'chat': this._renderChat(tab, mc); break;
-            case 'fb': this._renderFb(tab, mc); break;
+            case 'fb': await this._renderFb(tab, mc); break;
             case 'tools': this._renderTools(tab, mc); break;
         }
     },
@@ -293,7 +307,7 @@ window.tabManager = {
         this._renderHome(tab, container);
     },
 
-    _renderFb: function(tab, container) {
+    _renderFb: async function(tab, container) {
         var contentDiv = document.createElement('div');
         contentDiv.id = 'content-view';
         contentDiv.style.cssText = 'height:100%;min-height:400px;display:flex;flex-direction:column;';
@@ -329,17 +343,71 @@ window.tabManager = {
                     if (tab.state.fbCurrentPath && tab.state.fbCurrentPath.length > 0) {
                         FileBase.currentPath = JSON.parse(JSON.stringify(tab.state.fbCurrentPath));
                     }
+                    FileBase.init();
                 } else {
-                    FileBase.currentFbId = null;
-                    FileBase.fbName = '';
-                    FileBase.fbLocalPath = '';
-                    FileBase.fbDisplayPath = '';
-                    FileBase.fbCurrentPermission = 'view';
-                    FileBase.fbCanEdit = false;
-                    FileBase.fbCanManage = false;
-                    FileBase.fbLocalCurrentSubdir = '';
+                    // 检查 localStorage 中是否有定位信息（如从知识库右键"定位到文件库"进入）
+                    var storedFbId = localStorage.getItem('docflow_current_fb_id');
+                    if (storedFbId) {
+                        // 从文件库列表 API 获取文件库信息
+                        fetch('/api/fb/list').then(function(resp) { return resp.json(); }).then(function(data) {
+                            if (data.success && data.kbs) {
+                                var kb = data.kbs.find(function(k) { return k.id === storedFbId; });
+                                if (kb) {
+                                    FileBase.currentFbId = kb.id;
+                                    FileBase.fbName = kb.name || '';
+                                    FileBase.fbLocalPath = kb.local_path || '';
+                                    FileBase.fbDisplayPath = kb.display_path || '';
+                                    FileBase.fbCurrentPermission = kb.permission || 'view';
+                                    FileBase.fbCanEdit = kb.permission === 'edit' || kb.permission === 'manage';
+                                    FileBase.fbCanManage = kb.permission === 'manage';
+                                    FileBase.fbLocalCurrentSubdir = localStorage.getItem('docflow_current_subdir') || '';
+                                    FileBase.fbCategoryTree = null;
+                                    FileBase.fbTreeLoaded = false;
+                                } else {
+                                    FileBase.currentFbId = null;
+                                    FileBase.fbName = '';
+                                    FileBase.fbLocalPath = '';
+                                    FileBase.fbDisplayPath = '';
+                                    FileBase.fbCurrentPermission = 'view';
+                                    FileBase.fbCanEdit = false;
+                                    FileBase.fbCanManage = false;
+                                    FileBase.fbLocalCurrentSubdir = '';
+                                }
+                            } else {
+                                FileBase.currentFbId = null;
+                                FileBase.fbName = '';
+                                FileBase.fbLocalPath = '';
+                                FileBase.fbDisplayPath = '';
+                                FileBase.fbCurrentPermission = 'view';
+                                FileBase.fbCanEdit = false;
+                                FileBase.fbCanManage = false;
+                                FileBase.fbLocalCurrentSubdir = '';
+                            }
+                            FileBase.init();
+                        }).catch(function(e) {
+                            console.error('[FB] Failed to restore fb state from localStorage:', e);
+                            FileBase.currentFbId = null;
+                            FileBase.fbName = '';
+                            FileBase.fbLocalPath = '';
+                            FileBase.fbDisplayPath = '';
+                            FileBase.fbCurrentPermission = 'view';
+                            FileBase.fbCanEdit = false;
+                            FileBase.fbCanManage = false;
+                            FileBase.fbLocalCurrentSubdir = '';
+                            FileBase.init();
+                        });
+                    } else {
+                        FileBase.currentFbId = null;
+                        FileBase.fbName = '';
+                        FileBase.fbLocalPath = '';
+                        FileBase.fbDisplayPath = '';
+                        FileBase.fbCurrentPermission = 'view';
+                        FileBase.fbCanEdit = false;
+                        FileBase.fbCanManage = false;
+                        FileBase.fbLocalCurrentSubdir = '';
+                        FileBase.init();
+                    }
                 }
-                FileBase.init();
             }
         });
     },
@@ -470,7 +538,7 @@ window.tabManager = {
                     var d = new Date(s.last_active * 1000);
                     timeStr = d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
                 }
-                var escId = s.id.replace(/'/g, "\\'");
+                var escId = escapeJsForHtmlAttr(s.id);
                 h += '<div style="display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="tabManager._onSessionClick(\'' + escId + '\')">';
                 h += '<span style="margin-right:8px">💬</span>';
                 h += '<div style="min-width:0;flex:1;font-size:13px">';

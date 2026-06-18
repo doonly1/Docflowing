@@ -1,9 +1,11 @@
 import os
 import json
+import re
 import sys
 import subprocess
-import uuid
+import threading
 import time
+import uuid
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context, send_file, g
 
@@ -11,12 +13,40 @@ from .auth import p2p_auth_required
 from .models import TrustStore, RemoteFilebaseStore
 from logging_config import get_logger
 from tools.tool_defs import get_tool_script_path, TOOL_EXTENSIONS
+from server.workspace import _get_workspace_dir
 
 logger = get_logger(__name__)
 
 p2p_bp = Blueprint('p2p', __name__, url_prefix='/p2p')
 
 from fb.decorators import PERM_BITS, _check_fb_perm_bits
+
+
+def _is_path_safe(base_dir: str, target_path: str) -> bool:
+    """检查 target_path 是否在 base_dir 内部，防止路径穿越。"""
+    try:
+        base = os.path.realpath(base_dir)
+        target = os.path.realpath(target_path)
+        return target.startswith(base + os.sep) or target == base
+    except OSError:
+        return False
+
+
+def _validate_save_dir(dest_dir: str) -> tuple[bool, str]:
+    """验证另存目标目录是否安全（必须在用户工作空间内）。"""
+    if not dest_dir:
+        return False, '未指定保存路径'
+    try:
+        dest_dir = os.path.abspath(dest_dir)
+    except Exception:
+        return False, '保存路径无效'
+    allowed_base = os.path.realpath(_get_workspace_dir())
+    if not _is_path_safe(allowed_base, dest_dir):
+        return False, '保存路径不能在工作空间之外'
+    return True, ''
+
+# 单个工具执行最大秒数（文档处理可能较慢，设为 10 分钟）
+_TOOL_TIMEOUT_SECONDS = 600
 
 # Backward compatible levels for old system
 FB_PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
@@ -119,7 +149,7 @@ def p2p_list_files(fb_id):
     target = os.path.join(local_path, subdir) if subdir else local_path
     target = os.path.normpath(target)
 
-    if not target.startswith(os.path.normpath(local_path)):
+    if not target.startswith(os.path.normpath(local_path) + os.sep) and target != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isdir(target):
@@ -187,7 +217,7 @@ def p2p_file_content(fb_id):
         return jsonify({'success': False, 'message': '未指定路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isfile(file_path):
@@ -230,7 +260,7 @@ def p2p_download(fb_id):
         return jsonify({'success': False, 'message': '未指定路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isfile(file_path):
@@ -253,19 +283,32 @@ def p2p_upload(fb_id):
     target_dir = os.path.join(local_path, subdir) if subdir else local_path
     target_dir = os.path.normpath(target_dir)
 
-    if not target_dir.startswith(os.path.normpath(local_path)):
+    if not target_dir.startswith(os.path.normpath(local_path) + os.sep) and target_dir != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     os.makedirs(target_dir, exist_ok=True)
 
     uploaded = []
+    _bad_chars = re.compile(r'[<>:"\\|?*\/]')
     for key in request.files:
         for f in request.files.getlist(key):
             if not f.filename:
                 continue
-            safe_name = os.path.basename(f.filename)
+            safe_name = f.filename
+            # 剥离路径分隔符和非法字符
+            safe_name = _bad_chars.sub('_', safe_name)
+            # 去掉所有 '..' 段，防止路径穿越
+            while '..' in safe_name:
+                safe_name = safe_name.replace('..', '_')
+            # 最终兜底：只保留文件名部分
+            safe_name = os.path.basename(safe_name)
+            if not safe_name:
+                continue
             file_path = os.path.join(target_dir, safe_name)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # 最终校验：确保落点仍在文件库目录内
+            file_path = os.path.normpath(file_path)
+            if not file_path.startswith(os.path.normpath(local_path) + os.sep):
+                continue
             f.save(file_path)
             stat = os.stat(file_path)
             uploaded.append({'name': f.filename, 'size': stat.st_size, 'mtime': stat.st_mtime})
@@ -292,7 +335,7 @@ def p2p_save_file(fb_id):
         return jsonify({'success': False, 'message': '未指定路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isfile(file_path):
@@ -333,7 +376,7 @@ def p2p_delete_items(fb_id):
     errors = []
     for rel in paths:
         target = os.path.normpath(os.path.join(local_path, rel))
-        if not target.startswith(os.path.normpath(local_path)):
+        if not target.startswith(os.path.normpath(local_path) + os.sep) and target != os.path.normpath(local_path):
             errors.append(f'{rel}: 路径非法')
             continue
         try:
@@ -372,7 +415,7 @@ def p2p_rename_item(fb_id):
         return jsonify({'success': False, 'message': '名称不能包含路径分隔符'})
 
     old = os.path.normpath(os.path.join(local_path, rel_path))
-    if not old.startswith(os.path.normpath(local_path)):
+    if not old.startswith(os.path.normpath(local_path) + os.sep) and old != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     parent_dir = os.path.dirname(old)
@@ -406,7 +449,7 @@ def p2p_move_items(fb_id):
         return jsonify({'success': False, 'message': '参数不完整'})
 
     dest_path = os.path.normpath(os.path.join(local_path, dest))
-    if not dest_path.startswith(os.path.normpath(local_path)):
+    if not dest_path.startswith(os.path.normpath(local_path) + os.sep) and dest_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '目标路径非法'})
 
     import shutil
@@ -415,7 +458,7 @@ def p2p_move_items(fb_id):
     errors = []
     for src in sources:
         src_path = os.path.normpath(os.path.join(local_path, src))
-        if not src_path.startswith(os.path.normpath(local_path)):
+        if not src_path.startswith(os.path.normpath(local_path) + os.sep) and src_path != os.path.normpath(local_path):
             errors.append(f'{src}: 路径非法')
             continue
         if not os.path.exists(src_path):
@@ -452,7 +495,7 @@ def p2p_copy_items(fb_id):
 
     import shutil
     dest_dir = os.path.normpath(os.path.join(local_path, dest)) if dest else local_path
-    if not dest_dir.startswith(os.path.normpath(local_path)):
+    if not dest_dir.startswith(os.path.normpath(local_path) + os.sep) and dest_dir != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '目标路径非法'})
     os.makedirs(dest_dir, exist_ok=True)
 
@@ -460,7 +503,7 @@ def p2p_copy_items(fb_id):
     errors = []
     for rel in sources:
         src = os.path.normpath(os.path.join(local_path, rel))
-        if not src.startswith(os.path.normpath(local_path)):
+        if not src.startswith(os.path.normpath(local_path) + os.sep) and src != os.path.normpath(local_path):
             errors.append(f'{rel}: 路径非法')
             continue
         try:
@@ -501,7 +544,7 @@ def p2p_create_file(fb_id):
 
     target_dir = os.path.join(local_path, parent) if parent else local_path
     target_dir = os.path.normpath(target_dir)
-    if not target_dir.startswith(os.path.normpath(local_path)):
+    if not target_dir.startswith(os.path.normpath(local_path) + os.sep) and target_dir != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     base, ext = os.path.splitext(name)
@@ -539,7 +582,7 @@ def p2p_create_dir(fb_id):
 
     target_dir = os.path.join(local_path, parent) if parent else local_path
     target_dir = os.path.normpath(target_dir)
-    if not target_dir.startswith(os.path.normpath(local_path)):
+    if not target_dir.startswith(os.path.normpath(local_path) + os.sep) and target_dir != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     new_dir = os.path.join(target_dir, name)
@@ -570,7 +613,7 @@ def p2p_replace_file(fb_id):
         return jsonify({'success': False, 'message': '未指定路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isfile(file_path):
@@ -611,7 +654,7 @@ def p2p_run_tool(fb_id):
         return jsonify({'success': False, 'message': f'工具脚本不存在: {tool}'})
 
     target_path = os.path.normpath(os.path.join(local_path, subdir)) if subdir else local_path
-    if not target_path.startswith(os.path.normpath(local_path)):
+    if not target_path.startswith(os.path.normpath(local_path) + os.sep) and target_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
     if not os.path.isdir(target_path):
         return jsonify({'success': False, 'message': f'目录不存在: {subdir or "根目录"}'})
@@ -634,8 +677,25 @@ def p2p_run_tool(fb_id):
 
             process = subprocess.Popen(
                 cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, cwd=target_path, env=env
+                text=True, encoding='utf-8', errors='replace',
+                bufsize=1, cwd=target_path, env=env
             )
+
+            # 进程超时守护：超时后强制终止
+            timeout_flag = [False]
+            start_time = time.time()
+
+            def _timeout_killer():
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                        timeout_flag[0] = True
+                except Exception:
+                    pass
+
+            timer = threading.Timer(_TOOL_TIMEOUT_SECONDS, _timeout_killer)
+            timer.daemon = True
+            timer.start()
 
             output_lines = []
             for line in iter(process.stdout.readline, ''):
@@ -646,12 +706,18 @@ def p2p_run_tool(fb_id):
                     yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
 
             process.stdout.close()
-            process.wait()
-            success = process.returncode == 0
-            if not success:
-                yield f'data: {json.dumps({"type": "end", "success": False, "error": "\n".join(output_lines) if output_lines else "执行失败"})}\n\n'
+            process.wait(timeout=10)
+            timer.cancel()
+
+            if timeout_flag[0]:
+                elapsed = int(time.time() - start_time)
+                yield f'data: {json.dumps({"type": "end", "success": False, "error": f"执行超时（超过 {_TOOL_TIMEOUT_SECONDS}s，已用 {elapsed}s）"})}\n\n'
             else:
-                yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+                success = process.returncode == 0
+                if not success:
+                    yield f'data: {json.dumps({"type": "end", "success": False, "error": "\n".join(output_lines) if output_lines else "执行失败"})}\n\n'
+                else:
+                    yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
 
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
@@ -718,7 +784,7 @@ def p2p_preview(fb_id):
 
     rel_path = request.args.get('path', '').strip()
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
     if not os.path.isfile(file_path):
         return jsonify({'success': False, 'message': '文件不存在'})
@@ -758,18 +824,32 @@ def p2p_handshake():
 
 
 @p2p_bp.route('/share/notify', methods=['POST'])
+@p2p_auth_required
 def p2p_share_notify():
+    """接收远端节点推送的共享通知（需签名认证）
+
+    注意：g.remote_node_id 从签名中提取，优于请求体中的 node_id 字段。
+    """
     data = request.get_json() or {}
     fb_id = data.get('fb_id', '')
     fb_name = data.get('fb_name', '')
     owner_addr = data.get('owner_addr', '')
     permission = data.get('permission', 'view')
-    node_id = data.get('node_id', '')
+    # 强制使用认证装饰器从签名中提取的 node_id，忽略请求体值（防身份伪装）
+    node_id = g.remote_node_id
     node_name = data.get('node_name', '')
     node_public_key = data.get('node_public_key', '')
 
-    if not fb_id or not fb_name or not node_id:
+    if not fb_id or not fb_name:
         return jsonify({'success': False, 'message': '参数不完整'})
+
+    # SSRF 防护：校验 owner_addr 格式，拒绝本地回环地址
+    if owner_addr:
+        if not re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}', owner_addr):
+            return jsonify({'success': False, 'message': 'owner_addr 格式无效'}), 400
+        host_part = owner_addr.rsplit(':', 1)[0]
+        if host_part in ('127.0.0.1', '::1', '0.0.0.0'):
+            return jsonify({'success': False, 'message': '禁止使用本地回环地址'}), 400
 
     trust_store = TrustStore()
     trust_store.add_node(node_id, node_name, owner_addr, node_public_key)
@@ -787,36 +867,27 @@ def p2p_share_notify():
 def p2p_share_list():
     from fb.database import get_db
     db = get_db()
-    # Get from old permissions table
+    # 合并新旧权限表查询（UNION 自动去重，性能更优）
     rows = db.execute(
-        "SELECT f.id, f.name, f.filebase_type FROM filebases f "
-        "JOIN filebase_permissions p ON f.id = p.filebase_id "
-        "WHERE p.user_id = ? AND p.permission_level IN ('view', 'edit', 'manage') "
-        "AND COALESCE(f.status, 'active') != 'trashed'",
-        (g.remote_node_id,)
+        "SELECT DISTINCT f.id, f.name, f.filebase_type FROM filebases f "
+        "WHERE f.id IN ("
+        "  SELECT p.filebase_id FROM filebase_permissions p "
+        "  WHERE p.user_id = ? AND p.permission_level IN ('view', 'edit', 'manage')"
+        "  UNION ALL "
+        "  SELECT p.filebase_id FROM filebase_perm_v2 p "
+        "  WHERE p.user_id = ? AND p.perm_mask > 0"
+        ") AND COALESCE(f.status, 'active') != 'trashed'",
+        (g.remote_node_id, g.remote_node_id)
     ).fetchall()
 
     filebases = [{'id': r['id'], 'name': r['name'], 'type': r['filebase_type']} for r in rows]
-
-    # Also include from perm_v2 table
-    v2_rows = db.execute(
-        "SELECT f.id, f.name, f.filebase_type FROM filebases f "
-        "JOIN filebase_perm_v2 p ON f.id = p.filebase_id "
-        "WHERE p.user_id = ? AND p.perm_mask > 0 "
-        "AND COALESCE(f.status, 'active') != 'trashed'",
-        (g.remote_node_id,)
-    ).fetchall()
-    existing_ids = {r['id'] for r in rows}
-    for r in v2_rows:
-        if r['id'] not in existing_ids:
-            filebases.append({'id': r['id'], 'name': r['name'], 'type': r['filebase_type']})
-
     return jsonify({'success': True, 'filebases': filebases})
 
 
 @p2p_bp.route('/fb/<fb_id>/revoke', methods=['DELETE'])
+@p2p_auth_required
 def p2p_revoke_share(fb_id):
-    """接收远端所有者的撤销共享通知，从本地移除远程文件库"""
+    """接收远端所有者的撤销共享通知，从本地移除远程文件库（需签名认证）"""
     remote_store = RemoteFilebaseStore()
     info = remote_store.get(fb_id)
     if not info:

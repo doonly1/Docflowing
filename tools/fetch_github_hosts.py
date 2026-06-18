@@ -4,6 +4,7 @@
 # ================================
 
 import os
+import re
 import sys
 import ctypes
 import urllib.request
@@ -42,6 +43,45 @@ def download_file(url):
     except (urllib.error.URLError, Exception):
         pass
     return None
+
+
+def validate_hosts_content(content: str) -> tuple[bool, str]:
+    """校验下载的 hosts 内容安全性和格式
+
+    返回 (是否有效, 错误消息)。
+    正常内容样例：'140.82.112.0 github.com'
+    """
+    if not content:
+        return False, "下载内容为空"
+
+    # 内容大小限制：正常 GitHub520 hosts 不超过 200KB
+    if len(content) > 200 * 1024:
+        return False, f"内容过大（{len(content)} 字节），疑似恶意数据"
+
+    # 校验每一行
+    _ip_pattern = re.compile(r'^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+(\S+)\s*$')
+    private_prefixes = ('10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                       '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+                       '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+                       '172.30.', '172.31.', '192.168.', '127.', '0.')
+    valid_line_count = 0
+    for line_no, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue  # 空行和注释允许
+        m = _ip_pattern.match(stripped)
+        if not m:
+            return False, f"第 {line_no} 行格式无效: {stripped[:60]}"
+        ip, domain = m.group(1), m.group(2)
+        # 拒绝私有/回环 IP
+        if ip.startswith(private_prefixes) or ip == '255.255.255.255':
+            return False, f"第 {line_no} 行使用了私有/回环 IP: {ip}"
+        valid_line_count += 1
+
+    if valid_line_count == 0:
+        return False, "未找到有效的 hosts 记录"
+
+    return True, ""
 
 
 def show_message(title, message, style=0):
@@ -84,6 +124,13 @@ def main():
     if downloaded_content is None:
         if not silent:
             show_message("GitHub Hosts", "下载 hosts 失败!", 16)
+        sys.exit(1)
+
+    # Step 2.5: 校验下载内容的格式和安全性
+    valid, err_msg = validate_hosts_content(downloaded_content)
+    if not valid:
+        if not silent:
+            show_message("GitHub Hosts", f"Hosts 内容校验失败: {err_msg}，拒绝写入", 16)
         sys.exit(1)
 
     # 合并内容

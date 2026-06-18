@@ -103,12 +103,16 @@ def api_list_files():
 # ==================== 版本兼容的目录操作 ====================
 
 @workspace_bp.route('/list_dir', methods=['POST'])
+@login_required
 def api_list_dir():
     """列出目录内容的API"""
     data = request.get_json()
     directory = data.get('directory')
 
-    if not directory or not os.path.isdir(directory):
+    if not directory:
+        return jsonify({'success': False, 'message': '目录不能为空'})
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
         return jsonify({'success': False, 'message': '目录不存在或无效'})
 
     try:
@@ -137,7 +141,8 @@ def api_upload_files():
     directory = request.form.get('directory') or data.get('directory')
     if not directory:
         return jsonify({'success': False, 'message': '请指定上传目录'}), 400
-    
+
+    directory = os.path.abspath(directory)
     os.makedirs(directory, exist_ok=True)
 
     saved_files = []
@@ -153,18 +158,27 @@ def api_upload_files():
         if extensions and not fname_lower.endswith(extensions):
             continue
 
-        file_content = file.read()
-        file_size = len(file_content)
-        file.seek(0)
-
-        if file_size > MAX_FILE_SIZE:
-            return jsonify({'success': False, 'message':
-                f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制'})
-
         filename = os.path.basename(file.filename)
         save_path = os.path.join(directory, filename)
+
+        # 流式分块读取 & 写入，避免大文件撑爆内存；同时检查大小
+        _CHUNK_SIZE = 1024 * 1024  # 1MB
+        file_size = 0
         with open(save_path, 'wb') as f:
-            f.write(file_content)
+            while True:
+                chunk = file.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    f.close()
+                    try:
+                        os.remove(save_path)
+                    except OSError:
+                        pass
+                    return jsonify({'success': False, 'message':
+                        f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制'}), 413
+                f.write(chunk)
         saved_files.append(filename)
 
     return jsonify({
@@ -177,10 +191,13 @@ def api_upload_files():
 @workspace_bp.route('/check_results', methods=['POST'])
 @login_required
 def api_check_results():
-    data = request.get_json()
+    data = request.get_json() or {}
     directory = data.get('directory')
 
-    if not directory or not os.path.isdir(directory):
+    if not directory:
+        return jsonify({'success': True, 'files': [], 'count': 0})
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
         return jsonify({'success': True, 'files': [], 'count': 0})
 
     try:
@@ -247,7 +264,10 @@ def api_open_folder():
     data = request.get_json() or {}
     directory = data.get('directory')
 
-    if not directory or not os.path.isdir(directory):
+    if not directory:
+        return jsonify({'success': False, 'message': '目录不能为空'})
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
         return jsonify({'success': False, 'message': '目录不存在或无效'})
 
     try:
@@ -268,7 +288,10 @@ def api_clear_workspace():
     data = request.get_json() or {}
     directory = data.get('directory')
 
-    if not directory or not os.path.isdir(directory):
+    if not directory:
+        return jsonify({'success': False, 'message': '目录不能为空'})
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
         return jsonify({'success': True, 'message': '目录不存在或无效'})
 
     try:

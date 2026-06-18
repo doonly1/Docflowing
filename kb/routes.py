@@ -23,25 +23,33 @@ def _check_wiki_permission(usr_id, target_usr_id, required_level):
     """检查用户对目标用户知识库的权限"""
     if not usr_id:
         return False
-    # 单用户桌面版，当前用户即为 admin
-    if usr_id == 'admin':
-        return True
+    # 桌面版：资源所有者对自己的资源拥有全部权限（最常见场景）
     if usr_id == target_usr_id:
         return True
-
-    conn = get_db(usr_id)
-    row = conn.execute(
-        "SELECT permission_level FROM wiki_permissions WHERE usr_id = ? AND shared_user_id = ?",
-        (target_usr_id, usr_id)
-    ).fetchone()
-    if row:
-        actual = PERMISSION_LEVELS.get(row['permission_level'], -1)
-        return actual >= PERMISSION_LEVELS.get(required_level, 0)
+    # 管理账户（向前兼容保留）
+    if usr_id == 'admin':
+        return True
+    # 其他用户：检查共享权限表
+    try:
+        conn = get_db(target_usr_id)
+        row = conn.execute(
+            "SELECT permission_level FROM wiki_permissions WHERE usr_id = ? AND shared_user_id = ?",
+            (target_usr_id, usr_id)
+        ).fetchone()
+        if row:
+            actual = PERMISSION_LEVELS.get(row['permission_level'], -1)
+            return actual >= PERMISSION_LEVELS.get(required_level, 0)
+    except Exception:
+        return False
     return False
 
 
 def _require_wiki_permission(required_level):
-    """KB 专属权限校验装饰器，需在 @login_required 之后使用"""
+    """KB 专属权限校验装饰器，需在 @login_required 之后使用。
+
+    对于需要访问其他用户资源的路由，应在路由函数内自行调用 _check_wiki_permission
+    并指定具体的 target_usr_id。此装饰器用于「访问当前用户自己资源」的场景。
+    """
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
@@ -52,8 +60,9 @@ def _require_wiki_permission(required_level):
             if not user_id:
                 return jsonify({'success': False, 'message': '未登录，请先登录'}), 401
 
-            # 此处可扩展：检查 user_id 对当前资源的具体权限
-            # 目前仅保证已登录，具体权限由调用方通过 _check_wiki_permission 判断
+            # 检查当前用户对自己资源的权限（桌面版：始终通过；为 P2P 共享预留扩展）
+            if not _check_wiki_permission(user_id, user_id, required_level):
+                return jsonify({'success': False, 'message': '权限不足'}), 403
 
             return f(*args, **kwargs)
         return decorated
@@ -765,14 +774,27 @@ def get_llm_providers():
 
 
 @wiki_bp.route('/llm-models', methods=['POST'])
+@login_required
+@_require_wiki_permission('view')
 def get_llm_models():
     """从提供商API动态获取可用模型列表"""
     data = request.get_json() or {}
-    base_url = data.get('base_url', '').strip()
-    api_key = data.get('api_key', '').strip()
+    base_url = (data.get('base_url') or '').strip()
+    api_key = (data.get('api_key') or '').strip()
 
     if not base_url:
         return jsonify({'success': False, 'message': '缺少 base_url'}), 200
+
+    # 安全校验：只允许 http/https，拒绝 file:///gopher:// 等协议
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'success': False, 'message': f'base_url 协议 {parsed.scheme!r} 不受支持，仅允许 http/https'}), 200
+        if not parsed.hostname:
+            return jsonify({'success': False, 'message': 'base_url 缺少主机名'}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'base_url 格式错误: {e}'}), 200
 
     try:
         import requests
@@ -848,8 +870,17 @@ def test_llm_connection():
 
     try:
         import requests
+        from urllib.parse import urlparse
 
         base_url = current['base_url'].rstrip('/')
+
+        # 安全校验：只允许 http/https 协议
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'success': False, 'message': f'base_url 协议 {parsed.scheme!r} 不受支持，仅允许 http/https'}), 200
+        if not parsed.hostname:
+            return jsonify({'success': False, 'message': 'base_url 缺少主机名'}), 200
+
         api_key = current['api_key']
         model = current['model']
 

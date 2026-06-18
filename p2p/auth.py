@@ -33,10 +33,7 @@ def p2p_auth_required(f):
         sign_data = f'{request.method}:{request.path}:{body_hash}'.encode()
 
         if not verify_signature(pub_key, sign_data, sig_b64):
-            # 向后兼容：旧版签名不包含 body_hash
-            old_sign_data = f'{request.method}:{request.path}'.encode()
-            if not verify_signature(pub_key, old_sign_data, sig_b64):
-                return jsonify({'success': False, 'message': '签名验证失败'}), 403
+            return jsonify({'success': False, 'message': '签名验证失败'}), 403
 
         g.remote_node_id = node_id
         return f(*args, **kwargs)

@@ -32,7 +32,10 @@ app = create_app()
 if __name__ == '__main__':
     host = os.environ.get('HOST', '127.0.0.1')
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes')
+    debug = os.environ.get('DEBUG', '0').lower() in ('1', 'true', 'yes')
+    if debug:
+        import warnings
+        warnings.warn('DEBUG 模式已启用，生产环境请勿使用！', UserWarning)
 
     print(f"Docflowing 服务启动 -> http://{host}:{port}")
     app.run(host=host, port=port, threaded=True, debug=debug)

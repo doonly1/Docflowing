@@ -73,21 +73,21 @@ def _check_fb_permission(filebase_id, user_id, required_level):
     """检查用户对指定文件库的权限（旧版字符串级别）"""
     if not user_id:
         return False
-    if get_user_role(user_id) == 'admin':
-        return True
     db = get_db()
+    # 文件库所有者自动拥有全部权限（本地桌面场景的核心逻辑）
     row = db.execute(
+        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
+    ).fetchone()
+    if row and row['owner_id'] == user_id:
+        return True
+    # 非所有者：从权限表查询具体权限级别
+    perm_row = db.execute(
         "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
         (filebase_id, user_id)
     ).fetchone()
-    if row:
-        actual = PERMISSION_LEVELS.get(row['permission_level'], -1)
+    if perm_row:
+        actual = PERMISSION_LEVELS.get(perm_row['permission_level'], -1)
         return actual >= PERMISSION_LEVELS.get(required_level, 0)
-    kb_row = db.execute(
-        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
-    ).fetchone()
-    if kb_row and kb_row['owner_id'] == user_id:
-        return True
     return False
 
 
@@ -124,12 +124,17 @@ def _check_fb_perm_bits(filebase_id, user_id, required_bits):
     """检查用户对文件库是否拥有指定的权限位（bitmask）"""
     if not user_id:
         return False
-    if get_user_role(user_id) == 'admin':
-        return True
 
     db = _get_db()
 
-    # 1. Try perm_v2 first (granular bitmask)
+    # 1. 文件库所有者自动拥有 manage 全部权限
+    kb_row = db.execute(
+        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
+    ).fetchone()
+    if kb_row and kb_row['owner_id'] == user_id:
+        return True
+
+    # 2. Try perm_v2 (granular bitmask)
     row = db.execute(
         "SELECT perm_mask FROM filebase_perm_v2 WHERE filebase_id = ? AND user_id = ?",
         (filebase_id, user_id)
@@ -137,7 +142,7 @@ def _check_fb_perm_bits(filebase_id, user_id, required_bits):
     if row:
         return (row['perm_mask'] & required_bits) == required_bits
 
-    # 2. Fallback to old permission_level
+    # 3. Fallback to old permission_level
     row = db.execute(
         "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
         (filebase_id, user_id)
@@ -151,13 +156,6 @@ def _check_fb_perm_bits(filebase_id, user_id, required_bits):
         elif level == 'view':
             return (ROLE_TEMPLATES['view'] & required_bits) == required_bits
         return False
-
-    # 3. Check if user is owner (owner gets manage bits)
-    kb_row = db.execute(
-        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
-    ).fetchone()
-    if kb_row and kb_row['owner_id'] == user_id:
-        return (ROLE_TEMPLATES['manage'] & required_bits) == required_bits
 
     return False
 

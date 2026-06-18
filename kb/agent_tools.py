@@ -603,7 +603,7 @@ def _execute_fb_browse(args: Dict[str, Any], user_id: str) -> str:
         local_path = row['local_path']
         target = os.path.join(local_path, subdir) if subdir else local_path
         target = os.path.normpath(target)
-        if not target.startswith(os.path.normpath(local_path)):
+        if not target.startswith(os.path.normpath(local_path) + os.sep) and target != os.path.normpath(local_path):
             return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
         if not os.path.isdir(target):
             return json.dumps({"success": False, "error": f"目录不存在: {subdir or '/'}"}, ensure_ascii=False)
@@ -659,7 +659,7 @@ def _execute_fb_read(args: Dict[str, Any], user_id: str) -> str:
             return json.dumps({"success": False, "error": "文件库路径不存在"}, ensure_ascii=False)
         local_path = row['local_path']
         file_path = os.path.normpath(os.path.join(local_path, path))
-        if not file_path.startswith(os.path.normpath(local_path)):
+        if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
             return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
         if not os.path.isfile(file_path):
             return json.dumps({"success": False, "error": f"文件不存在: {path}"}, ensure_ascii=False)
@@ -791,7 +791,7 @@ def _execute_fb_create(args: Dict[str, Any], user_id: str) -> str:
 
         target_dir = os.path.join(local_path, parent) if parent else local_path
         target_dir = os.path.normpath(target_dir)
-        if not target_dir.startswith(os.path.normpath(local_path)):
+        if not target_dir.startswith(os.path.normpath(local_path) + os.sep) and target_dir != os.path.normpath(local_path):
             return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
 
         if create_type == 'dir':
@@ -873,7 +873,7 @@ def _execute_fb_move_rename(args: Dict[str, Any], user_id: str) -> str:
                 return json.dumps({"success": False, "error": "sources and dest are required for move"}, ensure_ascii=False)
 
             dest_path = os.path.normpath(os.path.join(local_path, dest))
-            if not dest_path.startswith(os.path.normpath(local_path)):
+            if not dest_path.startswith(os.path.normpath(local_path) + os.sep) and dest_path != os.path.normpath(local_path):
                 return json.dumps({"success": False, "error": "目标目录非法"}, ensure_ascii=False)
             os.makedirs(dest_path, exist_ok=True)
 
@@ -881,7 +881,7 @@ def _execute_fb_move_rename(args: Dict[str, Any], user_id: str) -> str:
             errors = []
             for src in sources:
                 src_path = os.path.normpath(os.path.join(local_path, src))
-                if not src_path.startswith(os.path.normpath(local_path)):
+                if not src_path.startswith(os.path.normpath(local_path) + os.sep) and src_path != os.path.normpath(local_path):
                     errors.append(f'{src}: 路径非法')
                     continue
                 if not os.path.exists(src_path):
@@ -914,7 +914,7 @@ def _execute_fb_move_rename(args: Dict[str, Any], user_id: str) -> str:
                 return json.dumps({"success": False, "error": "新名称不能包含路径分隔符"}, ensure_ascii=False)
 
             old = os.path.normpath(os.path.join(local_path, path))
-            if not old.startswith(os.path.normpath(local_path)):
+            if not old.startswith(os.path.normpath(local_path) + os.sep) and old != os.path.normpath(local_path):
                 return json.dumps({"success": False, "error": "路径非法"}, ensure_ascii=False)
             if not os.path.exists(old):
                 return json.dumps({"success": False, "error": "文件或目录不存在"}, ensure_ascii=False)

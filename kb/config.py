@@ -199,6 +199,22 @@ def save_llm_config(llm_cfg: dict, user_id: str = None) -> bool:
     if api_key:
         llm_cfg['api_key'] = _encrypt_api_key(api_key, user_id)
 
+    # base_url 安全校验（只允许 http/https 协议）
+    base_url = (llm_cfg.get('base_url') or '').strip()
+    if base_url:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(base_url)
+            if parsed.scheme not in ('http', 'https'):
+                logger.warning("拒绝保存 LLM base_url：协议 '%s' 不受支持", parsed.scheme)
+                return False
+            if not parsed.hostname:
+                logger.warning("拒绝保存 LLM base_url：缺少主机名")
+                return False
+        except Exception:
+            logger.warning("拒绝保存 LLM base_url：解析失败")
+            return False
+
     config['llm'] = llm_cfg
 
     os.makedirs(os.path.dirname(user_path), exist_ok=True)

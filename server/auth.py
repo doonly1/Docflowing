@@ -27,12 +27,14 @@ def _get_node_id() -> str:
 
 
 def _get_real_ip() -> str:
-    """获取真实客户端 IP，优先从 X-Forwarded-For 解析（反向代理场景）"""
-    xff = request.headers.get('X-Forwarded-For', '').strip()
-    if xff:
-        # X-Forwarded-For 格式: client_ip, proxy1_ip, proxy2_ip, ...
-        return xff.split(',')[0].strip()
-    return request.remote_addr or ''
+    """获取真实客户端 IP。
+
+    桌面单用户场景下，所有请求都直接来自本机浏览器。为避免 X-Forwarded-For 请求头
+    被滥用伪造 IP 来绕过认证，我们只信任 `request.remote_addr`（TCP 连接的真实远端 IP）。
+
+    未来如果放在反向代理后部署，应改为：从可信代理链末尾提取 IP，并验证代理白名单。
+    """
+    return request.remote_addr or ""
 
 
 def login_required(f):

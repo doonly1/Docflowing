@@ -220,7 +220,7 @@ def wmi_watch_thread():
             if os.path.exists(STOP_FILE):
                 _quit_event.set()
                 break
-            event = watcher.NextEvent(200)
+            event = watcher.NextEvent(10000)
             if event is not None and not _quit_event.is_set():
                 if not os.path.exists(STOP_FILE):
                     start_hidden_word()

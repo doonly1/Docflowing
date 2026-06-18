@@ -121,10 +121,13 @@ def doc_to_docx(workdir: str) -> Optional[str]:
                 logger.warning('删除原文件失败: %s, %s', doc_path, e)
 
     convert_errors = []
+    word = None
+    win32com_tried = False
 
     # ——— win32com 路径 ———
     try:
         from win32com import client
+        win32com_tried = True
         word = client.Dispatch("Word.Application")
         word.Visible = False
         for file in doc_files:
@@ -138,20 +141,30 @@ def doc_to_docx(workdir: str) -> Optional[str]:
             except Exception as e:
                 logger.warning('win32com 转换单个文件失败: %s, %s', file, e)
                 convert_errors.append(file)
-        word.Quit()
+    except (ImportError, ModuleNotFoundError):
+        # win32com 不可用，回退到 LibreOffice
+        pass
+    except Exception as e:
+        logger.warning('win32com 初始化失败，回退到 LibreOffice: %s', e)
+    finally:
+        # 确保 Word 进程总是被关闭，无论中途是否出错
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                logger.warning('word.Quit() 调用失败，可能有 Word 进程残留')
 
+    # win32com 成功（无异常）时提前返回，不再尝试 LibreOffice
+    # 如果 win32com 可用但只是部分文件转换失败，也提前返回
+    if win32com_tried:
         _cleanup(_get_converted())
         if convert_errors:
             err_msg = f"win32com 部分转换失败: {', '.join(convert_errors)}"
             logger.warning(err_msg)
             return err_msg
         return None
-    except (ImportError, ModuleNotFoundError):
-        logger.info('win32com 不可用，回退到 LibreOffice')
-    except Exception as e:
-        logger.warning('win32com 转换失败，回退到 LibreOffice: %s', e)
 
-    # ——— LibreOffice 路径 ———
+    # ——— LibreOffice 路径（win32com 不可用时的回退） ———
     lo_cmd = find_libreoffice()
     if lo_cmd:
         for file in doc_files:

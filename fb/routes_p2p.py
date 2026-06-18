@@ -42,8 +42,6 @@ def share_filebase(filebase_id):
     if not identity:
         return jsonify({'success': False, 'message': '节点身份未初始化'})
 
-    owner_addr = f'{identity.node_id}:{identity.port}'
-
     now = time.time()
     success_count = 0
     for node in target_nodes:
@@ -55,6 +53,8 @@ def share_filebase(filebase_id):
             continue
 
         host = node_addr.split(':')[0] if ':' in node_addr else node_addr
+        # owner_addr 格式：远端节点用来连接回本机的地址 = 本机 IP + 端口
+        # TODO: 动态获取本机 LAN IP（目前使用已发现的远端 host，局域网同网段下通常可达）
         owner_full_addr = f'{host}:{identity.port}'
 
         try:
@@ -129,13 +129,16 @@ def list_shared_nodes(filebase_id):
 def revoke_share(filebase_id, node_id):
     """撤销对某个节点的共享"""
     db = get_db()
+    # 先查询再删除（注意顺序：查询必须在 DELETE 之前，否则记录已被删除）
+    row = db.execute("SELECT node_addr FROM shared_nodes WHERE filebase_id = ? AND node_id = ?",
+                     (filebase_id, node_id)).fetchone()
+    node_addr = row['node_addr'] if row else None
+
     db.execute("DELETE FROM shared_nodes WHERE filebase_id = ? AND node_id = ?", (filebase_id, node_id))
     db.commit()
 
-    row = db.execute("SELECT node_addr FROM shared_nodes WHERE filebase_id = ? AND node_id = ?",
-                     (filebase_id, node_id)).fetchone()
-    if row:
-        node_addr = row['node_addr']
+    # 向远端节点发送撤销通知（独立于本地删除结果）
+    if node_addr:
         try:
             import requests
             identity = _get_node_identity()
@@ -145,7 +148,7 @@ def revoke_share(filebase_id, node_id):
                 requests.delete(f'http://{node_addr}/p2p/fb/{filebase_id}/revoke',
                                 headers=headers, timeout=10)
         except Exception:
-            pass
+            pass  # 远端通知失败不影响本地撤销成功
 
     return jsonify({'success': True, 'message': '共享已撤销'})
 
@@ -174,7 +177,6 @@ def batch_share():
 
     fb_row = db.execute("SELECT name FROM filebases WHERE id = ?", (fb_id,)).fetchone()
     fb_name = fb_row['name'] if fb_row else ''
-    owner_addr = f'{identity.node_id}:{identity.port}'
     now = time.time()
 
     success_count = 0
@@ -188,6 +190,7 @@ def batch_share():
             import requests
             host = node_addr.split(':')[0] if ':' in node_addr else node_addr
             notify_url = f'http://{node_addr}/p2p/share/notify'
+            # owner_addr: 远端节点用来连接回本机的地址（与 share_filebase 保持一致）
             payload = {
                 'fb_id': fb_id,
                 'fb_name': fb_name,

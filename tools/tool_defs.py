@@ -9,12 +9,21 @@ import os
 
 
 def _get_project_root():
-    """动态解析项目根目录，运行时计算而非模块加载时固定。
-    
-    在打包场景下（PyInstaller），__file__ 行为变化，
-    但此函数在调用时才计算，确保路径始终正确。
+    """动态解析项目根目录，运行时计算而非模块加载时硬编码。
+
+    - 开发模式：tools/tool_defs.py → tools/ → 项目根
+    - PyInstaller frozen 模式：优先使用 sys._MEIPASS（资源所在目录）
     """
-    # tools/tool_defs.py → 父目录 tools/ → 父目录 项目根
+    import sys as _sys
+    if getattr(_sys, 'frozen', False):
+        meipass = getattr(_sys, '_MEIPASS', None)
+        if meipass:
+            if os.path.isdir(os.path.join(meipass, 'tools')):
+                return meipass
+        exe_dir = os.path.dirname(_sys.executable)
+        if os.path.isdir(os.path.join(exe_dir, 'tools')):
+            return exe_dir
+    # 开发模式：向上两级
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

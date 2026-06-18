@@ -57,11 +57,11 @@
             if (isCompare) {
                 const fileNames = filesData.files.map(f => f.name);
                 leftList.innerHTML = fileNames.map(f => {
-                    const e = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    const e = escapeHtmlJs(f);
                     return `<span class="file-tag" onclick="selectRadio(this, 'orig', '${e}')">${f}</span>`;
                 }).join('');
                 rightList.innerHTML = fileNames.map(f => {
-                    const e = f.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    const e = escapeHtmlJs(f);
                     return `<span class="file-tag" onclick="selectRadio(this, 'final', '${e}')">${f}</span>`;
                 }).join('');
             } else if (isIndex) {
@@ -77,11 +77,11 @@
                 const files = filesData.files;
                 const mid = Math.ceil(files.length / 2);
                 leftList.innerHTML = files.slice(0, mid).map(f => {
-                    const e = f.name.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    const e = escapeHtml(f.name);
                     return `<span class="file-tag" data-filename="${e}" onclick="toggleFileTag(this)">${f.name}</span>`;
                 }).join('');
                 rightList.innerHTML = files.slice(mid).map(f => {
-                    const e = f.name.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                    const e = escapeHtml(f.name);
                     return `<span class="file-tag" data-filename="${e}" onclick="toggleFileTag(this)">${f.name}</span>`;
                 }).join('');
             }
@@ -480,7 +480,7 @@
                 const daizi = companyInfo.代字 || '';
                 const stampPath = companyInfo['印章位置'] || '';
                 const escName = escapeHtml(companyName);
-                const escJsName = escName.replace(/'/g, "\\'");
+                const escJsName = escapeHtmlJs(companyName);
 
                 formHtml += `
                     <div class="company-section" data-original-name="${escJsName}" style="margin-bottom: 6px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 4px; background: #f9f9f9;">
@@ -1133,7 +1133,7 @@ function renderKbSelectorItem(kb) {
     var disabledClass = canEdit ? '' : ' disabled';
     var title = canEdit ? (kb.name + ' (' + (kb.permission === 'manage' ? '管理' : '编辑') + ')') : (kb.name + ' (只读)');
     var selClass = (kbSelectorState.selectedKbId === kb.id) ? ' selected' : '';
-    var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + kb.id.replace(/'/g, "\\'") + '\', event)" ondblclick="selectKbForProcessing(\'' + kb.id.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
+    var clickHandler = canEdit ? ' onclick="markKbSelected(\'' + escapeHtmlJs(kb.id) + '\', event)" ondblclick="selectKbForProcessing(\'' + escapeHtmlJs(kb.id) + '\',\'' + escapeHtmlJs(kb.name) + '\',\'' + escapeHtmlJs(kb.display_path || kb.name) + '\',\'' + kb.permission + '\')"' : '';
     return '<div class="fb-selector-item' + disabledClass + selClass + '"' + clickHandler + ' title="' + title + '">📁 ' + escapeHtml(kb.name) + (kb.display_path ? '<span style="font-size:11px;color:#999;margin-left:8px;">' + escapeHtml(kb.display_path) + '</span>' : '') + '</div>';
 }
 
@@ -1159,8 +1159,17 @@ window.markKbSelected = function(kbId, event) {
 };
 
 function escapeHtmlJs(str) {
-    if (!str) return '';
-    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+    if (str === undefined || str === null) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function escapeHtml(str) {
@@ -1221,7 +1230,7 @@ function renderKbSubdirView(categories) {
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
             var selClass = (kbSelectorState.selectedSubdir === cat.path) ? ' selected' : '';
-            h += '<div class="fb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\', event)" ondblclick="enterKbSubdir(\'' + cat.path.replace(/'/g, "\\'") + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
+            h += '<div class="fb-subdir-item' + selClass + '" onclick="selectKbSubdir(\'' + escapeHtmlJs(cat.path) + '\', event)" ondblclick="enterKbSubdir(\'' + escapeHtmlJs(cat.path) + '\',\'' + escapeHtmlJs(cat.name) + '\')">';
             h += '<span>📁 ' + escapeHtml(cat.name) + '</span>';
             h += '</div>';
         }

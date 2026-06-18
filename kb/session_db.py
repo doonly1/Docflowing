@@ -5,6 +5,7 @@ import platform
 import random
 import re
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -15,8 +16,25 @@ from server.workspace import _get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
-# FTS5 simple 分词器扩展路径（平台相关）
-_EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fts_ext')
+# FTS5 simple 分词器扩展路径（平台相关 + PyInstaller 兼容）
+# - 开发模式：kb/fts_ext/（相对于本文件）
+# - PyInstaller frozen 模式：sys._MEIPASS/kb/fts_ext/
+def _resolve_fts_extension_dir() -> str:
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    if getattr(sys, 'frozen', False):
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidate = os.path.join(meipass, 'kb', 'fts_ext')
+            if os.path.isdir(candidate):
+                return candidate
+        # onedir 模式下可能直接放到 exe 同级
+        exe_sibling = os.path.join(os.path.dirname(sys.executable), 'kb', 'fts_ext')
+        if os.path.isdir(exe_sibling):
+            return exe_sibling
+    return os.path.join(this_dir, 'fts_ext')
+
+
+_EXTENSION_DIR = _resolve_fts_extension_dir()
 _SYS = platform.system()
 _MACH = platform.machine()
 

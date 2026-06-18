@@ -1380,14 +1380,14 @@ var WikiKnowledge = {
                         var d = new Date(s.last_active * 1000);
                         timeStr = d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
                     }
-                    html += '<div class="kb-session-item' + (isActive ? ' active' : '') + '" onclick="WikiKnowledge.switchSession(\'' + s.id.replace(/'/g, "\\'") + '\')">' +
+                    html += '<div class="kb-session-item' + (isActive ? ' active' : '') + '" onclick="WikiKnowledge.switchSession(\'' + escapeJsForHtmlAttr(s.id) + '\')">' +
                         '<span class="icon">💬</span>' +
                         '<div style="flex: 1; min-width: 0;">' +
                             '<div class="title">' + self._escapeHtml(s.title || '新对话') + '</div>' +
                             '<div class="preview">' + self._escapeHtml(s.preview || '') + '</div>' +
                             '<div class="time">' + timeStr + '</div>' +
                         '</div>' +
-                        '<button class="kb-session-delete-btn" onclick="event.stopPropagation(); WikiKnowledge.deleteSession(\'' + s.id.replace(/'/g, "\\'") + '\')" title="删除会话">🗑️</button>' +
+                        '<button class="kb-session-delete-btn" onclick="event.stopPropagation(); WikiKnowledge.deleteSession(\'' + escapeJsForHtmlAttr(s.id) + '\')" title="删除会话">🗑️</button>' +
                     '</div>';
                 }
                 html += '<div style="padding: 12px; border-top: 1px solid #eee; margin-top: 8px;">' +
@@ -1598,8 +1598,8 @@ var WikiKnowledge = {
                             '<div class="name">' + self._escapeHtml(fm.name || skill.name) + '</div>' +
                             (isUserSkill
                                 ? '<div class="kb-skill-actions">' +
-                                    '<button class="kb-skill-btn" onclick="WikiKnowledge.editSkill(\'' + skill.name + '\')" title="编辑">✏️</button>' +
-                                    '<button class="kb-skill-btn kb-skill-btn-del" onclick="WikiKnowledge.deleteSkill(\'' + skill.name + '\')" title="删除">🗑️</button>' +
+                                    '<button class="kb-skill-btn" onclick="WikiKnowledge.editSkill(\'' + escapeJsForHtmlAttr(skill.name) + '\')" title="编辑">✏️</button>' +
+                                    '<button class="kb-skill-btn kb-skill-btn-del" onclick="WikiKnowledge.deleteSkill(\'' + escapeJsForHtmlAttr(skill.name) + '\')" title="删除">🗑️</button>' +
                                   '</div>'
                                 : '<span class="kb-skill-system-badge">内置</span>') +
                         '</div>' +
@@ -1696,7 +1696,7 @@ var WikiKnowledge = {
                 '</div>' +
                 '<textarea id="kb-skill-input" rows="8">' + self._escapeHtml(desc) + '</textarea>' +
                 '<div style="display:flex;gap:6px">' +
-                    '<button onclick="WikiKnowledge.saveSkill(\'' + skillName + '\')" style="flex:1">保存修改</button>' +
+                    '<button onclick="WikiKnowledge.saveSkill(\'' + escapeJsForHtmlAttr(skillName) + '\')" style="flex:1">保存修改</button>' +
                     '<button onclick="WikiKnowledge.showSkills()" style="flex:1;background:#999">取消</button>' +
                 '</div>' +
             '</div>';
@@ -2130,4 +2130,18 @@ var WikiKnowledge = {
 function escapeHtmlForWiki(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeJsForHtmlAttr(str) {
+    if (str === undefined || str === null) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }

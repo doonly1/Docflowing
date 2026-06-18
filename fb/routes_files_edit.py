@@ -44,7 +44,7 @@ def replace_local_file(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isfile(file_path):
@@ -102,7 +102,7 @@ def move_local_items(filebase_id):
         return jsonify({'success': False, 'message': '请指定目标目录'})
 
     dest_path = os.path.normpath(os.path.join(local_path, dest))
-    if not dest_path.startswith(os.path.normpath(local_path)):
+    if not dest_path.startswith(os.path.normpath(local_path) + os.sep) and dest_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '目标目录非法'})
 
     if not os.path.isdir(dest_path):
@@ -112,7 +112,7 @@ def move_local_items(filebase_id):
     errors = []
     for src in sources:
         src_path = os.path.normpath(os.path.join(local_path, src))
-        if not src_path.startswith(os.path.normpath(local_path)):
+        if not src_path.startswith(os.path.normpath(local_path) + os.sep) and src_path != os.path.normpath(local_path):
             errors.append(f'{src}: 路径非法')
             continue
         if not os.path.exists(src_path):
@@ -168,7 +168,7 @@ def delete_local_items(filebase_id):
         if not rel:
             continue
         target = os.path.normpath(os.path.join(local_path, rel))
-        if not target.startswith(os.path.normpath(local_path)):
+        if not target.startswith(os.path.normpath(local_path) + os.sep) and target != os.path.normpath(local_path):
             errors.append(f'{rel}: 路径非法')
             continue
         try:
@@ -225,7 +225,7 @@ def rename_local_item(filebase_id):
         return jsonify({'success': False, 'message': '新名称不能包含路径分隔符'})
 
     old = os.path.normpath(os.path.join(local_path, rel_path))
-    if not old.startswith(os.path.normpath(local_path)):
+    if not old.startswith(os.path.normpath(local_path) + os.sep) and old != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.exists(old):
@@ -275,7 +275,7 @@ def copy_local_items(filebase_id):
         return jsonify({'success': False, 'message': '请选择要复制的项目'})
 
     dest_dir = os.path.normpath(os.path.join(local_path, dest)) if dest else local_path
-    if not dest_dir.startswith(os.path.normpath(local_path)):
+    if not dest_dir.startswith(os.path.normpath(local_path) + os.sep) and dest_dir != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '目标路径非法'})
 
     os.makedirs(dest_dir, exist_ok=True)
@@ -286,7 +286,7 @@ def copy_local_items(filebase_id):
         if not rel:
             continue
         src = os.path.normpath(os.path.join(local_path, rel))
-        if not src.startswith(os.path.normpath(local_path)):
+        if not src.startswith(os.path.normpath(local_path) + os.sep) and src != os.path.normpath(local_path):
             errors.append(f'{rel}: 路径非法')
             continue
         try:
@@ -403,7 +403,7 @@ def restore_file_trash(filebase_id):
             pass
 
     dst = os.path.normpath(os.path.join(local_path, original_path))
-    if not dst.startswith(os.path.normpath(local_path)):
+    if not dst.startswith(os.path.normpath(local_path) + os.sep) and dst != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     dst_parent = os.path.dirname(dst)
@@ -454,7 +454,7 @@ def delete_file_trash_item(filebase_id):
     if not os.path.exists(target):
         return jsonify({'success': False, 'message': '项目不存在'})
 
-    if not target.startswith(os.path.normpath(trash_dir)):
+    if not target.startswith(os.path.normpath(trash_dir) + os.sep) and target != os.path.normpath(trash_dir):
         return jsonify({'success': False, 'message': '路径非法'})
 
     try:

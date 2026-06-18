@@ -2,6 +2,7 @@
 
 import os
 import io
+import re
 import shutil
 from flask import Blueprint, request, jsonify, send_file, g
 
@@ -9,6 +10,38 @@ from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity, require_not_locked
 from fb.routes_files import _trigger_fb_sync
+from server.workspace import _get_workspace_dir
+
+
+def _is_path_safe(base_dir: str, target_path: str) -> bool:
+    """检查 target_path 是否在 base_dir 内部，防止路径穿越攻击。
+
+    使用 os.path.realpath 解析符号链接后比对，避免 .. 穿越。
+    """
+    try:
+        base = os.path.realpath(base_dir)
+        target = os.path.realpath(target_path)
+        return target.startswith(base + os.sep) or target == base
+    except OSError:
+        return False
+
+
+def _validate_save_dir(dest_dir: str) -> tuple[bool, str]:
+    """验证另存目标目录是否安全（必须在用户工作空间内）。
+
+    Returns:
+        (is_safe, error_message)
+    """
+    if not dest_dir:
+        return False, '未指定保存路径'
+    try:
+        dest_dir = os.path.abspath(dest_dir)
+    except Exception:
+        return False, '保存路径无效'
+    allowed_base = os.path.realpath(_get_workspace_dir())
+    if not _is_path_safe(allowed_base, dest_dir):
+        return False, '保存路径不能在工作空间之外'
+    return True, ''
 
 
 def _unique_path(dest_dir, name):
@@ -104,7 +137,7 @@ def get_local_file_content(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isfile(file_path):
@@ -173,7 +206,7 @@ def file_preview(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isfile(file_path):
@@ -221,7 +254,7 @@ def download_local_file(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isfile(file_path):
@@ -252,7 +285,7 @@ def batch_download_local(filebase_id):
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
         for rel_path in paths:
             abs_path = os.path.normpath(os.path.join(local_path, rel_path))
-            if not abs_path.startswith(os.path.normpath(local_path)):
+            if not abs_path.startswith(os.path.normpath(local_path) + os.sep) and abs_path != os.path.normpath(local_path):
                 continue
             if os.path.isfile(abs_path):
                 zf.write(abs_path, os.path.basename(abs_path))
@@ -312,8 +345,13 @@ def save_local_file_as(filebase_id):
     if not save_path:
         return jsonify({'success': False, 'message': '未指定保存路径'})
 
+    # 校验保存路径：必须位于用户工作空间内
+    safe, err = _validate_save_dir(os.path.dirname(save_path))
+    if not safe:
+        return jsonify({'success': False, 'message': err})
+
     src_file = os.path.normpath(os.path.join(local_path, rel_path))
-    if not src_file.startswith(os.path.normpath(local_path)):
+    if not src_file.startswith(os.path.normpath(local_path) + os.sep) and src_file != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
     if not os.path.isfile(src_file):
         return jsonify({'success': False, 'message': '源文件不存在'})
@@ -339,6 +377,11 @@ def batch_save_local_files(filebase_id):
         return jsonify({'success': False, 'message': '请选择文件'})
     if not dest_dir:
         return jsonify({'success': False, 'message': '未指定目标目录'})
+
+    # 校验目标目录：必须位于用户工作空间内
+    safe, err = _validate_save_dir(dest_dir)
+    if not safe:
+        return jsonify({'success': False, 'message': err})
 
     if getattr(g, 'is_remote_fb', False):
         from p2p import proxy as p2p_proxy
@@ -372,7 +415,7 @@ def batch_save_local_files(filebase_id):
         os.makedirs(dest_dir, exist_ok=True)
         for rel_path in paths:
             abs_path = os.path.normpath(os.path.join(local_path, rel_path))
-            if not abs_path.startswith(os.path.normpath(local_path)):
+            if not abs_path.startswith(os.path.normpath(local_path) + os.sep) and abs_path != os.path.normpath(local_path):
                 continue
             fname = os.path.basename(rel_path.replace('\\', '/'))
             target = _unique_path(dest_dir, fname)
@@ -401,7 +444,7 @@ def open_local_file(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问上级目录'})
 
     if not os.path.isfile(file_path):
@@ -435,7 +478,7 @@ def open_with_app(filebase_id):
         return jsonify({'success': False, 'message': '未指定文件路径'})
 
     file_path = os.path.normpath(os.path.join(local_path, rel_path))
-    if not file_path.startswith(os.path.normpath(local_path)):
+    if not file_path.startswith(os.path.normpath(local_path) + os.sep) and file_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '路径非法'})
 
     if not os.path.isfile(file_path):

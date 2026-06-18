@@ -1,27 +1,36 @@
-python-docx>=0.8.11
-python-pptx>=1.0.0
-pyyaml>=6.0
-flask>=2.3.0
-flask-cors>=4.0.0
-openpyxl>=3.1.0
-pdfplumber>=0.10.0
-beautifulsoup4>=4.12.0
-cryptography>=41.0.0
-markitdown>=0.1.0
-zeroconf>=0.132.0
-requests>=2.31.0
+# 开发依赖（允许小版本升级，不跳大版本）
+# 如需完全锁定版本，请使用 requirements-lock.txt
+
+# 文档处理
+python-docx>=0.8.11,<2.0
+python-pptx>=1.0.0,<2.0
+openpyxl>=3.1.0,<4.0
+pdfplumber>=0.10.0,<1.0
+beautifulsoup4>=4.12.0,<5.0
+
+# AI 文本抽取
+markitdown>=0.1.0,<1.0
+
+# Web 框架（Flask 2.x/3.x 都支持）
+flask>=2.3.0,<4.0
+flask-cors>=4.0.0,<5.0
+
+# 配置与网络
+pyyaml>=6.0,<7.0
+requests>=2.31.0,<3.0
+zeroconf>=0.132.0,<1.0
+cryptography>=41.0.0,<50.0
 
 # 桌面壳（pywebview + 系统托盘）
-pywebview>=6.0
-pystray>=0.19.0
-Pillow>=10.0.0
-appdirs>=1.4.0
+pywebview>=6.0,<7.0
+pystray>=0.19.0,<1.0
+Pillow>=10.0.0,<12.0
+appdirs>=1.4.0,<2.0
 
 # 测试
-pytest>=9.0.0
-pytest-cov>=7.0.0
-
+pytest>=9.0.0,<10.0
+pytest-cov>=7.0.0,<6.0
 
 # Windows 可选依赖（提供 Word COM 支持，其他平台不需要）
-pywin32>=305
-docx2pdf>=0.1.8
+pywin32>=305,<400; sys_platform == "win32"
+docx2pdf>=0.1.8,<1.0; sys_platform == "win32"

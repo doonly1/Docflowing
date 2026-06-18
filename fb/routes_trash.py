@@ -180,7 +180,7 @@ def delete_trash_item():
     if not os.path.exists(target):
         return jsonify({'success': False, 'message': '项目不存在'})
 
-    if not target.startswith(os.path.normpath(trash_dir)):
+    if not target.startswith(os.path.normpath(trash_dir) + os.sep) and target != os.path.normpath(trash_dir):
         return jsonify({'success': False, 'message': '路径非法'})
 
     db = get_db()

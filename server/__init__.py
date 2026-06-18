@@ -5,7 +5,13 @@ import sys
 import threading
 import traceback
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# PyInstaller 打包模式下，资源文件在 sys._MEIPASS 下
+is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+if is_frozen:
+    project_root = sys._MEIPASS
+else:
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 sys.path.insert(0, os.path.join(project_root, 'tools'))
 sys.path.insert(0, project_root)
 
@@ -38,50 +44,36 @@ def get_p2p_discovery() -> NodeDiscovery | None:
 
 
 def create_app():
-    # PyInstaller 打包模式下，ui/ 在 _MEIPASS/ui/
-    # 开发模式下 ui/ 在项目根目录
-    import sys
-    # 检测是否处于 PyInstaller frozen 环境
-    is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
-    
+    # PyInstaller 打包模式下，静态资源在 sys._MEIPASS/ui/
+    # is_frozen 和 project_root 已在模块顶部定义
     if is_frozen:
-        # 检测是 Electron 打包（resources/backend/）还是 pywebview 独立打包
-        exe_dir = os.path.dirname(sys.executable)
-        if 'resources' + os.sep + 'backend' in exe_dir or exe_dir.endswith(os.path.join('resources', 'backend')):
-            # Electron 打包模式：backend.exe 在 resources/backend/
-            resources_dir = os.path.dirname(exe_dir)  # resources/
-            static_folder = 'ui'
-            template_folder = 'ui'
-            root_path = resources_dir
-            logger.info(f"Electron packaged mode: static_folder={static_folder}, root_path={root_path}, exe_dir={exe_dir}")
-        else:
-            # pywebview 独立打包或普通 PyInstaller 模式：静态文件在 _MEIPASS/ui/
-            static_folder = 'ui'
-            template_folder = 'ui'
-            root_path = sys._MEIPASS
-            logger.info(f"PyInstaller packaged mode: static_folder={static_folder}, root_path={root_path}, _MEIPASS={sys._MEIPASS}")
+        static_folder = 'ui'
+        template_folder = 'ui'
+        root_path = project_root
     else:
-        # 还可以检测 Electron 环境变量（开发模式下 Electron 启动 Python 时设置）
-        is_electron_packaged = os.environ.get('DOCFLOWING_PACKAGED') == '1'
-        if is_electron_packaged:
-            exe_dir = os.path.dirname(sys.executable)  # resources/backend
-            resources_dir = os.path.dirname(exe_dir)    # resources/
-            static_folder = 'ui'
-            template_folder = 'ui'
-            root_path = resources_dir
-            logger.info(f"Electron dev mode detected: static_folder={static_folder}, root_path={root_path}")
-        else:
-            static_folder = 'ui'
-            template_folder = 'ui'
-            root_path = project_root
-            logger.info(f"Development mode: static_folder={static_folder}, root_path={root_path}")
-    
+        # 开发模式：静态资源在项目根目录
+        static_folder = 'ui'
+        template_folder = 'ui'
+        root_path = project_root
+
     app = Flask(__name__,
                 root_path=root_path,
                 template_folder=template_folder,
                 static_folder=static_folder,
                 static_url_path='')
-    CORS(app)
+    # 仅允许本地页面访问 API，禁止任意跨域请求
+    CORS(app, resources={
+        r"/*": {
+            "origins": [
+                "null",           # file:// 协议
+                "http://127.0.0.1:*",
+                "http://localhost:*",
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "X-Request-Id"],
+            "supports_credentials": True,
+        }
+    })
     app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE
 
     # 中间件
@@ -143,6 +135,26 @@ def create_app():
             'success': False,
             'message': f'上传总大小超过 {MAX_SESSION_SIZE // 1024 // 1024}MB 限制'
         }), 413
+
+    # 上游网关超时（代理场景）
+    @app.errorhandler(504)
+    def gateway_timeout(error):
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'message': '请求超时，请稍后重试'
+            }), 504
+        return error
+
+    # 上游网关错误
+    @app.errorhandler(502)
+    def bad_gateway(error):
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'message': '服务暂时不可用，请稍后重试'
+            }), 502
+        return error
 
     # 全局错误处理器 - 确保API请求返回JSON
     @app.errorhandler(500)

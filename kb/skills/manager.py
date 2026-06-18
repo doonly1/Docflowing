@@ -145,8 +145,20 @@ def create_skill(user_id: str, name: str, content: str, category: str = None, cr
 
 
 def _get_system_skills_dir() -> Path:
-    from pathlib import Path
-    kb_root = Path(__file__).parent.parent.parent
+    """系统技能目录定位。
+
+    - 开发模式：项目根 / kb/skills/system（由 __file__ 向上推导）
+    - PyInstaller frozen 模式：sys._MEIPASS/kb/skills/system
+    """
+    import sys as _sys
+    if getattr(_sys, 'frozen', False):
+        meipass = getattr(_sys, '_MEIPASS', None)
+        if meipass:
+            candidate = Path(meipass) / 'kb' / 'skills' / 'system'
+            if candidate.exists():
+                return candidate
+    # 开发模式（或 frozen 下找不到时回退）：基于 __file__
+    kb_root = Path(__file__).resolve().parent.parent.parent
     return kb_root / 'kb' / 'skills' / 'system'
 
 
@@ -389,17 +401,57 @@ def get_categories(user_id: str) -> List[str]:
     return sorted(categories)
 
 
+def _validate_skill_file_path(skill_dir: Path, file_path: str, allowed_dirs: set) -> tuple[bool, str]:
+    """校验 skill 文件路径安全，返回 (是否有效, 错误消息)。"""
+    if not file_path:
+        return False, "file_path is required."
+
+    # 统一用斜杠拆分，防止 Windows 分隔符绕过
+    parts = file_path.replace("\\", "/").split("/")
+
+    # 至少需要一级目录 + 文件名
+    if len(parts) < 2:
+        return False, f"file_path must be under one of: {', '.join(allowed_dirs)}"
+
+    # 顶级目录必须在白名单中
+    if parts[0] not in allowed_dirs:
+        return False, f"file_path must be under one of: {', '.join(allowed_dirs)}"
+
+    # 每一级都不能是空串或相对路径符
+    for part in parts:
+        if part == "" or part == "." or part == "..":
+            return False, "file_path cannot contain empty segments, '.', or '..'."
+
+    # 最终路径必须落在 skill_dir 下
+    target = (skill_dir / file_path).resolve()
+    skill_dir_real = skill_dir.resolve()
+    try:
+        target.relative_to(skill_dir_real)
+    except ValueError:
+        return False, "file_path escapes the skill directory."
+
+    # 还要确保不跳出允许的子目录（例如 scripts/.. 形式已经被 parts 检查拦截）
+    parent_dir = parts[0]
+    allowed_parent = (skill_dir_real / parent_dir)
+    try:
+        target.relative_to(allowed_parent)
+    except ValueError:
+        return False, f"file_path must be under '{parent_dir}/'."
+
+    return True, ""
+
+
 def write_skill_file(user_id: str, skill_name: str, file_path: str, content: str) -> Dict[str, Any]:
     skill_dir = _get_user_skills_dir(user_id) / skill_name
     if not skill_dir.exists():
         return {"success": False, "error": f"Skill '{skill_name}' not found."}
 
     allowed_dirs = {"references", "templates", "scripts"}
-    parts = file_path.replace("\\", "/").split("/")
-    if len(parts) < 2 or parts[0] not in allowed_dirs:
-        return {"success": False, "error": f"file_path must be under one of: {', '.join(allowed_dirs)}"}
+    valid, err = _validate_skill_file_path(skill_dir, file_path, allowed_dirs)
+    if not valid:
+        return {"success": False, "error": err}
 
-    target = skill_dir / file_path
+    target = (skill_dir / file_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -428,11 +480,11 @@ def remove_skill_file(user_id: str, skill_name: str, file_path: str) -> Dict[str
         return {"success": False, "error": f"Skill '{skill_name}' not found."}
 
     allowed_dirs = {"references", "templates", "scripts"}
-    parts = file_path.replace("\\", "/").split("/")
-    if len(parts) < 2 or parts[0] not in allowed_dirs:
-        return {"success": False, "error": f"file_path must be under one of: {', '.join(allowed_dirs)}"}
+    valid, err = _validate_skill_file_path(skill_dir, file_path, allowed_dirs)
+    if not valid:
+        return {"success": False, "error": err}
 
-    target = skill_dir / file_path
+    target = (skill_dir / file_path).resolve()
     if not target.exists():
         return {"success": False, "error": f"File '{file_path}' not found in skill '{skill_name}'."}
 

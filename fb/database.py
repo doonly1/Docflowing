@@ -100,4 +100,10 @@ def get_visible_fb_ids(user_id, is_admin=False):
 
 
 def get_user_role(user_id):
+    """查询用户的角色（目前为桌面单用户架构，始终返回 'admin'）。
+
+    预留扩展接口，待多用户系统实现时：
+    - 维护 user_roles 表 (user_id, role)
+    - 此函数改为：db.execute("SELECT role FROM user_roles WHERE user_id = ?", (user_id,)).fetchone()
+    """
     return 'admin'

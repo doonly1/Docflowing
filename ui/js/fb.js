@@ -271,7 +271,7 @@ var FileBase = {
                 if (kb.total_files !== undefined && kb.total_files !== null) {
                     initialCountHtml = '<small style="color:#666;font-size:11px;">文件数: ' + kb.total_files + '</small>';
                 }
-                html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeHtmlText(kb.name) + '\',\'' + escapeHtmlText(kb.local_path || '') + '\',\'' + escapeHtmlText(kb.display_path || '') + '\')">';
+                html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeJsForHtmlAttr(kb.name) + '\',\'' + escapeJsForHtmlAttr(kb.local_path || '') + '\',\'' + escapeJsForHtmlAttr(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
                 html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
                 html += '<div class="fb-card-sync-status" id="sync-status-' + kb.id + '" data-fb-id="' + kb.id + '">' + initialCountHtml + '</div>';
@@ -442,10 +442,10 @@ var FileBase = {
     },
 
     _buildKbCardContextMenu: function(kbId, kbName, permission, localPath, displayPath) {
-        var escId = kbId.replace(/'/g, "\\'");
-        var escName = (kbName || '').replace(/'/g, "\\'");
-        var escLocalPath = (localPath || '').replace(/'/g, "\\'");
-        var escDisplayPath = (displayPath || '').replace(/'/g, "\\'");
+        var escId = escapeJsForHtmlAttr(kbId);
+        var escName = escapeJsForHtmlAttr(kbName);
+        var escLocalPath = escapeJsForHtmlAttr(localPath);
+        var escDisplayPath = escapeJsForHtmlAttr(displayPath);
 
         var h = '';
         if (permission === 'manage') {
@@ -766,7 +766,7 @@ var FileBase = {
                 h2 = this._renderTreeNodes(n.children, depth + 1, activePath);
             }
             h += '<div class="fb-tree-node">';
-            var normNodePath = (n.path || '').replace(/\\/g, '/').replace(/'/g, "\\'");
+            var normNodePath = escapeJsForHtmlAttr((n.path || '').replace(/\\/g, '/'));
             h += '<div class="fb-tree-label' + (isActive ? ' active' : '') + '" style="padding-left:' + (ml + 8) + 'px" onclick="FileBase._treeLabelClick(this, \'' + normNodePath + '\')" oncontextmenu="FileBase.showTreeContextMenu(event, \'' + normNodePath + '\')" data-local-path="' + normNodePath + '">';
             if (hasChildren) {
                 h += '<span class="fb-tree-toggle' + (shouldExpand ? ' open' : '') + '" onclick="event.stopPropagation();FileBase.toggleTreeNode(this)"></span>';
@@ -887,7 +887,7 @@ var FileBase = {
 
         for (var i = 0; i < categories.length; i++) {
             var cat = categories[i];
-            var catNormPath = cat.path.replace(/\\/g, '/').replace(/'/g, "\\'");
+            var catNormPath = escapeJsForHtmlAttr(cat.path.replace(/\\/g, '/'));
             h += '<tr class="fb-file-row fb-local-dir" data-local-path="' + catNormPath + '" data-row-index="' + i + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">📁</span></td>';
             h += '<td class="col-name"><div class="fb-file-name">' + escapeHtmlText(cat.name) + '</div></td>';
@@ -904,7 +904,7 @@ var FileBase = {
             var size = self.formatSize(f.size);
             var date = self.formatDate(f.mtime);
             var fname = escapeHtmlText(f.name);
-            var normPath = f.path.replace(/\\/g, '/').replace(/'/g, "\\'");
+            var normPath = escapeJsForHtmlAttr(f.path.replace(/\\/g, '/'));
 
             h += '<tr class="fb-file-row" data-local-path="' + normPath + '" data-doc-name="' + fname + '" data-row-index="' + (categories.length + i) + '" draggable="true">';
             h += '<td class="col-icon"><span class="fb-file-icon">' + icon + '</span></td>';
@@ -1354,7 +1354,7 @@ var FileBase = {
     },
 
     _buildFileContextMenu: function(path, isDir) {
-        var escPath = path.replace(/'/g, "\\'");
+        var escPath = escapeJsForHtmlAttr(path);
         var h = '';
         if (this.hasPerm(this.PERM_RENAME)) {
             h += '<div class="fb-menu-item" onclick="FileBase.contextRename(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 1.5l3 3-8 8H1.5v-3l8-8z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 3l3 3" stroke="currentColor" stroke-width="1.2"/></svg></span> 重命名</div>';
@@ -1376,7 +1376,8 @@ var FileBase = {
             if (this.hasPerm(this.PERM_DELETE)) {
                 h += '<div class="fb-menu-divider"></div>';
             }
-            h += '<div class="fb-menu-item" onclick="FileBase.contextOpenLocalPath(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 11.5l4-4-4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 本地路径</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.contextOpenFolder(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h4l2 2h4v6H2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 打开文件夹</div>';
+            h += '<div class="fb-menu-item" onclick="FileBase.contextOpenLocalPath(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 11.5l4-4-4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 定位到文件</div>';
         }
         h += '<div class="fb-menu-divider"></div>';
         h += '<div class="fb-menu-item" onclick="FileBase.showProperties(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="5" r=".8" fill="currentColor"/><path d="M6.5 7h1v3h-1z" fill="currentColor"/></svg></span> 属性</div>';
@@ -1432,7 +1433,7 @@ var FileBase = {
     },
 
     _buildTreeContextMenu: function(path) {
-        var escPath = path.replace(/'/g, "\\'");
+        var escPath = escapeJsForHtmlAttr(path);
         var h = '';
         if (this.hasPerm(this.PERM_EDIT)) {
             h += '<div class="fb-menu-item" onclick="FileBase.treeNewFolder(\'' + escPath + '\');FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件夹</div>';
@@ -1657,14 +1658,51 @@ var FileBase = {
 
     // ──────────── 文件锁 右键菜单 ────────────
 
-    contextOpenLocalPath: function(path) {
+    contextOpenLocalPath: async function(path) {
         this.hideContextMenu();
-        var absolutePath = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '') + '/' + path.replace(/\\/g, '/');
-        absolutePath = absolutePath.replace(/\\/g, '/');
-        if (window.electronAPI && window.electronAPI.showItemInFolder) {
-            window.electronAPI.showItemInFolder(absolutePath);
-        } else {
+        if (!this.fbLocalPath) {
+            showToast('文件库未配置本地路径', 'error');
+            return;
+        }
+        var localRoot = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '');
+        var relPath = (path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        var absolutePath = localRoot + '/' + relPath;
+        if (!window.electronAPI || !window.electronAPI.showItemInFolder) {
             showToast('仅在桌面版可用', 'error');
+            return;
+        }
+        try {
+            var result = await window.electronAPI.showItemInFolder(absolutePath);
+            if (result && !result.success) {
+                showToast(result.message || '打开失败', 'error');
+            }
+        } catch (e) {
+            console.error('[FB] contextOpenLocalPath error:', e);
+            showToast('打开失败: ' + e.message, 'error');
+        }
+    },
+
+    contextOpenFolder: async function(path) {
+        this.hideContextMenu();
+        if (!this.fbLocalPath) {
+            showToast('文件库未配置本地路径', 'error');
+            return;
+        }
+        var localRoot = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '');
+        var relPath = (path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        var absolutePath = localRoot + '/' + relPath;
+        if (!window.electronAPI || !window.electronAPI.openFolder) {
+            showToast('仅在桌面版可用', 'error');
+            return;
+        }
+        try {
+            var result = await window.electronAPI.openFolder(absolutePath);
+            if (result && !result.success) {
+                showToast(result.message || '打开失败', 'error');
+            }
+        } catch (e) {
+            console.error('[FB] contextOpenFolder error:', e);
+            showToast('打开失败: ' + e.message, 'error');
         }
     },
 
@@ -1796,7 +1834,7 @@ var FileBase = {
             var n = nodes[i];
             var hasChildren = n.children && n.children.length > 0;
             h += '<div class="fb-tree-node">';
-            h += '<div class="fb-tree-label" style="padding-left:' + ml + 'px" onclick="FileBase._selectMoveDest(\'' + (n.path || '').replace(/'/g, "\\'") + '\', this)" data-dest="' + (n.path || '') + '">📁 ' + escapeHtmlText(n.name) + '</div>';
+            h += '<div class="fb-tree-label" style="padding-left:' + ml + 'px" onclick="FileBase._selectMoveDest(\'' + escapeJsForHtmlAttr(n.path || '') + '\', this)" data-dest="' + (n.path || '') + '">📁 ' + escapeHtmlText(n.name) + '</div>';
             if (hasChildren) {
                 h += '<div style="display:block">';
                 h += this._renderMoveTree(n.children, depth + 1);
@@ -2706,7 +2744,7 @@ var FileBase = {
                 h += '<tr><td>' + escapeHtmlText(sn.node_name || sn.node_id.slice(0, 12)) + '</td>';
                 h += '<td style="font-size:11px;color:#888">' + escapeHtmlText(sn.node_addr) + '</td>';
                 h += '<td>' + (sn.permission === 'manage' ? '管理' : sn.permission === 'edit' ? '编辑' : '查看') + '</td>';
-                h += '<td><button class="fb-btn-remove" onclick="FileBase._revokeShareNode(\'' + self.currentFbId + '\',\'' + sn.node_id.replace(/'/g, "\\'") + '\')">撤销共享</button></td></tr>';
+                h += '<td><button class="fb-btn-remove" onclick="FileBase._revokeShareNode(\'' + self.currentFbId + '\',\'' + escapeJsForHtmlAttr(sn.node_id) + '\')">撤销共享</button></td></tr>';
             }
             h += '</tbody></table>';
         } else {
@@ -2838,7 +2876,7 @@ var FileBase = {
                 var r = res.results[i];
                 if (!r.rel_path && !r.filebase_type) continue;
                 var dirPath = r.rel_path ? r.rel_path.replace(/\\/g, '/').replace(/\/[^\/]+$/, '') : '';
-                var clickAction = 'FileBase._openFromSearch(\'' + r.fb_id + '\',\'' + escapeHtmlText(r.fb_name) + '\',\'' + escapeHtmlText(dirPath) + '\')';
+                var clickAction = 'FileBase._openFromSearch(\'' + r.fb_id + '\',\'' + escapeJsForHtmlAttr(r.fb_name) + '\',\'' + escapeJsForHtmlAttr(dirPath) + '\')';
                 var downloadUrl = '/api/fb/' + r.fb_id + '/local-files/download?path=' + encodeURIComponent(r.rel_path || r.document_id);
                 h += '<tr>';
                 h += '<td>' + escapeHtmlText(r.fb_name) + '</td>';
@@ -2934,7 +2972,7 @@ var FileBase = {
         var h = '<div style="max-height:55vh;overflow-y:auto;margin:0 -24px;padding:0 24px">';
         for (var i = 0; i < allItems.length; i++) {
             var it = allItems[i];
-            var escName = it.name.replace(/'/g, "\\'");
+            var escName = escapeJsForHtmlAttr(it.name);
             var displayName = it.original_path || it.name;
             var restoreFn = it._isFileItem ? 'FileBase.restoreFileTrashItem' : 'FileBase.restoreTrashItem';
             var deleteFn = it._isFileItem ? 'FileBase.deleteFileTrashItem' : 'FileBase.deleteTrashItem';
@@ -3242,7 +3280,7 @@ var FileBase = {
         h += '</div>';
         h += '</div>';
 
-        var escFbId = fbId.replace(/'/g, "\\'");
+        var escFbId = escapeJsForHtmlAttr(fbId);
         h += '<div class="fb-modal-actions">';
         if (nodes.length > 0) {
             h += '<button class="fb-btn-primary" onclick="FileBase._doShare(\'' + escFbId + '\')">🔗 共享</button>';
@@ -3431,7 +3469,7 @@ var FileBase = {
                 h += '<span style="font-size:11px;color:#999;margin-left:8px">' + (isSelf ? '（我锁定的）' : '由 ' + escapeHtmlText(l.locked_by_short) + ' 锁定') + '</span>';
                 h += '</div>';
                 if (isSelf || this.hasPerm(this.PERM_MANAGE)) {
-                    h += '<button class="fb-btn-remove" onclick="FileBase._doUnlock(\'' + escapeHtmlText(l.path) + '\')">解锁</button>';
+                    h += '<button class="fb-btn-remove" onclick="FileBase._doUnlock(\'' + escapeJsForHtmlAttr(l.path) + '\')">解锁</button>';
                 }
                 h += '</div>';
             }
@@ -3493,6 +3531,20 @@ var FileBase = {
 function escapeHtmlText(text) {
     if (!text) return '';
     return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function escapeJsForHtmlAttr(str) {
+    if (str === undefined || str === null) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function formatFileSize(bytes) {

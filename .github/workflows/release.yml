@@ -4,46 +4,36 @@ on:
   push:
     tags:
       - 'v*'       # 推送 v1.0.0, v1.1.0 等标签时触发
+  workflow_dispatch:  # 也可以手动触发
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置 Python 3.12
+      - name: 设置 Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: 安装 Python 依赖
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt && pip install pyinstaller
 
-      - name: 构建 Python 后端
-        run: python electron/build-backend.py
+      - name: 生成 spec 并执行 PyInstaller 打包
+        run: python build-desktop.py
         env:
           PYTHONIOENCODING: utf-8
 
-      - name: 设置 Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: 安装 Node 依赖 + 拷贝前端库
-        run: npm ci
-
-      - name: 打包 Electron 安装包
-        run: npx electron-builder --win --publish=never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 列出构建产物（用于排错）
+        shell: pwsh
+        run: Get-ChildItem -Recurse dist | Select-Object FullName, Length
 
       - name: 发布到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: dist/**
           generate_release_notes: true
           make_latest: true

@@ -4,11 +4,16 @@ import os
 import json
 import sys
 import subprocess
+import threading
+import time
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from server.workspace import _get_workspace_dir
 from tools.tool_defs import get_tool_script_path
+
+# 单个工具执行最大秒数（文档处理可能较慢，设为 10 分钟）
+_TOOL_TIMEOUT_SECONDS = 600
 
 runner_bp = Blueprint('runner', __name__)
 
@@ -69,6 +74,22 @@ def api_run_tool_with_config():
                 env=env
             )
 
+            # 进程超时守护：超时后强制终止
+            timeout_flag = [False]
+            start_time = time.time()
+
+            def _timeout_killer():
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                        timeout_flag[0] = True
+                except Exception:
+                    pass
+
+            timer = threading.Timer(_TOOL_TIMEOUT_SECONDS, _timeout_killer)
+            timer.daemon = True
+            timer.start()
+
             output_lines = []
             for line in iter(process.stdout.readline, ''):
                 if line:
@@ -79,14 +100,19 @@ def api_run_tool_with_config():
                     yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
 
             process.stdout.close()
-            process.wait()
+            process.wait(timeout=10)
+            timer.cancel()
 
-            success = process.returncode == 0
-            if not success:
-                error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
-                yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
+            if timeout_flag[0]:
+                elapsed = int(time.time() - start_time)
+                yield f'data: {json.dumps({"type": "end", "success": False, "error": f"执行超时（超过 {_TOOL_TIMEOUT_SECONDS}s，已用 {elapsed}s）"})}\n\n'
             else:
-                yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+                success = process.returncode == 0
+                if not success:
+                    error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
+                    yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
+                else:
+                    yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
 
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'

@@ -53,7 +53,7 @@ def run_tool_on_fb(filebase_id):
     local_path = kb_row['local_path']
     target_path = os.path.normpath(os.path.join(local_path, subdir)) if subdir else local_path
 
-    if not target_path.startswith(os.path.normpath(local_path)):
+    if not target_path.startswith(os.path.normpath(local_path) + os.sep) and target_path != os.path.normpath(local_path):
         return jsonify({'success': False, 'message': '不允许访问的路径'})
 
     if not os.path.isdir(target_path):

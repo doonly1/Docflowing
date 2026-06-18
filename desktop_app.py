@@ -24,8 +24,18 @@ DEV_MODE = os.environ.get('DOCFLOWING_DEV') == '1'
 
 
 def _get_root_dir():
-    """获取项目根目录"""
+    """获取项目根目录（资源文件定位用）。
+
+    - 开发模式：desktop_app.py 所在目录。
+    - PyInstaller 打包模式：优先使用 sys._MEIPASS（PyInstaller 解压到的临时目录，
+      ui/、kb/fts_ext/、kb/skills/system/、tools/ 等资源均在此目录下），
+      回退到 sys.executable 目录。
+    """
     if getattr(sys, 'frozen', False):
+        # contents_directory='.' 时，_MEIPASS 等于 exe 同级目录
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass and os.path.isdir(meipass):
+            return meipass
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -100,7 +110,10 @@ def _start_flask():
 
     host = os.environ.get('HOST', '127.0.0.1')
     port = int(os.environ.get('PORT', DEFAULT_PORT))
-    debug = os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes')
+    debug = os.environ.get('DEBUG', '0').lower() in ('1', 'true', 'yes')
+    if debug:
+        import warnings
+        warnings.warn('[Docflowing] DEBUG 模式已启用，生产环境请勿使用！', UserWarning)
 
     # 添加一个隐藏端点用于显示窗口（由单实例锁激活）
     @_flask_app.route('/__pywebview_show__')
@@ -230,17 +243,41 @@ class DesktopAPI:
             return {'success': False, 'message': str(e)}
 
     def showItemInFolder(self, absolute_path):
-        """在文件管理器中定位文件"""
+        """在文件管理器中定位文件（选中并高亮）"""
         try:
+            if not absolute_path:
+                return {'success': False, 'message': '路径为空'}
+            norm_path = os.path.normpath(absolute_path)
             if platform.system() == 'Windows':
-                subprocess.Popen(['explorer', '/select,', absolute_path])
+                import subprocess
+                subprocess.Popen('explorer /select,"' + norm_path + '"', shell=True)
             elif platform.system() == 'Darwin':
-                subprocess.Popen(['open', '-R', absolute_path])
+                subprocess.Popen(['open', '-R', norm_path])
             else:
-                subprocess.Popen(['nautilus', '--select', absolute_path])
+                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
             return {'success': True}
         except Exception as e:
             print(f'[Desktop] showItemInFolder error: {e}')
+            return {'success': False, 'message': str(e)}
+
+    def openFolder(self, absolute_path):
+        """打开文件或文件夹所在的目录"""
+        try:
+            if not absolute_path:
+                return {'success': False, 'message': '路径为空'}
+            norm_path = os.path.normpath(absolute_path)
+            target_dir = norm_path if os.path.isdir(norm_path) else os.path.dirname(norm_path)
+            if not os.path.exists(target_dir):
+                return {'success': False, 'message': '路径不存在: ' + target_dir}
+            if platform.system() == 'Windows':
+                os.startfile(target_dir)
+            elif platform.system() == 'Darwin':
+                subprocess.Popen(['open', target_dir])
+            else:
+                subprocess.Popen(['xdg-open', target_dir])
+            return {'success': True}
+        except Exception as e:
+            print(f'[Desktop] openFolder error: {e}')
             return {'success': False, 'message': str(e)}
 
     # ──── 应用信息 ────
@@ -279,8 +316,15 @@ class DesktopAPI:
         if not os.path.exists(script):
             return
         try:
+            # 打包后 sys.executable 是 exe 文件，无法直接执行 Python 脚本
+            # 需使用系统 python 命令
+            if getattr(sys, 'frozen', False):
+                python_exe = sys.executable  # 打包后的 exe 本身支持 --word-keepalive 参数
+                cmd = [python_exe, '--word-keepalive', '--silent']
+            else:
+                cmd = [sys.executable, script, '--silent']
             self._word_keep_alive_proc = subprocess.Popen(
-                [sys.executable, script, '--silent'],
+                cmd,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
             )
@@ -439,7 +483,27 @@ def _wait_for_flask(timeout=30):
     return False
 
 
+def run_word_keepalive():
+    """运行 WordKeepAlive 功能（打包后通过 --word-keepalive 参数调用）"""
+    # 动态导入 WordKeepAlive 模块
+    root = _get_root_dir()
+    tools_dir = os.path.join(root, 'tools')
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    try:
+        from WordKeepAlive import main as wka_main
+        wka_main()
+    except ImportError as e:
+        print(f'[Desktop] 无法加载 WordKeepAlive: {e}')
+        sys.exit(1)
+
+
 def main():
+    # ──── 参数处理 ────
+    if '--word-keepalive' in sys.argv:
+        run_word_keepalive()
+        return
+
     # ──── 单实例锁 ────
     port = int(os.environ.get('PORT', DEFAULT_PORT))
     lock_sock = _try_lock(port)
