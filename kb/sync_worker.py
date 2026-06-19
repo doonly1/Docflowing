@@ -114,12 +114,14 @@ class SyncWorker:
 
     def _process_triggered_syncs(self):
         """处理手动触发的同步请求"""
+        skipped = []  # 正在处理中的项，处理完后放回队列
         while True:
             try:
                 user_id, filebase_id = self._trigger_queue.get_nowait()
 
                 if filebase_id in self._processing_filebases:
-                    logger.info(f"Filebase {filebase_id} already being processed, skipping trigger")
+                    logger.info(f"Filebase {filebase_id} already being processed, deferring")
+                    skipped.append((user_id, filebase_id))
                     continue
 
                 thread = threading.Thread(
@@ -131,6 +133,11 @@ class SyncWorker:
 
             except Empty:
                 break
+
+        # 把跳过的项放回队列，等待下次轮询时重新处理
+        for item in skipped:
+            self._trigger_queue.put(item)
+            self._trigger_event.set()
 
     def _sync_all_enabled_filebases(self):
         """扫描所有启用了同步的文件库"""

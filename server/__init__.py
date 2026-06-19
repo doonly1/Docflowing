@@ -21,7 +21,7 @@ from flask_cors import CORS
 from logging_config import setup_logging, get_logger
 from server.middleware import setup_middleware
 from server.auth import auth_bp
-from server.workspace import workspace_bp, MAX_SESSION_SIZE
+from server.workspace import workspace_bp
 from server.settings import settings_bp
 from server.runner import runner_bp
 
@@ -74,6 +74,7 @@ def create_app():
             "supports_credentials": True,
         }
     })
+    MAX_SESSION_SIZE = 200 * 1024 * 1024
     app.config['MAX_CONTENT_LENGTH'] = MAX_SESSION_SIZE
 
     # 中间件

@@ -306,17 +306,24 @@ def batch_download_local(filebase_id):
 @require_fb_perm('view')
 def save_local_file_as(filebase_id):
     """另存文件"""
+    data = request.get_json() or {}
+    rel_path = data.get('path', '').strip()
+    save_path = data.get('save_path', '').strip()
+
+    if not rel_path:
+        return jsonify({'success': False, 'message': '未指定源文件路径'})
+    if not save_path:
+        return jsonify({'success': False, 'message': '未指定保存路径'})
+
+    # 校验保存路径：必须位于用户工作空间内（本地和远程分支共用）
+    safe, err = _validate_save_dir(os.path.dirname(save_path))
+    if not safe:
+        return jsonify({'success': False, 'message': err})
+
     if getattr(g, 'is_remote_fb', False):
         from p2p import proxy as p2p_proxy
         node = _get_node_identity()
         info = g.remote_fb_info
-        data = request.get_json() or {}
-        rel_path = data.get('path', '').strip()
-        save_path = data.get('save_path', '').strip()
-        if not rel_path:
-            return jsonify({'success': False, 'message': '未指定源文件路径'})
-        if not save_path:
-            return jsonify({'success': False, 'message': '未指定保存路径'})
         try:
             resp = p2p_proxy.remote_download_file(info['owner_addr'], node, filebase_id, rel_path)
             if not resp:
@@ -336,19 +343,7 @@ def save_local_file_as(filebase_id):
         return jsonify({'success': False, 'message': '文件库不存在'})
 
     local_path = kb_row['local_path']
-    data = request.get_json() or {}
     rel_path = data.get('path', '').strip()
-    save_path = data.get('save_path', '').strip()
-
-    if not rel_path:
-        return jsonify({'success': False, 'message': '未指定源文件路径'})
-    if not save_path:
-        return jsonify({'success': False, 'message': '未指定保存路径'})
-
-    # 校验保存路径：必须位于用户工作空间内
-    safe, err = _validate_save_dir(os.path.dirname(save_path))
-    if not safe:
-        return jsonify({'success': False, 'message': err})
 
     src_file = os.path.normpath(os.path.join(local_path, rel_path))
     if not src_file.startswith(os.path.normpath(local_path) + os.sep) and src_file != os.path.normpath(local_path):

@@ -1376,7 +1376,6 @@ var FileBase = {
             if (this.hasPerm(this.PERM_DELETE)) {
                 h += '<div class="fb-menu-divider"></div>';
             }
-            h += '<div class="fb-menu-item" onclick="FileBase.contextOpenFolder(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h4l2 2h4v6H2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></span> 打开文件夹</div>';
             h += '<div class="fb-menu-item" onclick="FileBase.contextOpenLocalPath(\'' + escPath + '\')"><span class="icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 11.5l4-4-4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 定位到文件</div>';
         }
         h += '<div class="fb-menu-divider"></div>';
@@ -1678,30 +1677,6 @@ var FileBase = {
             }
         } catch (e) {
             console.error('[FB] contextOpenLocalPath error:', e);
-            showToast('打开失败: ' + e.message, 'error');
-        }
-    },
-
-    contextOpenFolder: async function(path) {
-        this.hideContextMenu();
-        if (!this.fbLocalPath) {
-            showToast('文件库未配置本地路径', 'error');
-            return;
-        }
-        var localRoot = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '');
-        var relPath = (path || '').replace(/\\/g, '/').replace(/^\/+/, '');
-        var absolutePath = localRoot + '/' + relPath;
-        if (!window.electronAPI || !window.electronAPI.openFolder) {
-            showToast('仅在桌面版可用', 'error');
-            return;
-        }
-        try {
-            var result = await window.electronAPI.openFolder(absolutePath);
-            if (result && !result.success) {
-                showToast(result.message || '打开失败', 'error');
-            }
-        } catch (e) {
-            console.error('[FB] contextOpenFolder error:', e);
             showToast('打开失败: ' + e.message, 'error');
         }
     },

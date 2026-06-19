@@ -5,13 +5,23 @@ from kb.database import get_db
 logger = logging.getLogger(__name__)
 
 
+def _escape_fts_term(term: str) -> str:
+    """转义 FTS5 查询中的特殊字符，用双引号包裹为短语查询。
+
+    参考 SQLite FTS5 文档：双引号内的内容被视为短语，内部双引号需加倍转义。
+    """
+    escaped = term.replace('"', '""')
+    return f'"{escaped}"'
+
+
 def search_wiki(usr_id, query):
     if not query or not query.strip():
         return []
 
     conn = get_db(usr_id)
     search_terms = query.strip().split()
-    fts_query = ' OR '.join(f'title:{t} OR content:{t}' for t in search_terms)
+    # 对每个搜索词转义 FTS5 特殊字符，防止语法错误和意外行为
+    fts_query = ' OR '.join(f'title:{_escape_fts_term(t)} OR content:{_escape_fts_term(t)}' for t in search_terms)
 
     try:
         rows = conn.execute(

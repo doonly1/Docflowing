@@ -48,6 +48,9 @@ def _validate_save_dir(dest_dir: str) -> tuple[bool, str]:
 # 单个工具执行最大秒数（文档处理可能较慢，设为 10 分钟）
 _TOOL_TIMEOUT_SECONDS = 600
 
+# SSE 并发限制：最多允许 3 个同时运行的远端 tool 流
+_SSE_SEMAPHORE = threading.BoundedSemaphore(3)
+
 # Backward compatible levels for old system
 FB_PERMISSION_LEVELS = {'view': 0, 'edit': 1, 'manage': 2}
 
@@ -288,6 +291,18 @@ def p2p_upload(fb_id):
 
     os.makedirs(target_dir, exist_ok=True)
 
+    # 已知文件格式魔数（前 4~8 字节）
+    _MAGIC_MAP = {
+        b'%PDF': '.pdf',
+        b'\xff\xd8\xff': '.jpg',
+        b'\x89PNG\r\n\x1a\n': '.png',
+        b'GIF87a': '.gif',
+        b'GIF89a': '.gif',
+        b'PK\x03\x04': '.docx',    # Office Open XML (docx/xlsx/pptx)
+        b'R0lGOD': '.gif',         # base64 encoded GIF
+        b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': '.doc',  # OLE2 (doc/xls/ppt)
+    }
+
     uploaded = []
     _bad_chars = re.compile(r'[<>:"\\|?*\/]')
     for key in request.files:
@@ -304,6 +319,24 @@ def p2p_upload(fb_id):
             safe_name = os.path.basename(safe_name)
             if not safe_name:
                 continue
+            # 简单 magic byte 校验：读取前 8 字节后 seek 回起点
+            try:
+                magic = f.stream.read(8)
+                f.stream.seek(0)
+                ext_lower = os.path.splitext(safe_name)[1].lower()
+                matched = False
+                for sig_bytes, expected_ext in _MAGIC_MAP.items():
+                    if magic[:len(sig_bytes)] == sig_bytes:
+                        matched = True
+                        break
+                # 没有对应魔数规则的扩展名（如 .md .txt .csv）直接放行
+                if ext_lower not in ('.md', '.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.html', '.htm', '.py', '.js', '.css', ''):
+                    if not matched:
+                        logger.warning("P2P 上传文件魔数不匹配: %s (magic=%s)", safe_name, magic.hex()[:16])
+                        continue
+            except Exception:
+                f.stream.seek(0)
+
             file_path = os.path.join(target_dir, safe_name)
             # 最终校验：确保落点仍在文件库目录内
             file_path = os.path.normpath(file_path)
@@ -665,6 +698,10 @@ def p2p_run_tool(fb_id):
                  if os.path.isfile(os.path.join(target_path, f)) and f.lower().endswith(extensions)]
 
     def generate():
+        acquired = _SSE_SEMAPHORE.acquire(blocking=False)
+        if not acquired:
+            yield f'data: {json.dumps({"type": "end", "success": False, "error": "服务器繁忙，请稍后再试"})}\n\n'
+            return
         try:
             env = os.environ.copy()
             env['PYTHONPATH'] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -721,6 +758,8 @@ def p2p_run_tool(fb_id):
 
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+        finally:
+            _SSE_SEMAPHORE.release()
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 

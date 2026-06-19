@@ -1,11 +1,8 @@
 """Workspace 管理 + 文件操作 API"""
 
 import os
-import json
-import shutil
-import tempfile
 
-from flask import Blueprint, request, jsonify, Response, g
+from flask import Blueprint, request, jsonify
 from server.auth import login_required
 from tools.tool_defs import get_tool_extensions
 
@@ -13,9 +10,7 @@ workspace_bp = Blueprint('workspace', __name__)
 
 # ==================== 常量 ====================
 
-MAX_FILE_SIZE = 90 * 1024 * 1024          # 单文件最大 90MB
-MAX_SESSION_SIZE = 900 * 1024 * 1024      # 单会话总大小最大 900MB
-MAX_FILES_PER_UPLOAD = 900                # 单次最多上传 900 个文件
+MAX_FILE_SIZE = 20 * 1024 * 1024           # 单文件最大 20MB
 
 # ==================== 运行时目录解析 ====================
 
@@ -69,6 +64,32 @@ def _get_workspace_resources_dir(user_id):
 # 工具扩展名由 tools/tool_defs.get_tool_extensions() 统一管理
 # 旧的 _get_tool_extensions 函数已移至 tools/tool_defs.py
 
+# ==================== 路径安全校验 ====================
+
+def _is_workspace_path(directory: str) -> bool:
+    """校验 directory 是否在 workspace 范围内，防止路径穿越滥用。
+
+    纵深防御：即使已登录，也不应允许通过 API 操作工作空间外的文件。
+    """
+    if not directory:
+        return False
+    try:
+        abs_dir = os.path.realpath(directory)
+        ws = os.path.realpath(_get_workspace_dir())
+        return abs_dir.startswith(ws + os.sep) or abs_dir == ws
+    except OSError:
+        return False
+
+
+def _relaxed_workspace_check(directory: str) -> bool:
+    """宽松版路径校验：仅检查路径不为空且存在，不限制必须在 workspace 内。
+
+    桌面单用户场景下，用户已通过本机认证，允许访问任意本地目录。
+    """
+    if not directory:
+        return False
+    return os.path.isdir(directory)
+
 # ==================== 文件列表 ====================
 
 @workspace_bp.route('/list_files', methods=['POST'])
@@ -79,7 +100,7 @@ def api_list_files():
     tool = data.get('tool', 'to_docx')
     show_all = data.get('show_all', False)
 
-    if not directory or not os.path.isdir(directory):
+    if not _relaxed_workspace_check(directory):
         return jsonify({'success': False, 'message': '目录不存在或无效'})
 
     extensions = get_tool_extensions(tool)
@@ -109,11 +130,9 @@ def api_list_dir():
     data = request.get_json()
     directory = data.get('directory')
 
-    if not directory:
-        return jsonify({'success': False, 'message': '目录不能为空'})
-    directory = os.path.abspath(directory)
-    if not os.path.isdir(directory):
+    if not _relaxed_workspace_check(directory):
         return jsonify({'success': False, 'message': '目录不存在或无效'})
+    directory = os.path.abspath(directory)
 
     try:
         files = []
@@ -128,65 +147,7 @@ def api_list_dir():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
-# ==================== 文件上传 / 结果检查 / 下载 / 清理 ====================
-
-@workspace_bp.route('/upload_files', methods=['POST', 'OPTIONS'])
-@login_required
-def api_upload_files():
-    # multipart/form-data 时 request.get_json() 为 None，需从 form 中获取
-    data = request.get_json() or {}
-    tool = request.form.get('tool') or data.get('tool', 'to_docx')
-    extensions = get_tool_extensions(tool)
-
-    directory = request.form.get('directory') or data.get('directory')
-    if not directory:
-        return jsonify({'success': False, 'message': '请指定上传目录'}), 400
-
-    directory = os.path.abspath(directory)
-    os.makedirs(directory, exist_ok=True)
-
-    saved_files = []
-    uploaded_files = request.files.getlist('files') if request.files else []
-
-    if len(uploaded_files) > MAX_FILES_PER_UPLOAD:
-        return jsonify({'success': False, 'message': f'单次最多上传 {MAX_FILES_PER_UPLOAD} 个文件'})
-
-    for file in uploaded_files:
-        if not file.filename:
-            continue
-        fname_lower = file.filename.lower()
-        if extensions and not fname_lower.endswith(extensions):
-            continue
-
-        filename = os.path.basename(file.filename)
-        save_path = os.path.join(directory, filename)
-
-        # 流式分块读取 & 写入，避免大文件撑爆内存；同时检查大小
-        _CHUNK_SIZE = 1024 * 1024  # 1MB
-        file_size = 0
-        with open(save_path, 'wb') as f:
-            while True:
-                chunk = file.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                file_size += len(chunk)
-                if file_size > MAX_FILE_SIZE:
-                    f.close()
-                    try:
-                        os.remove(save_path)
-                    except OSError:
-                        pass
-                    return jsonify({'success': False, 'message':
-                        f'文件 {file.filename} 超过 {MAX_FILE_SIZE // 1024 // 1024}MB 限制'}), 413
-                f.write(chunk)
-        saved_files.append(filename)
-
-    return jsonify({
-        'success': True,
-        'files': saved_files,
-        'file_count': len(saved_files),
-        'directory': directory
-    })
+# ==================== 结果检查 / 下载 ====================
 
 @workspace_bp.route('/check_results', methods=['POST'])
 @login_required
@@ -199,6 +160,8 @@ def api_check_results():
     directory = os.path.abspath(directory)
     if not os.path.isdir(directory):
         return jsonify({'success': True, 'files': [], 'count': 0})
+    if not _is_workspace_path(directory):
+        return jsonify({'success': False, 'message': '目录不在工作空间范围内'}), 403
 
     try:
         result_files = []
@@ -229,6 +192,8 @@ def api_download_results():
 
     if not directory or not os.path.isdir(directory):
         return jsonify({'success': False, 'message': '目录不存在'})
+    if not _is_workspace_path(directory):
+        return jsonify({'success': False, 'message': '目录不在工作空间范围内'}), 403
 
     try:
         files_in_dir = [f for f in os.listdir(directory) 
@@ -264,11 +229,9 @@ def api_open_folder():
     data = request.get_json() or {}
     directory = data.get('directory')
 
-    if not directory:
-        return jsonify({'success': False, 'message': '目录不能为空'})
-    directory = os.path.abspath(directory)
-    if not os.path.isdir(directory):
+    if not _relaxed_workspace_check(directory):
         return jsonify({'success': False, 'message': '目录不存在或无效'})
+    directory = os.path.abspath(directory)
 
     try:
         system = platform.system()
@@ -282,31 +245,6 @@ def api_open_folder():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@workspace_bp.route('/clear_workspace', methods=['POST'])
-@login_required
-def api_clear_workspace():
-    data = request.get_json() or {}
-    directory = data.get('directory')
-
-    if not directory:
-        return jsonify({'success': False, 'message': '目录不能为空'})
-    directory = os.path.abspath(directory)
-    if not os.path.isdir(directory):
-        return jsonify({'success': True, 'message': '目录不存在或无效'})
-
-    try:
-        for f in os.listdir(directory):
-            fpath = os.path.join(directory, f)
-            try:
-                if os.path.isfile(fpath):
-                    os.remove(fpath)
-                elif os.path.isdir(fpath):
-                    shutil.rmtree(fpath)
-            except Exception:
-                pass
-        return jsonify({'success': True, 'message': '清理完成'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
 
 @workspace_bp.route('/build_index_from_metadata', methods=['POST'])
 @login_required
@@ -323,6 +261,8 @@ def api_build_index_from_metadata():
 
     if not output_dir:
         return jsonify({'success': False, 'message': '请指定输出目录'})
+    if not _is_workspace_path(output_dir):
+        return jsonify({'success': False, 'message': '目录不在工作空间范围内'}), 403
 
     try:
         output_path = build_index_from_metadata(metadata_list, folder_name, output_dir)

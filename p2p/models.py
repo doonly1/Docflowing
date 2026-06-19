@@ -1,11 +1,33 @@
 import os
 import json
+import stat
 import time
 import threading
 
 from logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _set_file_permissions(path: str):
+    """限制敏感数据文件的权限，仅允许当前用户访问。
+
+    Unix: chmod 0o600
+    Windows: 使用 icacls 移除 Everyone 和 BUILTIN\\Users 的权限
+    """
+    try:
+        if os.name == 'nt':
+            import subprocess
+            user = os.environ.get('USERNAME', '')
+            if user:
+                subprocess.run(
+                    ['icacls', path, '/inheritance:r', '/grant', f'{user}:F'],
+                    capture_output=True, timeout=5
+                )
+        else:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception as e:
+        logger.warning("无法设置文件权限 %s: %s", path, e)
 
 
 def _get_p2p_data_dir():
@@ -56,6 +78,7 @@ class TrustStore:
         path = _get_trust_path()
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self._nodes, f, ensure_ascii=False, indent=2)
+        _set_file_permissions(path)
 
     def add_node(self, node_id: str, display_name: str, addr: str, public_key: str):
         with self._lock:
@@ -116,6 +139,7 @@ class RemoteFilebaseStore:
         path = _get_remote_fb_path()
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self._filebases, f, ensure_ascii=False, indent=2)
+        _set_file_permissions(path)
 
     def add(self, fb_id: str, owner_node_id: str, owner_addr: str, name: str, permission: str, perm_mask: int = None):
         with self._lock:

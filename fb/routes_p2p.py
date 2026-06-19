@@ -1,5 +1,6 @@
 """文件库 P2P 共享和节点管理"""
 
+import json
 import time
 import logging
 from flask import Blueprint, request, jsonify, g
@@ -59,6 +60,7 @@ def share_filebase(filebase_id):
 
         try:
             import requests
+            from p2p.proxy import _sign_request
             notify_url = f'http://{node_addr}/p2p/share/notify'
             payload = {
                 'fb_id': filebase_id,
@@ -71,7 +73,10 @@ def share_filebase(filebase_id):
             }
             if perm_mask is not None:
                 payload['perm_mask'] = perm_mask
-            resp = requests.post(notify_url, json=payload, timeout=10)
+            body = json.dumps(payload).encode()
+            headers = _sign_request(identity, 'POST', '/p2p/share/notify', body)
+            headers['Content-Type'] = 'application/json'
+            resp = requests.post(notify_url, data=body, headers=headers, timeout=10)
             if resp.ok:
                 success_count += 1
         except Exception as e:
@@ -188,6 +193,7 @@ def batch_share():
             continue
         try:
             import requests
+            from p2p.proxy import _sign_request
             host = node_addr.split(':')[0] if ':' in node_addr else node_addr
             notify_url = f'http://{node_addr}/p2p/share/notify'
             # owner_addr: 远端节点用来连接回本机的地址（与 share_filebase 保持一致）
@@ -202,7 +208,10 @@ def batch_share():
             }
             if perm_mask is not None:
                 payload['perm_mask'] = perm_mask
-            resp = requests.post(notify_url, json=payload, timeout=10)
+            body = json.dumps(payload).encode()
+            headers = _sign_request(identity, 'POST', '/p2p/share/notify', body)
+            headers['Content-Type'] = 'application/json'
+            resp = requests.post(notify_url, data=body, headers=headers, timeout=10)
             if resp.ok:
                 success_count += 1
         except Exception as e:

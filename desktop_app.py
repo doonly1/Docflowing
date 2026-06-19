@@ -242,24 +242,6 @@ class DesktopAPI:
             print(f'[Desktop] openFileWithOsApp error: {e}')
             return {'success': False, 'message': str(e)}
 
-    def showItemInFolder(self, absolute_path):
-        """在文件管理器中定位文件（选中并高亮）"""
-        try:
-            if not absolute_path:
-                return {'success': False, 'message': '路径为空'}
-            norm_path = os.path.normpath(absolute_path)
-            if platform.system() == 'Windows':
-                import subprocess
-                subprocess.Popen('explorer /select,"' + norm_path + '"', shell=True)
-            elif platform.system() == 'Darwin':
-                subprocess.Popen(['open', '-R', norm_path])
-            else:
-                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
-            return {'success': True}
-        except Exception as e:
-            print(f'[Desktop] showItemInFolder error: {e}')
-            return {'success': False, 'message': str(e)}
-
     def openFolder(self, absolute_path):
         """打开文件或文件夹所在的目录"""
         try:
@@ -278,6 +260,26 @@ class DesktopAPI:
             return {'success': True}
         except Exception as e:
             print(f'[Desktop] openFolder error: {e}')
+            return {'success': False, 'message': str(e)}
+
+    def showItemInFolder(self, absolute_path):
+        """在文件管理器中选中并高亮文件"""
+        try:
+            if not absolute_path:
+                return {'success': False, 'message': '路径为空'}
+            norm_path = os.path.normpath(absolute_path)
+            if not os.path.exists(norm_path):
+                return {'success': False, 'message': '路径不存在: ' + norm_path}
+            if platform.system() == 'Windows':
+                # explorer 要求 /select, 和路径必须作为一个参数，否则无法高亮
+                subprocess.Popen(['explorer', '/select,' + norm_path])
+            elif platform.system() == 'Darwin':
+                subprocess.Popen(['open', '-R', norm_path])
+            else:
+                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
+            return {'success': True}
+        except Exception as e:
+            print(f'[Desktop] showItemInFolder error: {e}')
             return {'success': False, 'message': str(e)}
 
     # ──── 应用信息 ────

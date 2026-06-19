@@ -4,6 +4,7 @@ import os
 import sys
 import subprocess
 import json
+import threading
 from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 
 from server.auth import login_required
@@ -12,6 +13,9 @@ from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local
 from tools.tool_defs import get_tool_script_path
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
+
+# SSE 并发限制：最多允许 3 个同时运行的 tool 流
+_SSE_SEMAPHORE = threading.BoundedSemaphore(3)
 
 
 @fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
@@ -70,6 +74,10 @@ def run_tool_on_fb(filebase_id):
     _user_id = g.user_id
 
     def generate():
+        acquired = _SSE_SEMAPHORE.acquire(blocking=False)
+        if not acquired:
+            yield f'data: {json.dumps({"type": "end", "success": False, "error": "服务器繁忙，请稍后再试"})}\n\n'
+            return
         try:
             env = os.environ.copy()
             env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
@@ -110,6 +118,8 @@ def run_tool_on_fb(filebase_id):
 
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+        finally:
+            _SSE_SEMAPHORE.release()
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 

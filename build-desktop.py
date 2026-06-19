@@ -17,7 +17,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-SPEC_NAME = os.path.join(ROOT, 'desktop.spec')
+SPEC_NAME = os.path.join(ROOT, 'build.spec')
 DIST_DIR = os.path.join(ROOT, 'dist', 'desktop')
 OUTPUT_NAME = '文澜'
 

@@ -1,5 +1,6 @@
 """简化认证系统 — 单用户桌面版，以本机 node_id 为用户标识"""
 
+import ipaddress
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, g
@@ -37,6 +38,19 @@ def _get_real_ip() -> str:
     return request.remote_addr or ""
 
 
+def _is_loopback(ip_str: str) -> bool:
+    """判断 IP 地址是否为回环地址（支持 IPv4、IPv6、IPv4-mapped IPv6）。"""
+    if not ip_str:
+        return False
+    if ip_str == 'localhost':
+        return True
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        return addr.is_loopback
+    except ValueError:
+        return False
+
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -44,7 +58,7 @@ def login_required(f):
             return f(*args, **kwargs)
 
         remote_ip = _get_real_ip()
-        if remote_ip in ('127.0.0.1', '::1', 'localhost'):
+        if _is_loopback(remote_ip):
             g.user_id = _get_node_id()
             return f(*args, **kwargs)
 
