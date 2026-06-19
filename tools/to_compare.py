@@ -21,11 +21,16 @@ from logging_config import setup_logging, get_logger
 setup_logging()
 logger = get_logger(__name__)
 
+# 开关：Diff 驱动的重分割（方案 B）
+# True  = 先做全文 char_diff，只在 equal 区域的标点处分句（方案 B）
+# False = 直接按标点分句（方案 A-1），保留 mismatch 回退（方案 A-2）
+ENABLE_DIFF_DRIVEN_SPLIT = False
+
 
 # 标点集按层级固定（中英文混合，从强到弱）
 PUNCTUATION_LEVELS = [
     "。！？!?",     # L1：强终结符
-    "；：;:",     # L2：中强分隔符
+    "；：;",     # L2：中强分隔符（不含半角:，避免数字/比分/时间误拆分）
     "，,",        # L3（末级）：弱分隔符，终端拆分
 ]
 # 顿号"、"不参与拆分
@@ -154,12 +159,147 @@ def char_level_diff(original_text, final_text):
     return result
 
 
+def _split_at_reliable_boundaries(text, reliable_flags, thresholds, level=0, base_offset=0):
+    """
+    在可靠位置按层级递归拆分文本。
+
+    只有落在 reliable_flags 对应位置为 True 的区域内的标点，才作为有效边界。
+    这确保了分割边界在原稿和终稿中都是存在的、未被编辑的。
+
+    拆分结果包含标点：每个句子片段以边界标点结尾（如果标点可靠）。
+
+    Args:
+        text: 待分句文本
+        reliable_flags: 与 text 等长的 bool 列表，标记每个位置是否可靠
+        thresholds: [(punct_chars, max_len), ...] 按层级递归
+        level: 当前递归层级
+        base_offset: 当前 text 在原始 reliable_flags 中的起始偏移量
+    """
+    import re
+    if level >= len(thresholds):
+        return [text]  # 超出定义层级，不再拆分
+
+    punct_chars, max_len = thresholds[level]
+    is_last_level = (level == len(thresholds) - 1)
+
+    # 用捕获组保留标点，同时收集每个标点的位置索引
+    parts = re.split(f'([{re.escape(punct_chars)}])', text)
+
+    # 收集可靠标点的位置
+    # parts 格式：[内容, 标点, 内容, 标点, ..., 内容(可能无)]
+    # 需要映射回 reliable_flags
+    reliable_boundaries = []  # [(char_pos, punct), ...]
+    char_pos = 0
+    for i in range(0, len(parts) - 1, 2):
+        content = parts[i]
+        punct = parts[i + 1]
+        # 内容区域
+        char_pos += len(content)
+        # 标点：检查其位置是否可靠
+        if char_pos < len(reliable_flags) and reliable_flags[char_pos]:
+            reliable_boundaries.append((char_pos, punct))
+        char_pos += len(punct)
+    # 最后一段（无标点跟随的内容）
+    # 不需要额外处理 char_pos
+
+    # 按可靠边界拆分，结果包含标点
+    segments = []
+    if reliable_boundaries:
+        prev = 0
+        for bound_pos, punct in reliable_boundaries:
+            # 片段：prev 到标点位置（含标点）
+            if bound_pos >= prev:
+                segments.append(text[prev:bound_pos + 1])
+            prev = bound_pos + 1
+        # 最后一段（标点之后的剩余内容）
+        if prev < len(text):
+            segments.append(text[prev:])
+    else:
+        # 没有可靠边界，整段保留
+        segments = [text]
+
+    # 每个子段独立判断是否继续递归
+    result = []
+    seg_start_offset = 0  # 当前 segment 在 text 中的起始偏移
+    for seg in segments:
+        if not seg:
+            continue
+        seg_len = len(seg)
+        if is_last_level:
+            # 末级：直接保留，不再递归
+            result.append(seg)
+        elif seg_len <= max_len:
+            # 未超阈值 → 语义单元，保留
+            result.append(seg)
+        else:
+            # 超过阈值 → 递归下钻
+            # 使用偏移量计算子段在 reliable_flags 中的对应位置，避免 text.index() 的重复匹配问题
+            seg_start = base_offset + seg_start_offset
+            seg_end = seg_start + seg_len
+            seg_reliable = reliable_flags[seg_start_offset:seg_start_offset + seg_len]
+            sub_segs = _split_at_reliable_boundaries(seg, seg_reliable, thresholds, level + 1, seg_start)
+            result.extend(sub_segs)
+        seg_start_offset += seg_len
+
+    return result
+
+
+def split_by_reliable_boundaries(orig_text, final_text, semantic_unit_thresholds=None):
+    """
+    Diff 驱动的可靠边界分句（方案 B）。
+    
+    核心思路：先做全文 char_diff，再从 opcodes 的 equal 区域中提取可靠的标点边界。
+    - equal 区域的标点：在原稿和终稿中都存在，未被编辑，是可靠的分割边界
+    - replace/insert/delete 区域的标点：可能是编辑产物，不作为边界
+    
+    这样从根本上避免了"标点本身被修改"导致的分句不一致问题。
+    
+    Args:
+        orig_text: 原稿文本
+        final_text: 终稿文本
+        semantic_unit_thresholds: 多级语义单元拆分配置
+    
+    Returns:
+        (orig_sentences, final_sentences): 原稿和终稿的分句结果
+    """
+    # 向后兼容：无配置时使用传统分句
+    if semantic_unit_thresholds is None:
+        orig_sentences = split_into_sentences(orig_text, None)
+        final_sentences = split_into_sentences(final_text, None)
+        return orig_sentences, final_sentences
+    
+    # 1. 获取 opcodes
+    matcher = difflib.SequenceMatcher(None, orig_text, final_text)
+    opcodes = matcher.get_opcodes()
+    
+    # 2. 标记原稿和终稿中哪些字符位置是 equal（可靠的）
+    orig_reliable = [False] * len(orig_text)
+    final_reliable = [False] * len(final_text)
+    
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == 'equal':
+            for i in range(i1, i2):
+                orig_reliable[i] = True
+            for j in range(j1, j2):
+                final_reliable[j] = True
+    
+    # 3. 按层级在可靠边界处拆分
+    orig_sentences = _split_at_reliable_boundaries(
+        orig_text, orig_reliable, semantic_unit_thresholds
+    )
+    final_sentences = _split_at_reliable_boundaries(
+        final_text, final_reliable, semantic_unit_thresholds
+    )
+    
+    return orig_sentences, final_sentences
+
+
 def split_into_sentences(text, semantic_unit_thresholds=None):
     """按语义单元层次递归分割句子
     
     多级拆分策略（默认）：
-    L1：先用强标点（。！？）切分，子句 ≤ 100 字则停止
-    L2：超长子句再按次强标点（；：）切分，子句 ≤ 80 字则停止
+    L1：先用强标点（。！？）切分，子句 ≤ 30 字则停止
+    L2：超长子句再按次强标点（；：）切分，子句 ≤ 30 字则停止
     L3（末级）：按逗号切分，不再判断阈值。顿号永远不参与切分
     
     Args:
@@ -256,84 +396,6 @@ def _longest_increasing_subsequence(indices):
     return lis_positions
 
 
-def _output_split_diff(result_doc, orig_text, all_f_indices, final_paras, SENTENCE_SIM_THRESHOLD):
-    """
-    处理拆分组输出：1原稿段落 → N终稿段落
-    将原稿文本与合并后的终稿文本做字符级 diff，
-    然后按终稿段落边界切割 diff 结果，分别输出到不同结果段落。
-    
-    Args:
-        result_doc: 结果文档
-        orig_text: 原稿段落文本
-        all_f_indices: 终稿段落索引列表（按终稿顺序，主段落在前）
-        final_paras: 终稿段落列表
-        SENTENCE_SIM_THRESHOLD: 句子相似度阈值
-    """
-    # 合并所有终稿段落文本
-    combined_final_text = "".join(
-        final_paras[sf]['text'] for sf in all_f_indices
-    )
-    
-    # 字符级 diff
-    diffs = char_level_diff(orig_text, combined_final_text)
-    
-    # 构建终稿段落边界表：[(start, end, f_idx), ...]
-    # start/end 是在 combined_final_text 中的字符位置
-    boundaries = []
-    cursor = 0
-    for sf in all_f_indices:
-        sf_text = final_paras[sf]['text']
-        sf_len = len(sf_text)
-        boundaries.append((cursor, cursor + sf_len, sf))
-        cursor += sf_len
-    
-    # 跟踪每个 diff 片段在 combined_final_text 中的位置
-    # f_pos: 当前在终稿合并文本中的位置
-    f_pos = 0
-    
-    # 为每个终稿段落收集其范围内的 diff 片段
-    # para_diffs[f_idx] = [(tag, text), ...]
-    para_diffs = {sf: [] for sf in all_f_indices}
-    
-    for tag, text in diffs:
-        if not text:
-            continue
-        text_len = len(text)
-        
-        if tag == 'delete':
-            # delete 不占终稿位置，归入当前 f_pos 所在的终稿段落
-            target_sf = _find_boundary(boundaries, f_pos)
-            para_diffs[target_sf].append((tag, text))
-            # f_pos 不变
-        elif tag == 'equal':
-            # equal 占据 f_pos ~ f_pos+text_len 的终稿范围
-            # 可能跨越多个终稿段落，需要按边界拆分
-            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
-            f_pos += text_len
-        elif tag == 'insert':
-            # insert 占据 f_pos ~ f_pos+text_len 的终稿范围
-            # 可能跨越多个终稿段落，需要按边界拆分
-            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
-            f_pos += text_len
-    
-    # 逐终稿段落输出
-    for sf in all_f_indices:
-        p = result_doc.add_paragraph()
-        sf_diffs = para_diffs[sf]
-        
-        if not sf_diffs:
-            # 无 diff 内容，直接输出终稿原文
-            p.add_run(final_paras[sf]['text'])
-        else:
-            # 检查是否全是 equal（即无改动）
-            all_equal = all(t == 'equal' for t, _ in sf_diffs)
-            if all_equal:
-                for t, txt in sf_diffs:
-                    p.add_run(txt)
-            else:
-                _apply_diff_run(p, sf_diffs)
-
-
 def _find_boundary(boundaries, pos):
     """根据位置找到对应的终稿段落索引"""
     for b_start, b_end, sf in boundaries:
@@ -378,6 +440,61 @@ def _split_diff_to_boundaries(para_diffs, boundaries, tag, text, start_pos):
             para_diffs[sf].append((tag, chunk))
 
 
+def _build_boundaries(items, key_fn):
+    """
+    构建边界表：[(start, end, idx), ...]
+    
+    Args:
+        items: 有序列表
+        key_fn: 从 item 提取文本的函数
+    
+    Returns:
+        boundaries: [(start, end, idx), ...] 按 items 顺序排列
+    """
+    boundaries = []
+    cursor = 0
+    for item in items:
+        text = key_fn(item)
+        text_len = len(text)
+        boundaries.append((cursor, cursor + text_len, item))
+        cursor += text_len
+    return boundaries
+
+
+def _distribute_diff_to_boundaries(diffs, boundaries):
+    """
+    将字符级 diff 结果按边界表分配到对应的段落/句子。
+    
+    公共逻辑：遍历 diffs，对 delete 按当前 f_pos 归入对应边界，
+    对 equal/insert 按边界切割后分配。
+    
+    Args:
+        diffs: char_level_diff 返回的 [(tag, text), ...]
+        boundaries: [(start, end, idx), ...] 边界表
+    
+    Returns:
+        {idx: [(tag, text), ...]} 分配结果
+    """
+    idxs = [b[2] for b in boundaries]
+    para_diffs = {idx: [] for idx in idxs}
+    
+    f_pos = 0
+    for tag, text in diffs:
+        if not text:
+            continue
+        text_len = len(text)
+        
+        if tag == 'delete':
+            target = _find_boundary(boundaries, f_pos)
+            if target is not None:
+                para_diffs[target].append((tag, text))
+        elif tag in ('equal', 'insert'):
+            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
+            f_pos += text_len
+    
+    return para_diffs
+
+
 def _apply_diff_run(result_para, diffs):
     """
     将 char_level_diff 的结果写入结果段落。
@@ -395,6 +512,67 @@ def _apply_diff_run(result_para, diffs):
         elif tag == 'insert':
             run = result_para.add_run(text)
             run.font.color.rgb = RGBColor(255, 0, 0)
+
+
+def _merge_unmatched_sentences(orig_sentences, final_sentences,
+                                used_orig, used_final, sentence_match,
+                                SENTENCE_SIM_THRESHOLD,
+                                merge_groups, group_used_orig, group_used_final):
+    """
+    兜底合并：贪心匹配 + 现有合并/拆分检测后仍有未匹配句时，
+    尝试与相邻已匹配句合并，兜底处理拆分碎片。
+
+    例如 "2" 和 "0！最终..." 被标点拆分后各自独立，但合并后
+    "2:0！最终..." 能与 "2:0。" 形成更好的匹配。
+
+    Args:
+        orig_sentences, final_sentences: 分句结果
+        used_orig, used_final: 当前已匹配/已分组的索引集合
+        sentence_match: 1:1 匹配结果 [(o_idx, f_idx, ratio), ...]
+        merge_groups: 已有的合并组，兜底结果追加至此（in-place）
+        group_used_orig, group_used_final: 已分组的索引集（in-place）
+    """
+    IMPROVEMENT_THRESHOLD = 0.15  # 合并后 ratio 提升超过此值才生效
+
+    unmatched_orig = sorted(set(range(len(orig_sentences))) - used_orig)
+    if not unmatched_orig:
+        return
+
+    # 收集已被合并组占用的 final 索引（避免冲突）
+    occupied_final = set()
+    for _, f_indices, _ in merge_groups:
+        occupied_final.update(f_indices)
+
+    for oi in unmatched_orig:
+        # 找 oi 前面最近的已匹配 orig 句
+        prev_candidates = [(m[0], m[1]) for m in sentence_match if m[0] < oi]
+        if not prev_candidates:
+            continue
+        prev_oi, prev_fi = max(prev_candidates, key=lambda x: x[0])
+
+        # 如果 prev_fi 已被合并组占用，跳过
+        if prev_fi in occupied_final:
+            continue
+
+        # 合并后 vs 同一 final 句的 ratio
+        merged_text = orig_sentences[prev_oi] + orig_sentences[oi]
+        merged_ratio = difflib.SequenceMatcher(
+            None, merged_text, final_sentences[prev_fi]
+        ).ratio()
+
+        # 当前最佳 solo ratio：prev 的匹配率 + oi 单独匹配的最佳值
+        prev_ratio = next((r for o, f, r in sentence_match if o == prev_oi), 0)
+        oi_best = max(
+            difflib.SequenceMatcher(
+                None, orig_sentences[oi], final_sentences[fi]
+            ).ratio()
+            for fi in range(len(final_sentences))
+        )
+        best_solo = max(prev_ratio, oi_best)
+
+        if merged_ratio - best_solo > IMPROVEMENT_THRESHOLD:
+            merge_groups.append(([prev_oi, oi], [prev_fi], merged_ratio))
+            group_used_orig.add(oi)
 
 
 def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, used_final, SENTENCE_SIM_THRESHOLD, sentence_match=None):
@@ -422,6 +600,7 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
         replaced_match_indices: 被合并组替代的1:1匹配在sentence_match中的索引集合
     """
     MAX_GROUP_SIZE = 3  # 最多合并/拆分3句
+    SEARCH_WINDOW = 5    # 合并/拆分检测时仅搜索相邻±5句范围内的候选，避免O(n²)遍历
     
     unmatched_orig = sorted(i for i in range(len(orig_sentences)) if i not in used_orig)
     unmatched_final = sorted(i for i in range(len(final_sentences)) if i not in used_final)
@@ -435,13 +614,18 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
             if not f_text.strip():
                 continue
             
-            for seg_start in range(len(unmatched_orig)):
+            # 窗口限制：只搜索原稿中 f_idx±SEARCH_WINDOW 范围内的未匹配句
+            window_start = max(0, f_idx - SEARCH_WINDOW)
+            window_end = min(len(orig_sentences), f_idx + SEARCH_WINDOW + 1)
+            window_orig = [oi for oi in unmatched_orig if window_start <= oi < window_end]
+            
+            for seg_start in range(len(window_orig)):
                 for group_size in range(2, MAX_GROUP_SIZE + 1):
                     seg_end = seg_start + group_size
-                    if seg_end > len(unmatched_orig):
+                    if seg_end > len(window_orig):
                         break
                     
-                    o_indices = unmatched_orig[seg_start:seg_end]
+                    o_indices = window_orig[seg_start:seg_end]
                     
                     # 连续性检查：索引必须相邻
                     if o_indices != list(range(o_indices[0], o_indices[0] + group_size)):
@@ -471,13 +655,18 @@ def _detect_sentence_merge_split(orig_sentences, final_sentences, used_orig, use
             if not o_text.strip():
                 continue
             
-            for seg_start in range(len(unmatched_final)):
+            # 窗口限制：只搜索终稿中 o_idx±SEARCH_WINDOW 范围内的未匹配句
+            window_start = max(0, o_idx - SEARCH_WINDOW)
+            window_end = min(len(final_sentences), o_idx + SEARCH_WINDOW + 1)
+            window_final = [fi for fi in unmatched_final if window_start <= fi < window_end]
+            
+            for seg_start in range(len(window_final)):
                 for group_size in range(2, MAX_GROUP_SIZE + 1):
                     seg_end = seg_start + group_size
-                    if seg_end > len(unmatched_final):
+                    if seg_end > len(window_final):
                         break
                     
-                    f_indices = unmatched_final[seg_start:seg_end]
+                    f_indices = window_final[seg_start:seg_end]
                     
                     # 连续性检查
                     if f_indices != list(range(f_indices[0], f_indices[0] + group_size)):
@@ -732,9 +921,7 @@ def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_i
     
     将原稿句子文本与合并后的终稿句子文本做字符级 diff，
     然后按终稿句子边界切割 diff 结果，分别输出到 result_para 的不同 run 区域。
-    
-    与段落级 _output_split_diff 的区别：所有输出在同一 result_para 内，
-    不创建新段落，仅按句子边界分段输出 diff。
+    所有输出在同一 result_para 内，不创建新段落。
     
     Args:
         result_para: 结果段落对象
@@ -742,39 +929,14 @@ def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_i
         final_sentences_map: {f_idx: sentence_text} 终稿句子映射
         f_indices: 终稿句子索引列表（按终稿顺序）
     """
-    # 合并所有终稿句子文本
     combined_final_text = "".join(final_sentences_map[fi] for fi in f_indices)
-    
-    # 字符级 diff
     diffs = char_level_diff(orig_text, combined_final_text)
     
-    # 构建终稿句子边界表：[(start, end, f_idx), ...]
-    boundaries = []
-    cursor = 0
-    for fi in f_indices:
-        sf_text = final_sentences_map[fi]
-        sf_len = len(sf_text)
-        boundaries.append((cursor, cursor + sf_len, fi))
-        cursor += sf_len
+    boundaries = _build_boundaries(
+        f_indices, lambda fi: final_sentences_map[fi]
+    )
+    para_diffs = _distribute_diff_to_boundaries(diffs, boundaries)
     
-    # 为每个终稿句子收集其范围内的 diff 片段
-    para_diffs = {fi: [] for fi in f_indices}
-    
-    f_pos = 0
-    for tag, text in diffs:
-        if not text:
-            continue
-        text_len = len(text)
-        
-        if tag == 'delete':
-            target_fi = _find_boundary(boundaries, f_pos)
-            if target_fi is not None:
-                para_diffs[target_fi].append((tag, text))
-        elif tag in ('equal', 'insert'):
-            _split_diff_to_boundaries(para_diffs, boundaries, tag, text, f_pos)
-            f_pos += text_len
-    
-    # 逐终稿句子输出（连续追加到同一个 result_para）
     for fi in f_indices:
         sf_diffs = para_diffs[fi]
         
@@ -792,8 +954,14 @@ def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_i
 def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD,
                          short_para_char_threshold=0, semantic_unit_thresholds=None):
     """
-    句子级别差异比较（改进版）
-    - 按终稿句子顺序输出
+    句子级别差异比较（方案 B：Diff 驱动的可靠边界分句）
+
+    核心改进（方案 B）：
+    - 使用 split_by_reliable_boundaries 替代 split_into_sentences
+    - 先做全文 char_diff，从 equal 区域提取可靠的标点边界
+    - 避免了"标点本身被编辑修改"导致的分句不一致问题
+
+    其他逻辑保持不变：
     - 贪心1:1匹配 + 句子级拆分/合并检测
     - 使用逆序对检测句子互换
     - 低于相似度阈值的配对直接标记新增+删除
@@ -801,38 +969,25 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     Args:
         short_para_char_threshold: >0 时，若原文+终稿总字符数不超过此值，
             直接走字符级diff，跳过句子拆分
-        semantic_unit_thresholds: 多级语义单元拆分配置，传给 split_into_sentences
+        semantic_unit_thresholds: 多级语义单元拆分配置，传给 split_by_reliable_boundaries
     """
     # 短段落直接字符级diff，避免句子拆分产生不合理的碎片
     if short_para_char_threshold > 0 and len(orig_text) + len(final_text) <= short_para_char_threshold:
         para_diff = char_level_diff(orig_text, final_text)
         _apply_diff_run(result_para, para_diff)
         return
-    orig_sentences = split_into_sentences(orig_text, semantic_unit_thresholds)
-    final_sentences = split_into_sentences(final_text, semantic_unit_thresholds)
-    
-    # ---- Mismatch 回退：句子数量不一致时，可能是标点本身被编辑改动了 ----
-    # 先分句再匹配，如果分句边界本身就不一致（比如逗号改句号），
-    # 贪心匹配大概率产生红蓝分离。此时回退到全段 char_diff 更安全。
-    if len(orig_sentences) != len(final_sentences):
-        fallback_max = (
-            semantic_unit_thresholds[0][1] * 2
-            if semantic_unit_thresholds
-            else short_para_char_threshold * 2
-            if short_para_char_threshold > 0
-            else 200
+
+    # ---- 分句：方案 B（Diff 驱动） 或 方案 A（直接标点） ----
+    if ENABLE_DIFF_DRIVEN_SPLIT:
+        # 方案 B：先做全文 char_diff，从 equal 区域提取可靠的标点边界
+        orig_sentences, final_sentences = split_by_reliable_boundaries(
+            orig_text, final_text, semantic_unit_thresholds
         )
-        if len(orig_text) + len(final_text) <= fallback_max:
-            logger.debug(
-                "sentence count mismatch (%d vs %d), "
-                "falling back to full-text char_diff (total=%d <= %d)",
-                len(orig_sentences), len(final_sentences),
-                len(orig_text) + len(final_text), fallback_max
-            )
-            para_diff = char_level_diff(orig_text, final_text)
-            _apply_diff_run(result_para, para_diff)
-            return
-    
+    else:
+        # 方案 A-1：直接按标点层级分句
+        orig_sentences = split_into_sentences(orig_text, semantic_unit_thresholds)
+        final_sentences = split_into_sentences(final_text, semantic_unit_thresholds)
+
     # 只有一个句子时，直接字符级比对
     if len(orig_sentences) == 1 and len(final_sentences) == 1:
         para_diff = char_level_diff(orig_text, final_text)
@@ -879,7 +1034,20 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     # 将分组占用的索引加入已用集合
     used_orig.update(group_used_orig)
     used_final.update(group_used_final)
-    
+
+    # ---- 步骤2.5: 未匹配句相邻合并兜底 ----
+    # 贪心匹配 + 现有合并/拆分检测后仍有未匹配句时，
+    # 尝试与相邻已匹配句合并，兜底处理拆分碎片
+    _merge_unmatched_sentences(
+        orig_sentences, final_sentences,
+        used_orig, used_final, sentence_match,
+        SENTENCE_SIM_THRESHOLD,
+        merge_groups, group_used_orig, group_used_final
+    )
+    # 将兜底合并加入已用集合
+    used_orig.update(group_used_orig)
+    used_final.update(group_used_final)
+
     # 构建查找表
     # merge_map: frozenset(f_indices) -> (o_indices, f_indices, ratio)  合并组（支持多终稿句）
     merge_map = {}  # f_idx -> (o_indices, f_indices, ratio)
@@ -1247,6 +1415,16 @@ def _clear_para_runs(paragraph):
             p_elem.remove(child)
 
 
+def _remove_element_safe(element):
+    """安全地从 DOM 中移除段落元素。"""
+    try:
+        parent = element.getparent()
+        if parent is not None:
+            parent.remove(element)
+    except Exception:
+        pass
+
+
 def _set_para_red_with_deletion(result_para, orig_text, font_info):
     """将一个段落标记为已删除（蓝色+删除线），保留段落中的图片/表格等元素"""
     has_content = False
@@ -1352,31 +1530,12 @@ def _output_split_diff_inplace(result_doc, base_para, orig_text, all_f_indices,
     combined_final_text = "".join(
         final_paras[sf]['text'] for sf in all_f_indices
     )
-
     diffs = char_level_diff(orig_text, combined_final_text)
-
-    boundaries = []
-    cursor = 0
-    for sf in all_f_indices:
-        sf_text = final_paras[sf]['text']
-        sf_len = len(sf_text)
-        boundaries.append((cursor, cursor + sf_len, sf))
-        cursor += sf_len
-
-    f_pos = 0
-    para_diffs_map = {sf: [] for sf in all_f_indices}
-
-    for tag, text in diffs:
-        if not text:
-            continue
-        text_len = len(text)
-
-        if tag == 'delete':
-            target_sf = _find_boundary(boundaries, f_pos)
-            para_diffs_map[target_sf].append((tag, text))
-        elif tag in ('equal', 'insert'):
-            _split_diff_to_boundaries(para_diffs_map, boundaries, tag, text, f_pos)
-            f_pos += text_len
+    
+    boundaries = _build_boundaries(
+        all_f_indices, lambda sf: final_paras[sf]['text']
+    )
+    para_diffs_map = _distribute_diff_to_boundaries(diffs, boundaries)
 
     # 输出：第一个拆分到 base_para，后续插入新段落
     first = True
@@ -1424,6 +1583,90 @@ def _output_split_diff_inplace(result_doc, base_para, orig_text, all_f_indices,
                         run.font.color.rgb = RGBColor(255, 0, 0)
 
 
+def _extract_table_texts(doc):
+    """
+    提取文档中所有表格的单元格文本，返回扁平列表。
+    每个元素包含表格索引、行列位置和文本内容。
+    
+    Args:
+        doc: python-docx Document 对象
+    
+    Returns:
+        [(table_idx, row_idx, col_idx, text), ...]
+    """
+    cells = []
+    for t_idx, table in enumerate(doc.tables):
+        for r_idx, row in enumerate(table.rows):
+            for c_idx, cell in enumerate(row.cells):
+                text = cell.text
+                cells.append((t_idx, r_idx, c_idx, text))
+    return cells
+
+
+def _compare_table_cells(orig_cells, final_cells, result_doc):
+    """
+    比较表格单元格并在结果文档中标记差异。
+    
+    匹配策略：先按 (table_idx, row_idx, col_idx) 精确匹配，
+    然后对文本不同的单元格做字符级 diff 标记。
+    
+    Args:
+        orig_cells: 原稿单元格列表 [(t_idx, r_idx, c_idx, text), ...]
+        final_cells: 终稿单元格列表 [(t_idx, r_idx, c_idx, text), ...]
+        result_doc: 结果文档（已加载，基于原稿）
+    """
+    # 构建索引查找表
+    final_cell_map = {}
+    for t_idx, r_idx, c_idx, text in final_cells:
+        key = (t_idx, r_idx, c_idx)
+        final_cell_map[key] = text
+    
+    # 遍历结果文档的表格，标记差异
+    for t_idx, table in enumerate(result_doc.tables):
+        if t_idx >= len(result_doc.tables):
+            break
+        for r_idx, row in enumerate(table.rows):
+            if r_idx >= len(table.rows):
+                break
+            for c_idx, cell in enumerate(row.cells):
+                if c_idx >= len(row.cells):
+                    break
+                key = (t_idx, r_idx, c_idx)
+                orig_text = cell.text
+                final_text = final_cell_map.get(key)
+                
+                if final_text is None:
+                    # 原稿有此单元格，终稿没有 → 蓝色删除
+                    if orig_text.strip():
+                        _clear_cell_paragraphs(cell)
+                        para = cell.paragraphs[0]
+                        run = para.add_run(orig_text)
+                        run.font.color.rgb = RGBColor(0, 0, 255)
+                        run.font.strike = True
+                elif orig_text != final_text:
+                    # 文本不同 → 字符级 diff
+                    _clear_cell_paragraphs(cell)
+                    para = cell.paragraphs[0]
+                    diffs = char_level_diff(orig_text, final_text)
+                    _apply_diff_run(para, diffs)
+    
+    # 终稿新增的表格/单元格（在原稿中不存在的）
+    # 用标记记录新增的表格和单元格索引
+    orig_cell_keys = set((t_idx, r_idx, c_idx) for t_idx, r_idx, c_idx, _ in orig_cells)
+    new_cells = [(t_idx, r_idx, c_idx, text) for t_idx, r_idx, c_idx, text in final_cells
+                 if (t_idx, r_idx, c_idx) not in orig_cell_keys and text.strip()]
+    
+    if new_cells:
+        logger.info("检测到 %d 个新增表格单元格（终稿独有），无法在原稿副本中自动插入，请手动检查", len(new_cells))
+
+
+def _clear_cell_paragraphs(cell):
+    """清空单元格所有段落的文本内容，保留段落结构"""
+    for para in cell.paragraphs:
+        for run in para.runs:
+            run.text = ''
+
+
 def compare_with_python_inplace(original_path, final_path, output_path):
     """在原稿复制版上开展比对和标记，保留图片、表格、页眉页脚等元素
 
@@ -1466,6 +1709,8 @@ def compare_with_python_inplace(original_path, final_path, output_path):
             final_map[p['text']].append(i)
 
         for text, indices in final_map.items():
+            if not text:  # 空段落不参与精确匹配，避免跨索引跳跃
+                continue
             if text in orig_map:
                 for o_idx in orig_map[text]:
                     for f_idx in indices:
@@ -1478,6 +1723,8 @@ def compare_with_python_inplace(original_path, final_path, output_path):
         matched_orig = set()
 
         for text, f_indices in final_map.items():
+            if not text:  # 空段落不参与精确匹配
+                continue
             if text in orig_map:
                 for o_idx in orig_map[text]:
                     for f_idx in f_indices:
@@ -1700,7 +1947,6 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
         # 段落级逆序对检测（段落互换/重排）
         moved_para_orig_set = set()
-        moved_para_orig_set = set()
         forward_moved_para_orig_set = set()
 
         para_pairs = []
@@ -1807,11 +2053,15 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         elif next_orig_idx not in matched_orig:
-                            _set_para_red_with_deletion(
-                                result_paras[next_orig_idx],
-                                orig_paras[next_orig_idx]['text'],
-                                orig_font_info[next_orig_idx]
-                            )
+                            if not orig_paras[next_orig_idx]['text']:
+                                # 未匹配的空段落 → 从 DOM 删除，不留空行
+                                _remove_element_safe(result_paras[next_orig_idx]._element)
+                            else:
+                                _set_para_red_with_deletion(
+                                    result_paras[next_orig_idx],
+                                    orig_paras[next_orig_idx]['text'],
+                                    orig_font_info[next_orig_idx]
+                                )
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         else:
@@ -1833,11 +2083,15 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         elif next_orig_idx not in matched_orig:
-                            _set_para_red_with_deletion(
-                                result_paras[next_orig_idx],
-                                orig_paras[next_orig_idx]['text'],
-                                orig_font_info[next_orig_idx]
-                            )
+                            if not orig_paras[next_orig_idx]['text']:
+                                # 未匹配的空段落 → 从 DOM 删除，不留空行
+                                _remove_element_safe(result_paras[next_orig_idx]._element)
+                            else:
+                                _set_para_red_with_deletion(
+                                    result_paras[next_orig_idx],
+                                    orig_paras[next_orig_idx]['text'],
+                                    orig_font_info[next_orig_idx]
+                                )
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         else:
@@ -1941,15 +2195,34 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             for r in p.runs:
                                 _apply_run_font(r, font_info)
 
-        # 步骤C: 处理剩余的删除段落
+        # 步骤C: 处理剩余的删除段落和未处理的移动段落
         while next_orig_idx < len(orig_paras):
-            if next_orig_idx not in processed_orig and next_orig_idx not in matched_orig:
-                _set_para_red_with_deletion(
-                    result_paras[next_orig_idx],
-                    orig_paras[next_orig_idx]['text'],
-                    orig_font_info[next_orig_idx]
-                )
+            if next_orig_idx not in processed_orig:
+                if next_orig_idx not in matched_orig:
+                    if not orig_paras[next_orig_idx]['text']:
+                        # 未匹配的空段落 → 从 DOM 删除，不留空行
+                        _remove_element_safe(result_paras[next_orig_idx]._element)
+                    else:
+                        _set_para_red_with_deletion(
+                            result_paras[next_orig_idx],
+                            orig_paras[next_orig_idx]['text'],
+                            orig_font_info[next_orig_idx]
+                        )
+                elif next_orig_idx in moved_para_orig_set:
+                    # 移动段落的新位置已在前方输出，
+                    # 原位置标记为蓝色删除
+                    _set_para_red_with_deletion(
+                        result_paras[next_orig_idx],
+                        orig_paras[next_orig_idx]['text'],
+                        orig_font_info[next_orig_idx]
+                    )
             next_orig_idx += 1
+
+        # ── 表格内容对比 ──
+        orig_cells = _extract_table_texts(orig_doc)
+        final_cells = _extract_table_texts(final_doc)
+        if orig_cells or final_cells:
+            _compare_table_cells(orig_cells, final_cells, result_doc)
 
         result_doc.save(output_path)
         return True, "短句级比对（原地）"
