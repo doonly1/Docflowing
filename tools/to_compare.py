@@ -734,28 +734,28 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
         _apply_diff_run(result_para, para_diff)
         return
     
-    # ---- 步骤1: 贪心1:1匹配 ----
+    # ---- 步骤1: 贪心1:1匹配（按置信度降序分配）----
+    # 收集所有候选对，按 ratio 降序排序后分配（高置信度优先）
+    all_pairs = []  # (ratio, o_idx, f_idx)
+    for f_idx, f_sent in enumerate(final_sentences):
+        for o_idx, o_sent in enumerate(orig_sentences):
+            ratio = difflib.SequenceMatcher(None, o_sent, f_sent).ratio()
+            if ratio >= SENTENCE_SIM_THRESHOLD:
+                all_pairs.append((ratio, o_idx, f_idx))
+    
+    # 按 ratio 降序，高置信度优先分配；ratio 相同时保持原稿顺序稳定
+    all_pairs.sort(key=lambda x: (-x[0], x[1]))
+    
     used_orig = set()
     used_final = set()
-    
-    # sentence_match: [(orig_idx, final_idx, ratio), ...]
     sentence_match = []
     
-    for f_idx, f_sent in enumerate(final_sentences):
-        best_ratio = 0
-        best_o_idx = -1
-        for o_idx, o_sent in enumerate(orig_sentences):
-            if o_idx in used_orig:
-                continue
-            ratio = difflib.SequenceMatcher(None, o_sent, f_sent).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_o_idx = o_idx
-        
-        if best_o_idx != -1 and best_ratio >= SENTENCE_SIM_THRESHOLD:
-            sentence_match.append((best_o_idx, f_idx, best_ratio))
-            used_orig.add(best_o_idx)
-            used_final.add(f_idx)
+    for ratio, o_idx, f_idx in all_pairs:
+        if o_idx in used_orig or f_idx in used_final:
+            continue
+        sentence_match.append((o_idx, f_idx, ratio))
+        used_orig.add(o_idx)
+        used_final.add(f_idx)
     
     # ---- 步骤2: 句子级拆分/合并检测 ----
     merge_groups, split_groups, group_used_orig, group_used_final, replaced_match_indices = \
@@ -1365,18 +1365,49 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             matched_orig.add(o_idx)
                             break
 
+        # 预计算"有效（非空）索引"，用于 position_score 时空段落不计入位置偏移
+        orig_nonempty_idx = []  # orig_nonempty_idx[o_idx] = 该段在"仅非空段"中的序号
+        orig_nonempty_count = 0
+        for i, p in enumerate(orig_paras):
+            if p['text'].strip():
+                orig_nonempty_idx.append(orig_nonempty_count)
+                orig_nonempty_count += 1
+            else:
+                orig_nonempty_idx.append(-1)  # 空段标记为 -1
+
+        final_nonempty_idx = []
+        final_nonempty_count = 0
+        for i, p in enumerate(final_paras):
+            if p['text'].strip():
+                final_nonempty_idx.append(final_nonempty_count)
+                final_nonempty_count += 1
+            else:
+                final_nonempty_idx.append(-1)
+
         match_candidates = []
         for f_idx in range(len(final_paras)):
             if f_match[f_idx] != -1:
                 continue
+            # 终稿空段落不参与相似度匹配，直接作为新增处理
+            if not final_paras[f_idx]['text'].strip():
+                continue
             for o_idx in range(len(orig_paras)):
                 if o_idx in matched_orig:
+                    continue
+                # 原稿空段落不参与相似度匹配
+                if not orig_paras[o_idx]['text'].strip():
                     continue
                 ratio = difflib.SequenceMatcher(
                     None, orig_paras[o_idx]['text'], final_paras[f_idx]['text']
                 ).ratio()
                 if ratio >= PARA_SIM_THRESHOLD:
-                    position_score = 1.0 / (abs(o_idx - f_idx) + 1)
+                    # 用非空段有效索引计算 position_score，空段落不干扰位置偏移
+                    adj_o = orig_nonempty_idx[o_idx]
+                    adj_f = final_nonempty_idx[f_idx]
+                    if adj_o >= 0 and adj_f >= 0:
+                        position_score = 1.0 / (abs(adj_o - adj_f) + 1)
+                    else:
+                        position_score = 0.5  #  fallback（理论上不会走到这里）
                     total_score = ratio * 0.7 + position_score * 0.3
                     match_candidates.append((total_score, ratio, o_idx, f_idx))
 
@@ -1548,12 +1579,16 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
         # 段落级逆序对检测（段落互换/重排）
         moved_para_orig_set = set()
+        moved_para_orig_set = set()
         forward_moved_para_orig_set = set()
 
         para_pairs = []
         for f_i in range(len(final_paras)):
             o_i = f_match[f_i]
             if o_i != -1 and not isinstance(o_i, list):
+                # 空段落不参与移动检测 —— 空段落是格式元素，其位置变化不代表内容移动
+                if not final_paras[f_i]['text'].strip() and not orig_paras[o_i]['text'].strip():
+                    continue
                 para_pairs.append((o_i, f_i))
 
         para_pairs_sorted = sorted(para_pairs, key=lambda x: x[0])
@@ -1584,7 +1619,20 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
             # 确定目标原稿索引
             if o_idx == -1:
-                target_o = len(orig_paras)
+                # 查找下一个有匹配的最终稿段落的 o_idx，作为蓝后的截止位置
+                # 避免将后续正常出现的原稿段落误标为删除
+                next_target = None
+                for nf in range(f_idx + 1, len(final_paras)):
+                    no = f_match[nf]
+                    if no != -1:
+                        if isinstance(no, list):
+                            next_target = min(no)
+                        else:
+                            next_target = no
+                        break
+                if next_target is None:
+                    next_target = len(orig_paras)
+                target_o = next_target
             elif isinstance(o_idx, list):
                 target_o = min(o_idx)
             else:
