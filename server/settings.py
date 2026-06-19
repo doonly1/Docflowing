@@ -20,7 +20,8 @@ _DEFAULT_DOC_CONFIG = {
     'compare': {
         'sentence_similarity_threshold': 0.40,
         'para_similarity_threshold': 0.40,
-        'short_para_char_threshold': 50,
+        'short_para_char_threshold': 60,
+        'semantic_unit_thresholds': [30, 30],  # 仅数字，标点由 to_compare.py 的 PUNCTUATION_LEVELS 按序匹配
     },
     'last_workdir': '',
     '哈喽沃尔得有限公司': {

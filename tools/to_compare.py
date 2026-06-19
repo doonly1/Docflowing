@@ -22,18 +22,46 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+# 标点集按层级固定（中英文混合，从强到弱）
+PUNCTUATION_LEVELS = [
+    "。！？!?",     # L1：强终结符
+    "；：;:",     # L2：中强分隔符
+    "，,",        # L3（末级）：弱分隔符，终端拆分
+]
+# 顿号"、"不参与拆分
+
+
+def _build_thresholds(values):
+    """将阈值数字列表与固定标点集合并为内部格式 [(punct, max_len), ...]"""
+    result = []
+    for i, punct in enumerate(PUNCTUATION_LEVELS):
+        result.append((punct, values[i] if i < len(values) else None))
+    return result
+
+
 def load_compare_config():
     """从yaml配置文件加载比较参数（支持用户自定义配置）"""
     config = load_user_config()
     
+    sentence_threshold = 0.40
+    para_threshold = 0.40
+    short_para_char_threshold = 60
+    thresholds = _build_thresholds([30, 30])
+    
     if config:
         compare_config = config.get('compare', {})
-        sentence_threshold = compare_config.get('sentence_similarity_threshold', 0.40)
-        para_threshold = compare_config.get('para_similarity_threshold', 0.40)
-        short_para_char_threshold = compare_config.get('short_para_char_threshold', 50)
-        return sentence_threshold, para_threshold, short_para_char_threshold
+        sentence_threshold = compare_config.get('sentence_similarity_threshold', sentence_threshold)
+        para_threshold = compare_config.get('para_similarity_threshold', para_threshold)
+        short_para_char_threshold = compare_config.get('short_para_char_threshold', short_para_char_threshold)
+        
+        raw = compare_config.get('semantic_unit_thresholds')
+        if raw:
+            if isinstance(raw, list) and raw and isinstance(raw[0], (int, float)):
+                thresholds = _build_thresholds(raw)
+            else:
+                thresholds = [(item['punctuation'], item.get('threshold')) for item in raw]
     
-    return 0.40, 0.40, 50  # 默认值
+    return sentence_threshold, para_threshold, short_para_char_threshold, thresholds
 
 
 def find_docx_files(workdir):
@@ -126,17 +154,71 @@ def char_level_diff(original_text, final_text):
     return result
 
 
-def split_into_sentences(text):
-    """按逗号和句号分割句子，保留标点符号（支持中英文标点）"""
+def split_into_sentences(text, semantic_unit_thresholds=None):
+    """按语义单元层次递归分割句子
+    
+    多级拆分策略（默认）：
+    L1：先用强标点（。！？）切分，子句 ≤ 100 字则停止
+    L2：超长子句再按次强标点（；：）切分，子句 ≤ 80 字则停止
+    L3（末级）：按逗号切分，不再判断阈值。顿号永远不参与切分
+    
+    Args:
+        text: 待分句文本
+        semantic_unit_thresholds: [(punctuation_chars, max_len), ...] 按此顺序递归
+                                  末级的 max_len 被忽略（永远拆分到该级）
+                                  None 表示向后兼容的旧行为（逗号+句号一起切）
+    """
     import re
-    # 按逗号和句号分割，保留标点符号（同时支持中英文标点）
-    sentences = re.split(r'([，,。！!？?；;：:])', text)
-    # 合并句子和标点符号
+    if semantic_unit_thresholds is None:
+        # 向后兼容：所有标点一起切
+        sentences = re.split(r'([，,。！!？?；;：:])', text)
+        result = []
+        for i in range(0, len(sentences) - 1, 2):
+            result.append(sentences[i] + sentences[i + 1])
+        if len(sentences) % 2 == 1 and sentences[-1]:
+            result.append(sentences[-1])
+        return result
+    
+    return _recursive_split_with_thresholds(text, semantic_unit_thresholds)
+
+
+def _recursive_split_with_thresholds(text, thresholds, level=0):
+    """递归按级切分
+    
+    非末级：用对应标点切分，子段 ≤ 阈值则停止下钻
+    末级：直接切分到该级，不再判断阈值
+    """
+    import re
+    if level >= len(thresholds):
+        return [text]  # 超出定义层级，不再拆分
+    
+    punct_chars, max_len = thresholds[level]
+    is_last_level = (level == len(thresholds) - 1)
+    
+    # 用捕获组保留标点
+    parts = re.split(f'([{re.escape(punct_chars)}])', text)
+    
+    # 合并内容+标点
+    segments = []
+    for i in range(0, len(parts) - 1, 2):
+        segment = parts[i] + parts[i + 1]
+        segments.append(segment)
+    if len(parts) % 2 == 1 and parts[-1]:
+        segments.append(parts[-1])
+    
+    # 每个子段独立判断
     result = []
-    for i in range(0, len(sentences) - 1, 2):
-        result.append(sentences[i] + sentences[i + 1])
-    if len(sentences) % 2 == 1 and sentences[-1]:
-        result.append(sentences[-1])
+    for seg in segments:
+        if is_last_level:
+            # 末级：直接拆分到这级，不再判断阈值
+            result.append(seg)
+        elif len(seg) <= max_len:
+            # 未超阈值 → 语义单元，保留
+            result.append(seg)
+        else:
+            # 超过阈值 → 递归下钻
+            result.extend(_recursive_split_with_thresholds(seg, thresholds, level + 1))
+    
     return result
 
 
@@ -708,7 +790,7 @@ def _output_sentence_split_diff(result_para, orig_text, final_sentences_map, f_i
 
 
 def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHOLD,
-                         short_para_char_threshold=0):
+                         short_para_char_threshold=0, semantic_unit_thresholds=None):
     """
     句子级别差异比较（改进版）
     - 按终稿句子顺序输出
@@ -719,14 +801,37 @@ def sentence_level_diff(orig_text, final_text, result_para, SENTENCE_SIM_THRESHO
     Args:
         short_para_char_threshold: >0 时，若原文+终稿总字符数不超过此值，
             直接走字符级diff，跳过句子拆分
+        semantic_unit_thresholds: 多级语义单元拆分配置，传给 split_into_sentences
     """
     # 短段落直接字符级diff，避免句子拆分产生不合理的碎片
     if short_para_char_threshold > 0 and len(orig_text) + len(final_text) <= short_para_char_threshold:
         para_diff = char_level_diff(orig_text, final_text)
         _apply_diff_run(result_para, para_diff)
         return
-    orig_sentences = split_into_sentences(orig_text)
-    final_sentences = split_into_sentences(final_text)
+    orig_sentences = split_into_sentences(orig_text, semantic_unit_thresholds)
+    final_sentences = split_into_sentences(final_text, semantic_unit_thresholds)
+    
+    # ---- Mismatch 回退：句子数量不一致时，可能是标点本身被编辑改动了 ----
+    # 先分句再匹配，如果分句边界本身就不一致（比如逗号改句号），
+    # 贪心匹配大概率产生红蓝分离。此时回退到全段 char_diff 更安全。
+    if len(orig_sentences) != len(final_sentences):
+        fallback_max = (
+            semantic_unit_thresholds[0][1] * 2
+            if semantic_unit_thresholds
+            else short_para_char_threshold * 2
+            if short_para_char_threshold > 0
+            else 200
+        )
+        if len(orig_text) + len(final_text) <= fallback_max:
+            logger.debug(
+                "sentence count mismatch (%d vs %d), "
+                "falling back to full-text char_diff (total=%d <= %d)",
+                len(orig_sentences), len(final_sentences),
+                len(orig_text) + len(final_text), fallback_max
+            )
+            para_diff = char_level_diff(orig_text, final_text)
+            _apply_diff_run(result_para, para_diff)
+            return
     
     # 只有一个句子时，直接字符级比对
     if len(orig_sentences) == 1 and len(final_sentences) == 1:
@@ -1117,12 +1222,28 @@ def _apply_run_font(run, font_info):
         pass
 
 
+def _is_pure_image_para(paragraph):
+    """检查段落是否只包含图片（无文字内容），这类段落跳过标记规则"""
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    if paragraph._element.find('.//w:drawing', ns) is None:
+        return False
+    # 纯图片段落的特征：文本全空
+    return not paragraph.text.strip()
+
+
 def _clear_para_runs(paragraph):
-    """清空段落的所有run和hyperlink元素，保留段落级格式"""
+    """清空段落的所有run和hyperlink元素，保留段落级格式
+    
+    注意：保留包含图片（<w:drawing>）的 run，避免误删图片。
+    """
     p_elem = paragraph._element
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
     for child in list(p_elem):
         tag = child.tag
         if tag.endswith('}r') or tag.endswith('}hyperlink'):
+            # 保留包含图片的 run/hyperlink（不删除）
+            if child.find('.//w:drawing', ns) is not None:
+                continue
             p_elem.remove(child)
 
 
@@ -1315,7 +1436,7 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
     try:
         # 预加载配置
-        SENTENCE_SIM_THRESHOLD, PARA_SIM_THRESHOLD, SHORT_PARA_CHAR_THRESHOLD = load_compare_config()
+        SENTENCE_SIM_THRESHOLD, PARA_SIM_THRESHOLD, SHORT_PARA_CHAR_THRESHOLD, SEMANTIC_UNIT_THRESHOLDS = load_compare_config()
 
         # 打开文档（匹配用）
         orig_doc = Document(original_path)
@@ -1736,16 +1857,28 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
                     first_o = min(o_idx)
                     p = result_paras[first_o]
+
+                    # 纯图片段落跳过合并标记，保持原样
+                    if _is_pure_image_para(p):
+                        for idx in o_idx:
+                            processed_orig.add(idx)
+                        continue
+
                     _clear_para_runs(p)
                     font_info = orig_font_info[first_o]
 
                     sentence_level_diff(combined_orig_text, final_text, p, SENTENCE_SIM_THRESHOLD,
-                                         SHORT_PARA_CHAR_THRESHOLD)
+                                         SHORT_PARA_CHAR_THRESHOLD, SEMANTIC_UNIT_THRESHOLDS)
                     for r in p.runs:
                         _apply_run_font(r, font_info)
 
                     for extra_o in sorted(o_idx):
                         if extra_o != first_o and extra_o < len(result_paras):
+                            # 纯图片段落跳过合并标记
+                            if _is_pure_image_para(result_paras[extra_o]):
+                                # 确保 extra_o 被标记为已处理，避免后续再被打标
+                                processed_orig.add(extra_o)
+                                continue
                             _clear_para_runs(result_paras[extra_o])
                             if orig_paras[extra_o]['text']:
                                 run = result_paras[extra_o].add_run(
@@ -1764,7 +1897,7 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                         p_new = result_doc.add_paragraph()
                         _apply_para_format_from_last(result_doc, p_new)
                         sentence_level_diff(orig_text, final_text, p_new, SENTENCE_SIM_THRESHOLD,
-                                             SHORT_PARA_CHAR_THRESHOLD)
+                                             SHORT_PARA_CHAR_THRESHOLD, SEMANTIC_UNIT_THRESHOLDS)
                         for r in p_new.runs:
                             _apply_run_font(r, font_info)
 
@@ -1779,6 +1912,10 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                         orig_text = orig_paras[o_idx]['text']
                         p = result_paras[o_idx]
                         font_info = orig_font_info[o_idx]
+
+                        # 纯图片段落不参与标记，保持原样
+                        if _is_pure_image_para(p):
+                            continue
 
                         if o_idx in o_match:
                             split_f_indices = sorted(o_match[o_idx])
@@ -1800,7 +1937,7 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                         else:
                             _clear_para_runs(p)
                             sentence_level_diff(orig_text, final_text, p, SENTENCE_SIM_THRESHOLD,
-                                                 SHORT_PARA_CHAR_THRESHOLD)
+                                                 SHORT_PARA_CHAR_THRESHOLD, SEMANTIC_UNIT_THRESHOLDS)
                             for r in p.runs:
                                 _apply_run_font(r, font_info)
 

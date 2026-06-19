@@ -646,7 +646,12 @@
                 if (key === 'compare') {
                     yaml += 'compare:\n';
                     for (const subKey in obj[key]) {
-                        yaml += `  ${subKey}: ${obj[key][subKey]}\n`;
+                        const val = obj[key][subKey];
+                        if (Array.isArray(val)) {
+                            yaml += `  ${subKey}: [${val.join(', ')}]\n`;
+                        } else {
+                            yaml += `  ${subKey}: ${val}\n`;
+                        }
                     }
                 } else {
                     const companyInfo = obj[key];
@@ -733,7 +738,16 @@
             if (val === 'true') return true;
             if (val === 'false') return false;
             if (val === 'null' || val === '') return '';
+            // YAML 内联列表 [50, 30]
+            if (val.startsWith('[') && val.endsWith(']')) {
+                return val.slice(1, -1).split(',').map(v => {
+                    const trimmed = v.trim();
+                    const num = Number(trimmed);
+                    return isNaN(num) || trimmed === '' ? trimmed : num;
+                });
+            }
             const num = Number(val);
+            if (!isNaN(num) && val !== '') return num;
             if (!isNaN(num) && val !== '') return num;
             if ((val.startsWith('"') && val.endsWith('"')) ||
                 (val.startsWith("'") && val.endsWith("'"))) {
