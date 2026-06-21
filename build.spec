@@ -13,7 +13,6 @@ a = Analysis(
     (r'E:\download\learn\Docflowing\kb\fts_ext', 'kb/fts_ext'),
     ],
     hiddenimports=[
-        # ========== KB 模块 ==========
         'kb',
         'kb.auto_extract',
         'kb.config',
@@ -44,7 +43,6 @@ a = Analysis(
         'kb.skills.manager',
         'kb.skills.curator',
         'kb.skills.usage',
-        # ========== FB 模块 ==========
         'fb',
         'fb.models',
         'fb.routes',
@@ -60,7 +58,6 @@ a = Analysis(
         'fb.routes_trash',
         'fb.database',
         'fb.decorators',
-        # ========== P2P 模块 ==========
         'p2p',
         'p2p.node',
         'p2p.discovery',
@@ -68,19 +65,17 @@ a = Analysis(
         'p2p.api',
         'p2p.models',
         'p2p.proxy',
-        # ========== Server 模块 ==========
         'server',
         'server.auth',
         'server.middleware',
         'server.runner',
         'server.settings',
         'server.workspace',
-        # ========== pywebview（edgechromium 后端） ==========
+        'server.tool_runner',
         'webview',
         'webview.platforms.edgechromium',
         'webview.platforms.winforms',
         'webview.platforms.windows',
-        # ========== Tools（Python 模块形式引入） ==========
         'logging_config',
         'doc_process',
         'mystyle',
@@ -94,7 +89,6 @@ a = Analysis(
         'load_config',
         'tool_defs',
         'WordKeepAlive',
-        # ========== 第三方隐式依赖 ==========
         'flask',
         'flask_cors',
         'zeroconf',
@@ -113,9 +107,7 @@ a = Analysis(
         'PIL._tkinter_finder',
         'PIL.Image',
         'PIL.ImageTk',
-        'appdirs',
         'packaging',
-        # ========== Windows 可选依赖（COM + Word） ==========
         'win32com',
         'pythoncom',
         'win32api',
@@ -128,7 +120,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # 注意：不排除 tkinter —— desktop_app.py 的文件选择/保存对话框依赖它
         'unittest',
         'pdb',
         'test',
@@ -149,14 +140,13 @@ a = Analysis(
 )
 
 pyz = PYZ(a.pure)
-
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='文澜',
+    name='Docflowing',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -169,8 +159,17 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=r'E:\download\learn\Docflowing\ui\favicon.ico',
     contents_directory='.',
+    onefile=False,
 )
-
-# onedir 模式（保持目录结构便于调试 + 资源文件按原生路径读写）
-# 若要切换为单文件模式，将 EXE 改为 COLLECT + 独立 EXE(onefile=True)。
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='Docflowing',
+)

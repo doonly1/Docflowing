@@ -18,7 +18,7 @@ import webbrowser
 
 # ==================== 配置 ====================
 
-APP_NAME = '文澜'
+APP_NAME = 'Docflowing'
 DEFAULT_PORT = 5000
 DEV_MODE = os.environ.get('DOCFLOWING_DEV') == '1'
 
@@ -48,8 +48,8 @@ def _get_runtime_dir():
         return os.path.join(_get_root_dir(), 'data')
     if is_packaged:
         # 打包模式：使用 %APPDATA%/Docflowing
-        from appdirs import user_data_dir
-        return user_data_dir(APP_NAME, 'Docflowing')
+        appdata = os.environ.get('APPDATA') or os.path.expanduser('~/.local/share')
+        return os.path.join(appdata, APP_NAME)
     # 开发模式：项目根下的 workspaces/
     return os.path.join(_get_root_dir(), 'workspaces')
 
@@ -500,10 +500,66 @@ def run_word_keepalive():
         sys.exit(1)
 
 
+def _run_tool_cli():
+    """打包后通过 --run-tool 参数运行工具脚本（替代 subprocess 调用 .py）
+
+    用法: Docflowing.exe --run-tool <tool_name> <file1> [file2 ...]
+    """
+    if len(sys.argv) < 4:
+        sys.exit(1)
+
+    tool_name = sys.argv[2]
+    tool_paths = sys.argv[3:]
+
+    root = _get_root_dir()
+    tools_dir = os.path.join(root, 'tools')
+
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+
+    try:
+        import importlib
+        mod = importlib.import_module(tool_name)
+
+        _TOOL_DISPATCH = {
+            'to_docx': lambda: [
+                mod.generate_docx(p) if os.path.isfile(p) else mod.convert_folder(p)
+                for p in tool_paths
+            ],
+            'to_compare': lambda: (
+                mod.main(os.path.dirname(tool_paths[0]), tool_paths[0], tool_paths[1])
+                if len(tool_paths) >= 2 else mod.main(tool_paths[0])
+            ),
+            'to_pdf': lambda: [
+                mod.convert_single_to_pdf(p) if os.path.isfile(p) else mod.convert_to_pdf(p)
+                for p in tool_paths
+            ],
+            'to_pageNum': lambda: [
+                mod.add_page_number_single(p) if os.path.isfile(p) else mod.add_page_numbers(p)
+                for p in tool_paths
+            ],
+            'to_redhead': lambda: [
+                mod.add_seal_single(p) if os.path.isfile(p) else mod.add_seal(p)
+                for p in tool_paths
+            ],
+            'to_index': lambda: mod.build_index(tool_paths[0] if tool_paths else '.'),
+        }
+
+        runner = _TOOL_DISPATCH.get(tool_name)
+        if not runner:
+            sys.exit(1)
+        runner()
+    except Exception:
+        sys.exit(1)
+
+
 def main():
     # ──── 参数处理 ────
     if '--word-keepalive' in sys.argv:
         run_word_keepalive()
+        return
+    if '--run-tool' in sys.argv:
+        _run_tool_cli()
         return
 
     # ──── 单实例锁 ────
@@ -529,69 +585,102 @@ def main():
         root.destroy()
         return
 
-    # ──── 创建 pywebview 窗口 ────
-    import webview
+    # ──── 创建 pywebview 窗口（回退方案：浏览器模式）────
+    def _desktop_or_browser():
+        nonlocal lock_sock
+        """尝试创建 pywebview 桌面窗口，失败则打开系统浏览器"""
+        try:
+            import webview
+        except ImportError:
+            return _open_browser_mode(port)
 
-    # 补充 edgechromium 后端缺失的 create_file_dialog（对话框用）
-    import webview.platforms.edgechromium as _edge
-    from webview.platforms.winforms import create_file_dialog as _wfd
-    _edge.EdgeChrome.create_file_dialog = lambda self, dt, d, am, sf, ft, uid: _wfd(dt, d, am, sf, ft, uid)
+        # PyInstaller 打包后 pythonnet/clr_loader 可能无法
+        # 正确加载 .NET Runtime。捕获异常并回退到浏览器模式。
+        _GUI_BACKEND = 'edgechromium'
+        try:
+            import webview.platforms.edgechromium as _edge
+        except Exception:
+            try:
+                import webview.platforms.winforms as _edge
+                _GUI_BACKEND = 'winforms'
+            except Exception:
+                return _open_browser_mode(port)
 
-    # 创建窗口前算好居中坐标，直接传给 create_window（WinForms 用 Manual 定位）
-    import tkinter as tk
-    _root = tk.Tk()
-    _root.withdraw()
-    _sw = _root.winfo_screenwidth()
-    _sh = _root.winfo_screenheight()
-    _root.destroy()
-    _cx = max(0, (_sw - 1100) // 2)
-    _cy = max(0, (_sh - 700) // 2)
+        # 补充 create_file_dialog（edgechromium 后端缺失此方法）
+        if _GUI_BACKEND == 'edgechromium':
+            import webview.platforms.winforms as _wforms
+            from webview.platforms.winforms import create_file_dialog as _wfd
+            _edge.EdgeChrome.create_file_dialog = lambda self, dt, d, am, sf, ft, uid: _wfd(dt, d, am, sf, ft, uid)
 
-    api = DesktopAPI()
-    window = webview.create_window(
-        APP_NAME,
-        url=f'http://127.0.0.1:{port}',
-        width=1100,
-        height=700,
-        x=_cx, y=_cy,          # 预计算居中坐标，WinForms 用 Manual 模式定位
-        min_size=(800, 500),
-        frameless=True,
-        easy_drag=False,       # 关闭全局拖拽，避免吃点击事件
-        draggable=True,        # 启用 CSS class 限定区域拖拽
-        text_select=True,      # 允许文本选择（默认 False 会注入 user-select: none）
-        js_api=api,
-    )
-    api.set_window(window)
+        # 创建窗口前算好居中坐标，直接传给 create_window（WinForms 用 Manual 定位）
+        import tkinter as tk
+        _root = tk.Tk()
+        _root.withdraw()
+        _sw = _root.winfo_screenwidth()
+        _sh = _root.winfo_screenheight()
+        _root.destroy()
+        _cx = max(0, (_sw - 1100) // 2)
+        _cy = max(0, (_sh - 700) // 2)
 
-    # ──── 窗口事件 ────
+        api = DesktopAPI()
+        window = webview.create_window(
+            APP_NAME,
+            url=f'http://127.0.0.1:{port}',
+            width=1100,
+            height=700,
+            x=_cx, y=_cy,          # 预计算居中坐标，WinForms 用 Manual 模式定位
+            min_size=(800, 500),
+            frameless=True,
+            easy_drag=False,       # 关闭全局拖拽，避免吃点击事件
+            draggable=True,        # 启用 CSS class 限定区域拖拽
+            text_select=True,      # 允许文本选择（默认 False 会注入 user-select: none）
+            js_api=api,
+        )
+        api.set_window(window)
 
-    # loaded 事件触发时启用边缘缩放（此时窗口已存在）
-    window.events.loaded += lambda: _enable_frameless_resize(window)
+        # ──── 窗口事件 ────
 
-    # 后台线程兜底（loaded 可能早于 getgui.hwnd 就绪）
-    threading.Thread(
-        target=lambda: (
-            time.sleep(1.5),
-            _enable_frameless_resize(window),
-        ),
-        daemon=True, name='EnableFramelessResize'
-    ).start()
-    window.events.closing += lambda: _on_closing(api)
+        # loaded 事件触发时启用边缘缩放（此时窗口已存在）
+        window.events.loaded += lambda: _enable_frameless_resize(window)
 
-    # ──── 系统托盘 ────
-    tray_icon = _create_tray(api, window)
+        # 后台线程兜底（loaded 可能早于 getgui.hwnd 就绪）
+        threading.Thread(
+            target=lambda: (
+                time.sleep(1.5),
+                _enable_frameless_resize(window),
+            ),
+            daemon=True, name='EnableFramelessResize'
+        ).start()
+        window.events.closing += lambda: _on_closing(api)
 
-    # 启动 WordKeepAlive（默认启用）
-    api._start_word_keep_alive()
+        # ──── 系统托盘 ────
+        tray_icon = _create_tray(api, window)
 
-    # ──── 主循环 ────
-    webview.start(
-        gui='edgechromium',  # 使用 Edge WebView2（Windows 10+ 内置，无需额外安装）
-        http_server=False,   # 我们用 Flask 做 HTTP 服务器
-    )
+        # 启动 WordKeepAlive（默认启用）
+        api._start_word_keep_alive()
 
-    # ──── 清理 ────
-    _cleanup(api, lock_sock)
+        # ──── 主循环 ────
+        webview.start(
+            gui=_GUI_BACKEND,
+            http_server=False,
+        )
+        # ──── 清理 ────
+        _cleanup(api, lock_sock)
+
+    def _open_browser_mode(port):
+        """回退方案：打开系统浏览器"""
+        import webbrowser
+        url = f'http://127.0.0.1:{port}'
+        print(f'[Desktop] 打开浏览器: {url}')
+        webbrowser.open(url)
+        # 在浏览器模式下保持 Flask 运行直到收到关闭信号
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    _desktop_or_browser()
 
 
 def _on_closing(api):

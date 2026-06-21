@@ -1,9 +1,7 @@
-"""工具脚本执行 + SSE 流式输出"""
+"""工具脚本执行 + SSE 流式输出（进程内执行，不启动子进程）"""
 
 import os
 import json
-import sys
-import subprocess
 import threading
 import time
 
@@ -11,11 +9,15 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from server.workspace import _get_workspace_dir
 from tools.tool_defs import get_tool_script_path
+from server.tool_runner import run_tool_in_process
 
 # 单个工具执行最大秒数（文档处理可能较慢，设为 10 分钟）
 _TOOL_TIMEOUT_SECONDS = 600
 
 runner_bp = Blueprint('runner', __name__)
+
+# SSE 并发限制
+_SSE_SEMAPHORE = threading.BoundedSemaphore(3)
 
 
 @runner_bp.route('/run_tool_with_config', methods=['POST'])
@@ -39,82 +41,22 @@ def api_run_tool_with_config():
         return jsonify({'success': False, 'message': f'未知的工具: {tool}'})
 
     script_path = get_tool_script_path(tool)
-
     if not os.path.exists(script_path):
-        return jsonify({'success': False, 'message': f'脚本不存在: {script}'})
+        return jsonify({'success': False, 'message': f'脚本不存在: {tool}'})
 
-    _request_id = g.get('request_id', '')
-    _user_id = g.user_id
+    target_path = directory
+    file_list = files if files else []
 
     def generate():
+        acquired = _SSE_SEMAPHORE.acquire(blocking=False)
+        if not acquired:
+            yield f'data: {json.dumps({"type": "end", "success": False, "error": "服务器繁忙，请稍后再试"})}\n\n'
+            return
         try:
-            env = os.environ.copy()
-            env['REQUEST_ID'] = _request_id
-            env['PYTHONPATH'] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            env['USER_ID'] = _user_id
-
-            cmd_args = [sys.executable, "-u", script_path]
-
-            if files:
-                for f in files:
-                    full_path = os.path.join(directory, f) if not os.path.isabs(f) else f
-                    cmd_args.append(full_path)
-            else:
-                cmd_args.append(directory)
-
-            process = subprocess.Popen(
-                cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',  # 显式 UTF-8，避免 Windows cp936 导致解码报错
-                errors='replace',  # 非法字符用 � 替换，不中断流
-                bufsize=1,
-                cwd=directory,
-                env=env
-            )
-
-            # 进程超时守护：超时后强制终止
-            timeout_flag = [False]
-            start_time = time.time()
-
-            def _timeout_killer():
-                try:
-                    if process.poll() is None:
-                        process.kill()
-                        timeout_flag[0] = True
-                except Exception:
-                    pass
-
-            timer = threading.Timer(_TOOL_TIMEOUT_SECONDS, _timeout_killer)
-            timer.daemon = True
-            timer.start()
-
-            output_lines = []
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    content = line.rstrip()
-                    # 工具输出中路径统一正斜杠，保持和 API 路径格式一致
-                    content = content.replace('\\', '/')
-                    output_lines.append(content)
-                    yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
-
-            process.stdout.close()
-            process.wait(timeout=10)
-            timer.cancel()
-
-            if timeout_flag[0]:
-                elapsed = int(time.time() - start_time)
-                yield f'data: {json.dumps({"type": "end", "success": False, "error": f"执行超时（超过 {_TOOL_TIMEOUT_SECONDS}s，已用 {elapsed}s）"})}\n\n'
-            else:
-                success = process.returncode == 0
-                if not success:
-                    error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
-                    yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
-                else:
-                    yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
-
+            yield from run_tool_in_process(tool, file_list, target_path, script_path)
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+        finally:
+            _SSE_SEMAPHORE.release()
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')

@@ -764,7 +764,7 @@
             overlay.innerHTML = `
                 <div id="about-dialog" style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;transform:scale(0.95);transition:transform 0.2s ease;">
                     <div style="text-align:center;margin-bottom:12px;">
-                        <h2 style="margin:6px 0 2px;font-size:18px;"><a href="https://github.com/doonly1/" target="_blank" style="color:#1a1a2e;text-decoration:none;">文澜</a></h2>
+                        <h2 style="margin:6px 0 2px;font-size:18px;"><a href="https://github.com/doonly1/" target="_blank" style="color:#1a1a2e;text-decoration:none;">Docflowing</a></h2>
                         <div style="font-size:11px;color:#999;">Docflowing · 文涌清澜</div>
                     </div>
                     <div style="text-align:center;margin-top:14px;">
@@ -820,7 +820,7 @@
                             <input type="checkbox" id="settingAutostart" ${appSettings.autostart ? 'checked' : ''}>
                             开机自启动
                         </label>
-                        <div style="font-size:11px;color:#999;margin:4px 0 0 24px;">启动时自动运行文澜桌面版</div>
+                        <div style="font-size:11px;color:#999;margin:4px 0 0 24px;">Automatically launches Docflowing desktop on startup</div>
                     </div>
 
                     <div style="margin-bottom:14px;">

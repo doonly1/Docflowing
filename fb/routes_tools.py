@@ -2,7 +2,6 @@
 
 import os
 import sys
-import subprocess
 import json
 import threading
 from flask import Blueprint, request, jsonify, Response, stream_with_context, g
@@ -10,12 +9,18 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context, g
 from server.auth import login_required
 from fb.database import get_db
 from fb.decorators import _require_fb_permission, require_fb_perm, _ensure_local_fb_route, _get_node_identity
-from tools.tool_defs import get_tool_script_path
+from server.tool_runner import run_tool_in_process
+from tools.tool_defs import get_tool_script_path, TOOL_EXTENSIONS
 
 fb_bp = Blueprint('fb', __name__, url_prefix='/api/fb')
 
 # SSE 并发限制：最多允许 3 个同时运行的 tool 流
 _SSE_SEMAPHORE = threading.BoundedSemaphore(3)
+
+
+def _run_tool_in_process(tool, files, target_path, script_path):
+    """代理到 server.tool_runner.run_tool_in_process"""
+    yield from run_tool_in_process(tool, files, target_path, script_path)
 
 
 @fb_bp.route('/<fb_id>/run-tool', methods=['POST'])
@@ -71,50 +76,15 @@ def run_tool_on_fb(filebase_id):
             if os.path.isfile(full) and f.lower().endswith(extensions):
                 files.append(f)
 
-    _user_id = g.user_id
-
     def generate():
         acquired = _SSE_SEMAPHORE.acquire(blocking=False)
         if not acquired:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": "服务器繁忙，请稍后再试"})}\n\n'
             return
         try:
-            env = os.environ.copy()
-            env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
-            env['USER_ID'] = _user_id
-
-            cmd_args = [sys.executable, "-u", script_path]
-            for f in files:
-                full_path = os.path.join(target_path, f)
-                cmd_args.append(full_path)
-
-            process = subprocess.Popen(
-                cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=target_path,
-                env=env
-            )
-
-            output_lines = []
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    content = line.rstrip()
-                    content = content.replace('\\', '/')
-                    output_lines.append(content)
-                    yield f'data: {json.dumps({"type": "output", "content": content})}\n\n'
-
-            process.stdout.close()
-            process.wait()
-
-            success = process.returncode == 0
-            if not success:
-                error_msg = '\n'.join(output_lines) if output_lines else "执行失败"
-                yield f'data: {json.dumps({"type": "end", "success": False, "error": error_msg})}\n\n'
-            else:
-                yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+            # 始终用进程内导入工具模块运行（不再使用子进程）
+            # 这样可以完全避免子进程触发单实例锁的问题
+            yield from _run_tool_in_process(tool, files, target_path, script_path)
 
         except Exception as e:
             yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
