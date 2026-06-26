@@ -25,6 +25,11 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(project_root, 'tools'))
 sys.path.insert(0, project_root)
 
+# 统一工作目录为运行时数据目录（开发模式 → project_root/workspaces/，打包模式 → %APPDATA%/Docflowing），
+# 使 os.getcwd() 在开发和运行时行为一致
+from server.workspace import _get_runtime_dir
+os.chdir(_get_runtime_dir())
+
 from server import create_app
 
 app = create_app()

@@ -31,13 +31,7 @@ def _get_runtime_dir():
     marker = os.path.join(project_root, 'package.json')
     dev_marker = os.path.join(project_root, 'app_server.py')
 
-    # 判断是否为开发模式：开发模式直接使用项目根下的 workspaces
-    if os.path.exists(marker) or os.path.exists(dev_marker):
-        d = os.path.join(project_root, 'workspaces')
-        os.makedirs(d, exist_ok=True)
-        return d
-
-    # 否则使用用户目录
+    # 使用 %APPDATA%/Docflowing（开发模式与打包模式一致）
     if os.name == 'nt':
         appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
         d = os.path.join(appdata, 'Docflowing')

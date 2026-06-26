@@ -1129,7 +1129,7 @@
     <!-- 全局标题栏（贯穿窗口两端） -->
     <div class="app-header" id="app-header">
         <div class="header-left" id="header-left"></div>
-        <div class="header-center pywebview-drag-region" id="header-center"></div>
+        <div class="header-center pywebview-drag-region" id="header-center" ondblclick="toggleMaximize()"></div>
         <div class="header-right" id="header-right"></div>
     </div>
 
@@ -1425,5 +1425,14 @@
 
     <!-- 应用设置弹窗 -->
     <div id="settingsOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.2s ease;"></div>
+
+    <script>
+    // 标题栏双击最大化/还原（pywebview frameless 模式）
+    window.toggleMaximize = function() {
+        if (window.pywebview?.api?.windowToggleMaximize) {
+            window.pywebview.api.windowToggleMaximize();
+        }
+    };
+    </script>
 </body>
 </html>

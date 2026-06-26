@@ -317,9 +317,7 @@ class TestFlaskIntegration:
         port = 5888
         os.environ['PORT'] = str(port)
         os.environ['DOCFLOWING_PACKAGED'] = '0'
-        os.environ['DOCFLOWING_RUNTIME_DIR'] = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'workspaces'
-        )
+        os.environ['DOCFLOWING_RUNTIME_DIR'] = desktop_app._get_runtime_dir()
 
         # 重置事件
         _flask_ready.clear()

@@ -7,7 +7,12 @@ Word文档比较工具
 import os
 import sys
 import glob
+import struct
+import zlib
 import difflib
+import shutil
+import tempfile
+import zipfile
 from copy import deepcopy
 import yaml
 from docx import Document
@@ -67,6 +72,135 @@ def load_compare_config():
                 thresholds = [(item['punctuation'], item.get('threshold')) for item in raw]
     
     return sentence_threshold, para_threshold, short_para_char_threshold, thresholds
+
+
+# ======================== Docx CRC 校验修复 ========================
+
+def _find_all_zip_entries(raw_bytes):
+    """从 zip 原始字节中手动解析所有本地文件头条目，绕过 CRC 校验。
+    
+    标准 zipfile 在 .read() 时校验 CRC-32，对于图片损坏的 docx 会抛出
+    BadZipFile。此函数直接解析 PK\x03\x04 本地文件头，提取压缩数据
+    并手动解压，从而绕过 CRC 校验环节，最大限度修复内容。
+    
+    Returns:
+        list of {'filename': str, 'data': bytes, 'compression': int}
+    """
+    entries = []
+    pos = 0
+    SIGNATURE = b'\x50\x4b\x03\x04'
+
+    while True:
+        pos = raw_bytes.find(SIGNATURE, pos)
+        if pos == -1:
+            break
+
+        # 解析本地文件头 (30 字节固定部分)
+        fields = struct.unpack_from('<IHHHHHIIIHH', raw_bytes, pos)
+        compression = fields[3]          # 0=STORED, 8=DEFLATED
+        flag_bits = fields[2]
+        compressed_size = fields[7]
+        filename_len = fields[9]
+        extra_len = fields[10]
+
+        filename_bytes = raw_bytes[pos+30:pos+30+filename_len]
+        try:
+            filename = filename_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            filename = filename_bytes.decode('cp437')
+
+        data_offset = pos + 30 + filename_len + extra_len
+
+        # 处理 data descriptor (compressed_size=0 且有通用位标记)
+        if compressed_size == 0 and (flag_bits & 0x08):
+            candidates = []
+            for sig in (b'\x50\x4b\x07\x08',   # data descriptor
+                        b'\x50\x4b\x03\x04',   # next local header
+                        b'\x50\x4b\x05\x06',   # end of central directory
+                        b'\x50\x4b\x01\x02'):  # central directory entry
+                cp = raw_bytes.find(sig, data_offset)
+                if cp != -1 and cp > data_offset:
+                    candidates.append(cp)
+            if candidates:
+                compressed_size = min(candidates) - data_offset
+            else:
+                compressed_size = len(raw_bytes) - data_offset
+
+        compressed_data = raw_bytes[data_offset:data_offset + compressed_size]
+
+        # 手动解压
+        try:
+            if compression == 0:
+                decompressed = compressed_data
+            elif compression == 8:
+                decompressed = zlib.decompress(compressed_data, -zlib.MAX_WBITS)
+            else:
+                decompressed = compressed_data
+        except Exception:
+            decompressed = compressed_data  # 解压失败时保留原始压缩数据
+
+        entries.append({
+            'filename': filename,
+            'data': decompressed,
+        })
+
+        # 前进到下一个条目
+        next_pos = data_offset + compressed_size
+        if next_pos > pos:
+            pos = next_pos
+        else:
+            pos += 30 + filename_len + extra_len + 1
+
+    return entries
+
+
+def repair_corrupted_docx(filepath):
+    """检测并修复 docx 文件中损坏的 CRC-32 校验。
+    
+    方案：手动解析 zip 本地文件头提取数据并重新打包，
+    修复后的文件写入临时路径返回。调用方负责在不再需要时清理。
+    
+    Args:
+        filepath: 原始 .docx 路径（会被污染，但不会被修改）
+    
+    Returns:
+        修复后的临时文件路径，或 None（文件无问题的情况下不创建副本）
+    """
+    # 先尝试用标准 zipfile 检测 CRC 校验
+    crc_error = False
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            for info in zf.infolist():
+                try:
+                    zf.read(info.filename)
+                except zipfile.BadZipFile:
+                    crc_error = True
+                    break
+    except zipfile.BadZipFile:
+        crc_error = True
+
+    if not crc_error:
+        return None  # 文件正常，无需修复
+
+    logger.warning("检测到 docx CRC 校验错误，尝试修复: %s", os.path.basename(filepath))
+
+    with open(filepath, 'rb') as f:
+        raw_bytes = f.read()
+
+    entries = _find_all_zip_entries(raw_bytes)
+
+    fd, tmp_path = tempfile.mkstemp(suffix='.docx')
+    os.close(fd)
+
+    with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for entry in entries:
+            zi = zipfile.ZipInfo(entry['filename'])
+            zi.date_time = (1980, 1, 1, 0, 0, 0)
+            # 保留原压缩方式 - STORED 文件也用 DEFLATED 重新压缩
+            zf.writestr(zi, entry['data'])
+
+    logger.info("CRC 修复完成: %s", os.path.basename(tmp_path))
+    return tmp_path
 
 
 def find_docx_files(workdir):
@@ -1548,17 +1682,44 @@ def _output_split_diff_inplace(result_doc, base_para, orig_text, all_f_indices,
             _clear_para_runs(out_para)
             first = False
         else:
+            # 非首段：创建新段落并保留 diff 标记（run 级别颜色/删除线）
+            # 借用 _create_new_para_elem 创建框架，然后逐 run 应用格式
+            all_equal = all(t == 'equal' for t, _ in sf_diffs)
             piece_text = ""
             for tag, txt in sf_diffs:
                 piece_text += txt
             if not piece_text:
                 piece_text = final_paras[sf]['text']
 
-            _create_new_para_elem(
+            new_elem = _create_new_para_elem(
                 insert_after_elem, piece_text, font_info,
                 is_after=True
             )
-            insert_after_elem = insert_after_elem.getnext()
+            # 重新应用单个 run 的颜色标记
+            if sf_diffs and not all_equal:
+                # 创建与 diff 段对应的新 run，覆盖刚才的合并文本
+                temp_doc = Document()
+                temp_p = temp_doc.add_paragraph()
+                for tag, txt in sf_diffs:
+                    if not txt:
+                        continue
+                    r = temp_p.add_run(txt)
+                    _apply_run_font(r, font_info)
+                    if tag == 'delete':
+                        r.font.color.rgb = RGBColor(0, 0, 255)
+                        r.font.strike = True
+                    elif tag == 'insert':
+                        r.font.color.rgb = RGBColor(255, 0, 0)
+                # 替换 new_elem 中的 runs
+                pPr = new_elem.find(qn('w:pPr'))
+                for child in list(new_elem):
+                    if child.tag.endswith('}r'):
+                        new_elem.remove(child)
+                for r_elem in list(temp_p._element):
+                    if r_elem.tag.endswith('}r'):
+                        new_elem.append(deepcopy(r_elem))
+
+            insert_after_elem = new_elem
             continue
 
         if not sf_diffs:
@@ -1675,21 +1836,34 @@ def compare_with_python_inplace(original_path, final_path, output_path):
     2. 段落匹配（贪婪匹配 + 合并/拆分检测 + 逆序对移动检测）
     3. 在副本上原地标记差异：修改段落文本样式、插入新增段落
     """
-    import shutil
+
+    # 始化临时修复文件变量，确保异常时也能清理
+    orig_repaired = None
+    final_repaired = None
 
     try:
         # 预加载配置
         SENTENCE_SIM_THRESHOLD, PARA_SIM_THRESHOLD, SHORT_PARA_CHAR_THRESHOLD, SEMANTIC_UNIT_THRESHOLDS = load_compare_config()
 
+        # ── 修复损坏的 CRC-32 ──
+        # 有些 docx 文件中的图片数据 CRC 校验失败，python-docx 无法直接打开
+        orig_repaired = repair_corrupted_docx(original_path)
+        final_repaired = repair_corrupted_docx(final_path)
+        open_original = orig_repaired if orig_repaired else original_path
+        open_final = final_repaired if final_repaired else final_path
+
         # 打开文档（匹配用）
-        orig_doc = Document(original_path)
-        final_doc = Document(final_path)
+        orig_doc = Document(open_original)
+        final_doc = Document(open_final)
 
         orig_paras = get_paragraphs_with_style(orig_doc)
         final_paras = get_paragraphs_with_style(final_doc)
 
         # 拷贝原稿为结果文档
-        shutil.copy2(original_path, output_path)
+        # 如果原稿已被修复，从修复版拷贝（修复版已重新打包，CRC 正确）
+        # 这样输出文档也是完整可打开的
+        output_source = orig_repaired if orig_repaired else original_path
+        shutil.copy2(output_source, output_path)
         result_doc = Document(output_path)
 
         # ── 段落匹配 ──
@@ -1977,11 +2151,75 @@ def compare_with_python_inplace(original_path, final_path, output_path):
         next_orig_idx = 0
         outputted_split_final = set()
 
+        # 预构建拆分组触发映射
+        # split_group_map: {min_f_idx: (o_idx, sorted_f_indices)}
+        split_group_map = {}
+        all_split_finals = set()
+        for o_idx, f_indices in o_match.items():
+            sorted_f = sorted(f_indices)
+            split_group_map[sorted_f[0]] = (o_idx, sorted_f)
+            all_split_finals.update(f_indices)
+
         for f_idx in range(len(final_paras)):
             o_idx = f_match[f_idx]
             final_text = final_paras[f_idx]['text']
 
             if f_idx in outputted_split_final:
+                continue
+
+            # ── 拆分组：触发拆分的处理（在新增段落判断之前）──
+            if f_idx in split_group_map:
+                o_idx, all_f_indices = split_group_map[f_idx]
+
+                # 处理拆分组前的删除段落
+                while next_orig_idx < o_idx:
+                    if next_orig_idx not in processed_orig:
+                        if next_orig_idx in moved_para_orig_set:
+                            _set_para_red_with_deletion(
+                                result_paras[next_orig_idx],
+                                orig_paras[next_orig_idx]['text'],
+                                orig_font_info[next_orig_idx]
+                            )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        elif next_orig_idx not in matched_orig:
+                            if not orig_paras[next_orig_idx]['text']:
+                                _remove_element_safe(result_paras[next_orig_idx]._element)
+                            else:
+                                _set_para_red_with_deletion(
+                                    result_paras[next_orig_idx],
+                                    orig_paras[next_orig_idx]['text'],
+                                    orig_font_info[next_orig_idx]
+                                )
+                            processed_orig.add(next_orig_idx)
+                            next_orig_idx += 1
+                        else:
+                            break
+                    else:
+                        next_orig_idx += 1
+
+                # 输出拆分组
+                p = result_paras[o_idx]
+                _clear_para_runs(p)
+                font_info = orig_font_info[o_idx]
+                _output_split_diff_inplace(
+                    result_doc, p, orig_paras[o_idx]['text'], all_f_indices,
+                    final_paras, SENTENCE_SIM_THRESHOLD, font_info
+                )
+
+                processed_orig.add(o_idx)
+                if o_idx >= next_orig_idx:
+                    next_orig_idx = o_idx + 1
+
+                # 标记非触发拆分段为已处理
+                for sf in all_f_indices:
+                    if sf != f_idx:
+                        outputted_split_final.add(sf)
+                continue
+
+            # 跳过非触发的拆分组段落
+            if f_idx in all_split_finals:
+                outputted_split_final.add(f_idx)
                 continue
 
             # 确定目标原稿索引
@@ -2173,7 +2411,12 @@ def compare_with_python_inplace(original_path, final_path, output_path):
 
                         if o_idx in o_match:
                             split_f_indices = sorted(o_match[o_idx])
-                            all_f_indices = [f_idx] + [sf for sf in split_f_indices if sf != f_idx]
+                            # 确保按终稿索引顺序排列
+                            all_f_indices = sorted(set(split_f_indices) | {f_idx})
+                            if min(all_f_indices) != f_idx:
+                                # 非最小索引不应触达此处（已被拆分组处理截获）
+                                # 但仍保证顺序正确
+                                pass
 
                             _clear_para_runs(p)
                             _output_split_diff_inplace(
@@ -2225,9 +2468,25 @@ def compare_with_python_inplace(original_path, final_path, output_path):
             _compare_table_cells(orig_cells, final_cells, result_doc)
 
         result_doc.save(output_path)
+
+        # ── 清理临时修复文件 ──
+        for tmp in (orig_repaired, final_repaired):
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+
         return True, "短句级比对（原地）"
 
     except Exception as e:
+        # ── 异常时清理临时修复文件 ──
+        for tmp in (orig_repaired, final_repaired):
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
         import traceback
         traceback.print_exc()
         return False, str(e)

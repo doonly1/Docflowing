@@ -9,19 +9,20 @@ import os
 
 def _get_workspace_dir():
     """返回运行时数据目录（与 server.workspace._get_runtime_dir 逻辑一致）。
-    
+
     优先级：
     1. 环境变量 DOCFLOWING_DATA_DIR / DOCFLOWING_RUNTIME_DIR
-    2. 项目根目录 /workspaces
+    2. %APPDATA%/Docflowing（开发模式与打包模式一致）
     """
     env_dir = (os.environ.get('DOCFLOWING_DATA_DIR')
                or os.environ.get('DOCFLOWING_RUNTIME_DIR'))
     if env_dir:
         return os.path.abspath(env_dir)
 
-    # 本文件在 tools/load_config.py，项目根在 ../../ 两级上
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(project_root, 'workspaces')
+    if os.name == 'nt':
+        appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
+        return os.path.join(appdata, 'Docflowing')
+    return os.path.join(os.path.expanduser('~'), '.docflowing')
 
 
 def load_user_config():

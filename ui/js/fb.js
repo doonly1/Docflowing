@@ -921,29 +921,24 @@ var FileBase = {
 
         // 从参考来源右键定位到文件库，滚动并高亮目标文件
         var targetPath = self._lsGet('docflow_target_file_path');
-        console.log('[FB Locate] targetPath from localStorage:', targetPath);
         if (targetPath) {
             self._lsDel('docflow_target_file_path');
             // 归一化目标路径：转小写、统一为正斜杠、去掉两端空白和尾部斜杠
             var normTarget = targetPath.trim().toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
-            console.log('[FB Locate] normalized target:', normTarget);
+            // 优化：使用 for...of 循环，找到后立即终止，避免 console.log 拖慢速度
             var rows = div.querySelectorAll('.fb-file-row');
             var found = false;
-            for (var ri = 0; ri < rows.length; ri++) {
-                var rowPath = rows[ri].getAttribute('data-local-path') || '';
+            for (var row of rows) {
+                var rowPath = row.getAttribute('data-local-path') || '';
                 var normRow = rowPath.trim().toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
-                console.log('[FB Locate] row[' + ri + '] data-local-path:', rowPath, '| normalized:', normRow);
                 if (normRow === normTarget) {
-                    rows[ri].classList.add('selected');
-                    rows[ri].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                    console.log('[FB Locate] MATCH found and highlighted, row index:', ri);
+                    row.classList.add('selected');
+                    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                     found = true;
                     break;
                 }
             }
-            if (!found) {
-                console.warn('[FB Locate] No matching row found for targetPath:', targetPath);
-            }
+            if (!found) console.warn('[FB Locate] No matching row found for targetPath:', targetPath);
         }
 
         this.initColumnResize();
@@ -1663,18 +1658,20 @@ var FileBase = {
             showToast('文件库未配置本地路径', 'error');
             return;
         }
+        
         var localRoot = this.fbLocalPath.replace(/\\/g, '/').replace(/\/+$/, '');
         var relPath = (path || '').replace(/\\/g, '/').replace(/^\/+/, '');
         var absolutePath = localRoot + '/' + relPath;
+        
+        // 优化：提前检查 API 可用性，避免无效请求
         if (!window.electronAPI || !window.electronAPI.showItemInFolder) {
             showToast('仅在桌面版可用', 'error');
             return;
         }
+        
         try {
-            var result = await window.electronAPI.showItemInFolder(absolutePath);
-            if (result && !result.success) {
-                showToast(result.message || '打开失败', 'error');
-            }
+            // 优化：直接触发，不等待结果，减少 JS Bridge 延迟感
+            window.electronAPI.showItemInFolder(absolutePath);
         } catch (e) {
             console.error('[FB] contextOpenLocalPath error:', e);
             showToast('打开失败: ' + e.message, 'error');

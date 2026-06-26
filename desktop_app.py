@@ -42,16 +42,12 @@ def _get_root_dir():
 
 def _get_runtime_dir():
     """获取运行时数据目录（配置、工作区等）"""
-    is_packaged = getattr(sys, 'frozen', False) or os.environ.get('DOCFLOWING_PACKAGED') == '1'
     if '--portable' in sys.argv:
         # 便携版：数据目录在 exe 同级
         return os.path.join(_get_root_dir(), 'data')
-    if is_packaged:
-        # 打包模式：使用 %APPDATA%/Docflowing
-        appdata = os.environ.get('APPDATA') or os.path.expanduser('~/.local/share')
-        return os.path.join(appdata, APP_NAME)
-    # 开发模式：项目根下的 workspaces/
-    return os.path.join(_get_root_dir(), 'workspaces')
+    # 开发模式和打包模式一致：使用 %APPDATA%/Docflowing
+    appdata = os.environ.get('APPDATA') or os.path.expanduser('~/.local/share')
+    return os.path.join(appdata, APP_NAME)
 
 
 # ==================== 单实例锁 ====================
@@ -92,6 +88,12 @@ def _prepare_env():
         sys.path.insert(0, tools_dir)
     if root not in sys.path:
         sys.path.insert(0, root)
+
+    # 统一工作目录为运行时数据目录（开发模式 → %APPDATA%/Docflowing，打包模式 → %APPDATA%/Docflowing），
+    # 使 os.getcwd() 在开发和运行时行为一致
+    runtime_dir = _get_runtime_dir()
+    os.makedirs(runtime_dir, exist_ok=True)
+    os.chdir(runtime_dir)
 
     # 设置环境变量
     is_packaged = getattr(sys, 'frozen', False)
@@ -263,27 +265,31 @@ class DesktopAPI:
             return {'success': False, 'message': str(e)}
 
     def showItemInFolder(self, absolute_path):
-        """在文件管理器中选中并高亮文件"""
+        """在文件管理器中选中并高亮文件（优化：立即返回）"""
         try:
             if not absolute_path:
                 return {'success': False, 'message': '路径为空'}
             norm_path = os.path.normpath(absolute_path)
             if not os.path.exists(norm_path):
                 return {'success': False, 'message': '路径不存在: ' + norm_path}
-            if platform.system() == 'Windows':
-                # explorer 要求 /select, 和路径必须作为一个参数，否则无法高亮
-                subprocess.Popen(['explorer', '/select,' + norm_path])
-            elif platform.system() == 'Darwin':
-                subprocess.Popen(['open', '-R', norm_path])
+            
+            if platform.system() == "Windows":
+                # 优化：立即 Popen，不等待，最快响应
+                subprocess.Popen(
+                    ['explorer', '/select,' + norm_path],
+                    shell=False,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                return {'success': True}
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", "-R", norm_path])
+                return {'success': True}
             else:
-                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
-            return {'success': True}
+                subprocess.Popen(["xdg-open", os.path.dirname(norm_path)])
+                return {'success': True}
         except Exception as e:
             print(f'[Desktop] showItemInFolder error: {e}')
             return {'success': False, 'message': str(e)}
-
-    # ──── 应用信息 ────
-
     def getAppVersion(self):
         """获取应用版本"""
         root = _get_root_dir()

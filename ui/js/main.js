@@ -339,6 +339,12 @@
                     }
                 }
                 loadFileList(null, currentTool);
+                // 文档比较完成后自动打开结果文件（仅 pywebview 桌面模式）
+                if (currentTool === 'to_compare' && typeof pywebview !== 'undefined') {
+                    var origName = selectedFiles && selectedFiles.length > 0 ? selectedFiles[0] : '';
+                    var outputName = '差异标注-' + origName;
+                    try { pywebview.api.openFileWithOsApp(selDir.path + '/' + outputName); } catch (e) {}
+                }
             } catch (error) {
                 resultDiv.className = 'error';
                 resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(error.message) + '</pre>';

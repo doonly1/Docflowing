@@ -309,7 +309,7 @@ def list_fb():
             norm = os.path.normpath(local_path)
             parts = norm.split(os.sep)
             try:
-                ws_idx = [p.lower() for p in parts].index('workspaces')
+                ws_idx = [p.lower() for p in parts].index('docflowing')
                 if ws_idx + 2 < len(parts):
                     parts[ws_idx + 1] = owner_username
                 path_parts = parts[ws_idx + 1:]
