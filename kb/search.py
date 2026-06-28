@@ -21,7 +21,12 @@ def search_wiki(usr_id, query):
     conn = get_db(usr_id)
     search_terms = query.strip().split()
     # 对每个搜索词转义 FTS5 特殊字符，防止语法错误和意外行为
-    fts_query = ' OR '.join(f'title:{_escape_fts_term(t)} OR content:{_escape_fts_term(t)}' for t in search_terms)
+    # 词间 AND、词内字段 OR：每个关键词必须在 title 或 content 中出现至少一次
+    # 如搜「项目管理 文档」→ (title:X OR content:X) AND (title:Y OR content:Y)
+    fts_query = ' AND '.join(
+        f'(title:{_escape_fts_term(t)} OR content:{_escape_fts_term(t)})'
+        for t in search_terms
+    )
 
     try:
         rows = conn.execute(
@@ -32,35 +37,8 @@ def search_wiki(usr_id, query):
             (usr_id, fts_query)
         ).fetchall()
     except Exception as e:
-        logger.warning("FTS5 search failed, fallback to LIKE (query=%r, terms=%r): %s", query, search_terms, e)
-        rows = []
-
-    if not rows:
-        try:
-            like_parts = []
-            like_params = []
-            for t in search_terms:
-                like_parts.append("(title LIKE ? OR content LIKE ?)")
-                like_params.extend([f'%{t}%', f'%{t}%'])
-            like_params.insert(0, usr_id)
-
-            # 先用 AND：所有关键词都必须匹配
-            sql = (
-                "SELECT path, title, '' as title_snippet, '' as content_snippet "
-                "FROM wiki_fts WHERE usr_id = ? AND ({}) LIMIT 99"
-            ).format(' AND '.join(like_parts))
-            rows = conn.execute(sql, like_params).fetchall()
-
-            # AND 无结果时降级为 OR：匹配任意关键词即可
-            if not rows:
-                sql = (
-                    "SELECT path, title, '' as title_snippet, '' as content_snippet "
-                    "FROM wiki_fts WHERE usr_id = ? AND ({}) LIMIT 99"
-                ).format(' OR '.join(like_parts))
-                rows = conn.execute(sql, like_params).fetchall()
-        except Exception as e:
-            logger.error("LIKE fallback search failed (query=%r): %s", query, e)
-            return []
+        logger.warning("FTS5 search failed (query=%r, terms=%r): %s", query, search_terms, e)
+        return []
 
     return [
         {'path': r['path'], 'title': r['title'],

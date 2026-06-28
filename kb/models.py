@@ -17,16 +17,6 @@ CREATE TABLE IF NOT EXISTS wiki_permissions (
 )
 """
 
-CREATE_WIKI_FTS = """
-CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
-    usr_id,
-    title,
-    content,
-    path,
-    tokenize='trigram'
-)
-"""
-
 CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_wiki_permissions_shared_user ON wiki_permissions(shared_user_id)",
 ]
@@ -34,5 +24,4 @@ CREATE_INDEXES = [
 ALL_TABLES = [
     CREATE_WIKI_INFO,
     CREATE_WIKI_PERMISSIONS,
-    CREATE_WIKI_FTS,
 ]

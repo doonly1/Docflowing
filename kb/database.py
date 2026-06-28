@@ -1,8 +1,43 @@
+import logging
 import os
+import platform
 import sqlite3
 import threading
 
 from server.workspace import _get_workspace_dir
+from kb.session_db import _resolve_fts_extension_dir
+
+logger = logging.getLogger(__name__)
+
+_FTS_SYS = platform.system()
+if _FTS_SYS == 'Windows':
+    _FTS_NAME = 'simple.dll'
+else:
+    _FTS_NAME = 'simple.so'
+_FTS_EXTENSION = os.path.join(_resolve_fts_extension_dir(), _FTS_NAME)
+
+# 启用 SQLite 扩展加载
+try:
+    sqlite3.enable_load_extension(True)
+except AttributeError:
+    pass
+
+def _load_simple_extension(conn):
+    """加载 simple 扩展到当前连接（每个 SQLite 连接都需要单独加载）"""
+    if not os.path.isfile(_FTS_EXTENSION):
+        logger.warning("FTS5 simple 扩展未找到: %s", _FTS_EXTENSION)
+        return False
+    try:
+        try:
+            conn.enable_load_extension(True)
+        except AttributeError:
+            pass
+        conn.load_extension(_FTS_EXTENSION)
+        return True
+    except Exception as e:
+        logger.warning("加载 FTS5 simple 扩展失败: %s", e)
+        return False
+
 
 ALL_TABLES = [
     """
@@ -35,15 +70,6 @@ ALL_TABLES = [
         PRIMARY KEY (usr_id, path)
     )
     """,
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
-        usr_id,
-        title,
-        content,
-        path,
-        tokenize='trigram'
-    )
-    """,
 ]
 
 CREATE_INDEXES = [
@@ -54,6 +80,10 @@ CREATE_INDEXES = [
 ]
 
 _local = threading.local()
+
+# 使用 simple 分词器（需 fts_ext/simple.dll 扩展），支持中文分词
+_WIKI_FTS_TOKENIZER = 'simple'
+
 
 
 def _get_user_kb_dir(user_id: str) -> str:
@@ -71,32 +101,57 @@ def get_db_path(user_id=None):
     return os.path.join(kb_dir, 'wiki.db')
 
 
+def _create_wiki_fts(conn):
+    """创建 wiki_fts FTS5 虚拟表"""
+    conn.execute(f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
+            usr_id, title, content, path,
+            tokenize='{_WIKI_FTS_TOKENIZER}'
+        )
+    """)
+
+
 def _migrate_fts_tokenizer(conn):
-    """检查现有 wiki_fts 的 tokenizer，非 trigram 则迁移"""
+    """检查并迁移 wiki_fts 到目标分词器"""
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='wiki_fts'"
     ).fetchone()
-    if row and 'trigram' not in (row['sql'] or ''):
+    if not row:
+        # 表不存在，直接以目标分词器创建
+        _create_wiki_fts(conn)
+        return
+
+    # 检查当前表的分词器
+    current_sql = row['sql'] or ''
+    if _WIKI_FTS_TOKENIZER in current_sql:
+        return  # 已是目标分词器，无需迁移
+
+    # 旧表可能是 simple 或 trigram——需要先加载 simple 扩展才能读取
+    # 然后转存数据到 unicode61 的新表
+    _load_simple_extension(conn)
+
+    try:
         old_data = conn.execute(
             "SELECT usr_id, title, content, path FROM wiki_fts"
         ).fetchall()
-        conn.execute("DROP TABLE IF EXISTS wiki_fts")
-        conn.execute("""
-            CREATE VIRTUAL TABLE wiki_fts USING fts5(
-                usr_id, title, content, path,
-                tokenize='trigram'
+    except Exception as e:
+        logger.warning("无法读取旧 wiki_fts 数据 (tokenizer=%r): %s，直接重建空表", current_sql, e)
+        old_data = []
+
+    conn.execute("DROP TABLE IF EXISTS wiki_fts")
+    _create_wiki_fts(conn)  # 用 unicode61 创建
+    for old in old_data:
+        try:
+            conn.execute(
+                "INSERT INTO wiki_fts (usr_id, title, content, path) "
+                "VALUES (?, ?, ?, ?)",
+                (old['usr_id'], old['title'], old['content'], old['path'])
             )
-        """)
-        for old in old_data:
-            try:
-                conn.execute(
-                    "INSERT INTO wiki_fts (usr_id, title, content, path) "
-                    "VALUES (?, ?, ?, ?)",
-                    (old['usr_id'], old['title'], old['content'], old['path'])
-                )
-            except Exception:
-                pass
-        conn.commit()
+        except Exception:
+            pass
+    conn.commit()
+    logger.info("wiki_fts tokenizer migrated to %s (from %s)",
+                _WIKI_FTS_TOKENIZER, current_sql)
 
 
 def init_db(conn):
@@ -104,6 +159,8 @@ def init_db(conn):
         conn.execute(sql)
     for sql in CREATE_INDEXES:
         conn.execute(sql)
+    # 先加载扩展，再处理 FTS 表——每个连接都必须加载
+    _load_simple_extension(conn)
     _migrate_fts_tokenizer(conn)
     conn.commit()
 
