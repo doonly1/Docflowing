@@ -16,17 +16,15 @@ flask==3.0.3
 flask-cors==4.0.1
 werkzeug==3.0.3
 
-# 配置与网络
+# 配置与网络（cryptography 已移除，P2P 签名改用标准库 hmac）
 pyyaml==6.0.2
 requests==2.32.3
 zeroconf==0.132.2
-cryptography==42.0.8
 
 # 桌面壳（pywebview + 系统托盘）
 pywebview==5.3.1
 pystray==0.19.5
 Pillow==10.4.0
-appdirs==1.4.4
 
 # 测试
 pytest==8.3.2

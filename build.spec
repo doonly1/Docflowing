@@ -2,15 +2,22 @@
 import sys
 sys.setrecursionlimit(10000)
 
+# --- PIL C 扩展二进制（_imaging.pyd 等） ---
+import glob, os
+import PIL
+_pil_dir = PIL.__path__[0]
+_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))]
+
 a = Analysis(
-    [r'E:\download\learn\Docflowing/desktop_app.py'],
-    pathex=[r'E:\download\learn\Docflowing'],
-    binaries=[],
+    [r'E:\download\Tools\Docflowing/desktop_app.py'],
+    pathex=[r'E:\download\Tools\Docflowing'],
+    binaries=list(_pil_pyds),
     datas=[
-    (r'E:\download\learn\Docflowing\ui', 'ui'),
-    (r'E:\download\learn\Docflowing\kb\skills\system', 'kb/skills/system'),
-    (r'E:\download\learn\Docflowing\tools', 'tools'),
-    (r'E:\download\learn\Docflowing\kb\fts_ext', 'kb/fts_ext'),
+    (r'E:\download\Tools\Docflowing\ui', 'ui'),
+    (r'E:\download\Tools\Docflowing\kb\skills\system', 'kb/skills/system'),
+    (r'E:\download\Tools\Docflowing\tools', 'tools'),
+    (r'E:\download\Tools\Docflowing\kb\fts_ext', 'kb/fts_ext'),
+    (r'C:\Program Files\Python313\Lib\site-packages\pythonnet\runtime', 'pythonnet/runtime'),
     ],
     hiddenimports=[
         'kb',
@@ -75,7 +82,11 @@ a = Analysis(
         'webview',
         'webview.platforms.edgechromium',
         'webview.platforms.winforms',
-        'webview.platforms.windows',
+        'webview.platforms.win32',
+        'pythonnet',
+        'clr_loader',
+        'clr_loader.netfx',
+        'clr_loader.types',
         'logging_config',
         'doc_process',
         'mystyle',
@@ -93,7 +104,6 @@ a = Analysis(
         'flask_cors',
         'zeroconf',
         'yaml',
-        'cryptography',
         'requests',
         'pdfplumber',
         'bs4',
@@ -104,10 +114,13 @@ a = Analysis(
         'pptx',
         'pystray',
         'PIL',
+        'PIL._imaging',
         'PIL._tkinter_finder',
         'PIL.Image',
         'PIL.ImageTk',
         'packaging',
+        'tkinter',
+        '_tkinter',
         'win32com',
         'pythoncom',
         'win32api',
@@ -135,6 +148,7 @@ a = Analysis(
         'numpy.testing',
         'pandas',
         'cefpython3',
+        'cryptography',
     ],
     noarchive=False,
 )
@@ -151,15 +165,15 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.pyd'],
     runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=r'E:\download\learn\Docflowing\ui\favicon.ico',
+    icon=r'E:\download\Tools\Docflowing\ui\favicon.ico',
     contents_directory='.',
     onefile=False,
 )
@@ -170,6 +184,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.pyd'],
     name='Docflowing',
 )

@@ -4,18 +4,12 @@
  1. workspaces/config/kb_config.yaml（用户持久化配置）
  2. 代码内置默认值
 
-支持加密存储 API Key（Fernet 对称加密），密钥保存在 workspaces/config/_llm_key。"""
+API Key 以明文存储在同 YAML 文件中，配置文件权限设为仅当前用户可读。"""
 
 import os
 import yaml
 from pathlib import Path
 from typing import Any, Dict
-
-try:
-    from cryptography.fernet import Fernet
-    HAS_FERNET = True
-except ImportError:
-    HAS_FERNET = False
 
 # 缓存
 _cache: Dict[str, Any] = {}
@@ -63,9 +57,7 @@ _DEFAULT_KB_CONFIG = {
     },
 }
 
-# ==================== API Key 加密/解密 ====================
-
-_ENCRYPTION_KEY_FILE = '_llm_key'
+# ==================== API Key 处理 ====================
 
 
 def _get_user_config_dir(user_id: str = None) -> str:
@@ -76,43 +68,14 @@ def _get_user_config_dir(user_id: str = None) -> str:
     return config_dir
 
 
-def _get_or_create_encryption_key(user_id: str = None) -> bytes:
-    """获取或创建 Fernet 加密密钥（按用户存储）"""
-    if user_id is None:
-        user_id = 'anonymous'
-    key_path = os.path.join(_get_user_config_dir(user_id), _ENCRYPTION_KEY_FILE)
-    if os.path.exists(key_path):
-        with open(key_path, 'rb') as f:
-            return f.read().strip()
-    if not HAS_FERNET:
-        return b''
-    key = Fernet.generate_key()
-    with open(key_path, 'wb') as f:
-        f.write(key)
-    return key
-
-
 def _encrypt_api_key(api_key: str, user_id: str = None) -> str:
-    if not api_key or not HAS_FERNET:
-        return api_key
-    try:
-        key = _get_or_create_encryption_key(user_id)
-        f = Fernet(key)
-        return f.encrypt(api_key.encode()).decode()
-    except Exception:
-        return api_key
+    """API Key 以明文存储（配置依赖文件系统权限保护）"""
+    return api_key
 
 
 def _decrypt_api_key(value: str, user_id: str = None) -> str:
-    """尝试解密 API Key；若无法解密（明文或解密失败）则原样返回"""
-    if not value or not HAS_FERNET:
-        return value
-    try:
-        key = _get_or_create_encryption_key(user_id)
-        f = Fernet(key)
-        return f.decrypt(value.encode()).decode()
-    except Exception:
-        return value
+    """API Key 直接返回（加密已移除，保留接口兼容）"""
+    return value
 
 
 def _mask_api_key(api_key: str) -> str:

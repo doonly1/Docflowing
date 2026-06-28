@@ -44,6 +44,17 @@ def _datas_lines():
         os.path.join(ROOT, 'tools'):             'tools',
         os.path.join(ROOT, 'kb', 'fts_ext'):     'kb/fts_ext',
     }
+
+    # pythonnet .NET runtime DLL（pywebview/edgechromium 必需）
+    try:
+        import pythonnet
+        pynt_dir = os.path.dirname(pythonnet.__file__)
+        rt_dir = os.path.join(pynt_dir, 'runtime')
+        if os.path.isdir(rt_dir):
+            mapping[rt_dir] = 'pythonnet/runtime'
+    except ImportError:
+        pass
+
     for src, dst in mapping.items():
         if os.path.isdir(src):
             lines.append(f"    (r'{src}', '{dst}'),")
@@ -71,18 +82,23 @@ _HIDDEN_IMPORTS = [
     # ========== Server 模块 ==========
     'server', 'server.auth', 'server.middleware', 'server.runner',
     'server.settings', 'server.workspace', 'server.tool_runner',
-    # ========== pywebview（edgechromium 后端） ==========
-    'webview', 'webview.platforms.edgechromium',
-    'webview.platforms.winforms', 'webview.platforms.windows',
+    # ========== pywebview（后端按优先级：edgechromium → winforms → win32） ==========
+    'webview',
+    'webview.platforms.edgechromium', 'webview.platforms.winforms',
+    'webview.platforms.win32',
+    'pythonnet', 'clr_loader', 'clr_loader.netfx', 'clr_loader.types',
     # ========== Tools（Python 模块形式引入） ==========
     'logging_config', 'doc_process', 'mystyle', 'to_compare', 'to_docx',
     'to_redhead', 'to_index', 'to_pageNum', 'to_pdf', 'float_picture',
     'load_config', 'tool_defs', 'WordKeepAlive',
     # ========== 第三方隐式依赖 ==========
-    'flask', 'flask_cors', 'zeroconf', 'yaml', 'cryptography', 'requests',
+    'flask', 'flask_cors', 'zeroconf', 'yaml', 'requests',
     'pdfplumber', 'bs4', 'beautifulsoup4', 'markitdown', 'openpyxl',
-    'docx', 'pptx', 'pystray', 'PIL', 'PIL._tkinter_finder', 'PIL.Image',
+    'docx', 'pptx', 'pystray',
+    'PIL', 'PIL._imaging', 'PIL._tkinter_finder', 'PIL.Image',
     'PIL.ImageTk', 'packaging',
+    # ========== tkinter（弹窗用，打包时常被裁掉） ==========
+    'tkinter', '_tkinter',
     # ========== Windows 可选依赖（COM + Word） ==========
     'win32com', 'pythoncom', 'win32api', 'win32con', 'win32gui',
     'pywintypes', 'docx2pdf',
@@ -92,6 +108,8 @@ _EXCLUDES = [
     'unittest', 'pdb', 'test', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
     'matplotlib', 'scipy', 'notebook', 'jupyter', 'IPython', 'numpy.testing',
     'pandas', 'cefpython3',
+    # 已移除的依赖，残留时防止误打包
+    'cryptography',
 ]
 
 
@@ -100,10 +118,16 @@ def _common_analysis() -> str:
     datas = _datas_lines()
     hidden = '\n'.join(f"        '{m}'," for m in _HIDDEN_IMPORTS)
     excludes = '\n'.join(f"        '{m}'," for m in _EXCLUDES)
-    return f"""a = Analysis(
+    return f"""# --- PIL C 扩展二进制（_imaging.pyd 等） ---
+import glob, os
+import PIL
+_pil_dir = PIL.__path__[0]
+_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))]
+
+a = Analysis(
     [r'{ROOT}/desktop_app.py'],
     pathex=[r'{ROOT}'],
-    binaries=[],
+    binaries=list(_pil_pyds),
     datas=[
 {datas}
     ],
@@ -140,10 +164,10 @@ def _exe_block() -> str:
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.pyd'],
     runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
@@ -171,7 +195,7 @@ def create_onedir_spec():
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.pyd'],
     name='{OUTPUT_NAME}',
 )
 """
@@ -201,10 +225,10 @@ def create_onefile_spec():
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.pyd'],
     runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
@@ -254,8 +278,11 @@ def build(mode: str):
     tmp_dist = os.path.join(ROOT, 'dist_tmp')
     if os.path.exists(tmp_dist):
         shutil.rmtree(tmp_dist, ignore_errors=True)
+    # 保证 workpath 目录干净（PyInstaller 需要自己创建 build/ 子目录）
     if os.path.exists(WORK_DIR):
         shutil.rmtree(WORK_DIR, ignore_errors=True)
+    # 确保父目录存在
+    os.makedirs(os.path.dirname(WORK_DIR.rstrip('\\/')), exist_ok=True)
 
     cmd = [
         sys.executable, '-m', 'PyInstaller',

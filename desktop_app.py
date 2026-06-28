@@ -16,6 +16,10 @@ import threading
 import time
 import webbrowser
 
+# 提前导入 PIL，避免打包后惰性导入时 _imaging.pyd 加载失败
+# （UPX 压缩可能损坏 .pyd 文件，提前导入可尽早暴露问题）
+from PIL import Image  # noqa: E402
+
 # ==================== 配置 ====================
 
 APP_NAME = 'Docflowing'
@@ -117,13 +121,23 @@ def _start_flask():
         import warnings
         warnings.warn('[Docflowing] DEBUG 模式已启用，生产环境请勿使用！', UserWarning)
 
-    # 添加一个隐藏端点用于显示窗口（由单实例锁激活）
+    # 添加隐藏端点
     @_flask_app.route('/__pywebview_show__')
     def _pywebview_show():
         return 'ok'
 
+    @_flask_app.route('/__shutdown__')
+    def _shutdown():
+        """通过 Werkzeug 的 server.shutdown 机制停止 Flask"""
+        from flask import request
+        shutdown_func = request.environ.get('werkzeug.server.shutdown')
+        if shutdown_func:
+            shutdown_func()
+        return 'ok'
+
     _flask_ready.set()
     print(f"[Desktop] Flask 服务启动 -> http://{host}:{port}")
+
     _flask_app.run(host=host, port=port, threaded=True, debug=debug)
 
 
@@ -376,13 +390,11 @@ class DesktopAPI:
 # ==================== 系统托盘 ====================
 
 def _create_tray(api, window):
-    """创建系统托盘图标"""
+    """创建系统托盘（使用 pystray + Pillow）"""
     import pystray
-    from PIL import Image
 
     icon_path = os.path.join(_get_root_dir(), 'ui', 'favicon.ico')
     if not os.path.exists(icon_path):
-        # 用默认图标
         img = Image.new('RGBA', (16, 16), (233, 69, 96, 255))
     else:
         try:
@@ -409,9 +421,8 @@ def _create_tray(api, window):
     )
 
     icon = pystray.Icon(APP_NAME, img, APP_NAME, menu)
-    api.set_tray_icon(icon)
+    api._tray_icon = icon
 
-    # pystray 需要在后台线程运行
     t = threading.Thread(target=icon.run, daemon=True, name='TrayIcon')
     t.start()
     return icon
@@ -583,25 +594,28 @@ def main():
 
     if not _wait_for_flask():
         print('[Desktop] Flask 启动失败')
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror('启动失败', '后端服务启动超时，请重试')
-        root.destroy()
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0, '后端服务启动超时，请重试。\n若问题持续，请重启应用。',
+                'Docflowing 启动失败',
+                0x00000010 | 0x00000000  # MB_ICONERROR | MB_OK
+            )
+        except Exception:
+            pass
         return
 
-    # ──── 创建 pywebview 窗口（回退方案：浏览器模式）────
-    def _desktop_or_browser():
+    # ──── 创建 pywebview 窗口 ────
+    def _create_window():
         nonlocal lock_sock
-        """尝试创建 pywebview 桌面窗口，失败则打开系统浏览器"""
+        """创建 pywebview 桌面窗口"""
         try:
             import webview
         except ImportError:
-            return _open_browser_mode(port)
+            _show_error('导入 webview 失败，请检查环境。')
+            return
 
-        # PyInstaller 打包后 pythonnet/clr_loader 可能无法
-        # 正确加载 .NET Runtime。捕获异常并回退到浏览器模式。
+        # 尝试各后端：edgechromium → winforms → win32（不用 pythonnet）
         _GUI_BACKEND = 'edgechromium'
         try:
             import webview.platforms.edgechromium as _edge
@@ -610,23 +624,30 @@ def main():
                 import webview.platforms.winforms as _edge
                 _GUI_BACKEND = 'winforms'
             except Exception:
-                return _open_browser_mode(port)
+                try:
+                    import webview.platforms.win32 as _edge
+                    _GUI_BACKEND = 'win32'
+                except Exception:
+                    _show_error('桌面窗口后端加载失败，请检查系统环境。')
+                    return
 
-        # 补充 create_file_dialog（edgechromium 后端缺失此方法）
+        # edgechromium 时需要补充 create_file_dialog
         if _GUI_BACKEND == 'edgechromium':
             import webview.platforms.winforms as _wforms
             from webview.platforms.winforms import create_file_dialog as _wfd
             _edge.EdgeChrome.create_file_dialog = lambda self, dt, d, am, sf, ft, uid: _wfd(dt, d, am, sf, ft, uid)
 
         # 创建窗口前算好居中坐标，直接传给 create_window（WinForms 用 Manual 定位）
-        import tkinter as tk
-        _root = tk.Tk()
-        _root.withdraw()
-        _sw = _root.winfo_screenwidth()
-        _sh = _root.winfo_screenheight()
-        _root.destroy()
-        _cx = max(0, (_sw - 1100) // 2)
-        _cy = max(0, (_sh - 700) // 2)
+        _cx = 0
+        _cy = 0
+        try:
+            import ctypes
+            _sw = ctypes.windll.user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            _sh = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
+            _cx = max(0, (_sw - 1100) // 2)
+            _cy = max(0, (_sh - 700) // 2)
+        except Exception:
+            pass  # 获取失败就用 0,0，pywebview 会自行居中
 
         api = DesktopAPI()
         window = webview.create_window(
@@ -670,23 +691,26 @@ def main():
             gui=_GUI_BACKEND,
             http_server=False,
         )
-        # ──── 清理 ────
-        _cleanup(api, lock_sock)
 
-    def _open_browser_mode(port):
-        """回退方案：打开系统浏览器"""
-        import webbrowser
-        url = f'http://127.0.0.1:{port}'
-        print(f'[Desktop] 打开浏览器: {url}')
-        webbrowser.open(url)
-        # 在浏览器模式下保持 Flask 运行直到收到关闭信号
+        # ──── 直接退出 ────
+        # webview.start() 返回后程序即将退出，不执行 _cleanup 中的
+        # tray_icon.stop() —— 这会触发 PIL.Image 重导入，但此时
+        # _imaging C 扩展已被 Python GC 部分卸载，导致 ImportError。
+        # 直接 os._exit(0) 让操作系统回收资源，最安全。
+        os._exit(0)
+
+    def _show_error(message):
+        """用 Win32 MessageBox 显示错误"""
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0, message, 'Docflowing 启动失败',
+                0x00000010 | 0x00000000  # MB_ICONERROR | MB_OK
+            )
+        except Exception:
             pass
 
-    _desktop_or_browser()
+    _create_window()
 
 
 def _on_closing(api):
@@ -708,10 +732,17 @@ def _cleanup(api, lock_sock):
             api._tray_icon.stop()
         except Exception:
             pass
-    # 关闭 Flask
+    # 关闭 Flask（真正停掉 Werkzeug server）
     if _flask_app:
         try:
             _flask_app.do_teardown_appcontext()
+        except Exception:
+            pass
+        # 通过请求关闭服务器
+        import urllib.request
+        try:
+            port = int(os.environ.get('PORT', DEFAULT_PORT))
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/__shutdown__', timeout=1)
         except Exception:
             pass
     # 释放锁端口
