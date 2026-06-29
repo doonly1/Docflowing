@@ -49,11 +49,17 @@ _DEFAULT_KB_CONFIG = {
     },
     'llm': {
         'enabled': False,
+        'provider': 'openai',           # openai / cc_switch
         'api_key': '',
         'base_url': '',
         'model': '',
         'temperature': 0.7,
         'max_tokens': 4096,
+        # CC Switch 配置（默认代理端口 15721，用户可在 CC Switch 设置中修改）
+        'cc_switch': {
+            'proxy_url': 'http://127.0.0.1:15721',
+            'route': 'codex',  # claude / codex / gemini
+        },
     },
 }
 

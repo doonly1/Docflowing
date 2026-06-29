@@ -11,6 +11,9 @@ beautifulsoup4>=4.12.0,<5.0
 # AI 文本抽取
 markitdown>=0.1.0,<1.0
 
+# Anthropic SDK（CC Switch 模式使用）
+anthropic>=0.30.0,<1.0
+
 # Web 框架（Flask 2.x/3.x 都支持）
 flask>=2.3.0,<4.0
 flask-cors>=4.0.0,<5.0

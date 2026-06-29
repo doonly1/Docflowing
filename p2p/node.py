@@ -20,9 +20,61 @@ def _get_config_path():
     return os.path.join(_get_config_dir(), 'p2p_node.yaml')
 
 
+def _get_device_fingerprint() -> str:
+    """获取稳定的设备指纹，用于确定性 node_id 生成。
+
+    组合多个硬件/系统特征，确保同一台设备返回相同指纹：
+    - Windows MachineGuid（注册表，OS 重装后变）
+    - 主网卡 MAC 地址（换硬件后变）
+    - 主机名
+    """
+    import platform
+    import uuid
+
+    parts = []
+
+    # Windows 机器唯一 ID（注册表）
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\Cryptography'
+        ) as key:
+            guid, _ = winreg.QueryValueEx(key, 'MachineGuid')
+            parts.append(f'guid={guid}')
+    except Exception:
+        pass
+
+    # 主网卡 MAC 地址（uuid.getnode() 返回稳定值）
+    try:
+        mac_raw = uuid.getnode()
+        mac = ':'.join(f'{(mac_raw >> i) & 0xff:02x}'
+                       for i in range(0, 48, 8))
+        parts.append(f'mac={mac}')
+    except Exception:
+        pass
+
+    # 主机名
+    try:
+        parts.append(f'host={platform.node()}')
+    except Exception:
+        pass
+
+    fingerprint = '|'.join(parts) if parts else platform.node() or 'unknown'
+    return fingerprint
+
+
 def _generate_secret():
-    """生成 32 字节 HMAC 密钥（替代 Ed25519 密钥对）"""
-    secret = secrets.token_bytes(32)
+    """生成 32 字节 HMAC 密钥。
+
+    从设备指纹派生（确定性），确保同一设备每次生成的 node_id 相同。
+    如果 p2p_node.yaml 已存在则直接读取，不走此路径。
+    """
+    fingerprint = _get_device_fingerprint()
+    seed = hashlib.sha256(fingerprint.encode()).digest()
+    app_salt = b'docflowing-node-v1'
+    material = hashlib.sha256(seed + app_salt).digest()
+    secret = material[:32]
     return base64.b64encode(secret).decode()
 
 

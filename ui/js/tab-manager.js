@@ -179,11 +179,18 @@ window.tabManager = {
         if (!tab) return;
         switch (tab.type) {
             case 'home':
+                // home 标签：无需保存 sessionId（只有初次渲染才需要）
+                tab.state = {};
+                break;
             case 'chat':
                 tab.state = {
                     sessionId: typeof WikiKnowledge !== 'undefined' ? WikiKnowledge.sessionId : null,
                     chatName: tab.state.chatName || ''
                 };
+                // 离开 chat 标签时清空本地消息（流仍在后台继续，最终存到服务端）
+                if (typeof WikiKnowledge !== 'undefined') {
+                    WikiKnowledge.messages = [];
+                }
                 break;
             case 'fb':
                 if (typeof FileBase !== 'undefined') {
@@ -280,19 +287,19 @@ window.tabManager = {
         container.appendChild(contentDiv);
 
         var self = this;
-        var loadKb = function() {
-            if (typeof WikiKnowledge !== 'undefined') {
-                // 先恢复/清除会话 ID，再初始化 KB
-                if (tab.state && tab.state.sessionId) {
-                    sessionStorage.setItem('kb_session_id', tab.state.sessionId);
-                } else {
-                    sessionStorage.removeItem('kb_session_id');
-                    WikiKnowledge.sessionId = null;
+            var loadKb = function() {
+                if (typeof WikiKnowledge !== 'undefined') {
+                    // 清空消息，避免历史消息残留
                     WikiKnowledge.messages = [];
+                    if (tab.state && tab.state.sessionId) {
+                        sessionStorage.setItem('kb_session_id', tab.state.sessionId);
+                    } else {
+                        sessionStorage.removeItem('kb_session_id');
+                        WikiKnowledge.sessionId = null;
+                    }
+                    WikiKnowledge.init();
                 }
-                WikiKnowledge.init();
-            }
-        };
+            };
         if (typeof WikiKnowledge !== 'undefined') {
             loadKb();
         } else {
@@ -610,8 +617,11 @@ window.tabManager = {
                         WikiKnowledge.sessionId = null;
                         WikiKnowledge._saveSessionId();
                         WikiKnowledge.messages = [];
+                        if (typeof WikiKnowledge._switchToInitial === 'function') {
+                            WikiKnowledge._switchToInitial();
+                        }
                     }
-                    self.showSessions();
+                    self.closeSessionsModal();
                 } else {
                     showToast('清除失败', 'error');
                 }

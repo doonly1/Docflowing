@@ -44,10 +44,20 @@ var FileBase = {
     api: function(url, method, body) {
         var o = {
             method: method || 'GET',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' }
         };
         if (body && method !== 'GET') o.body = JSON.stringify(body);
-        return fetch(url, o).then(function(r) { return r.json(); }).catch(function() { return { success: false, message: '请求失败' }; });
+        return fetch(url, o).then(function(r) {
+            // 处理非 JSON 响应（服务器错误页面等）
+            var ct = r.headers.get('content-type') || '';
+            if (ct.indexOf('application/json') === -1) {
+                return { success: false, message: '服务器返回了非 JSON 响应 (HTTP ' + r.status + ')' };
+            }
+            return r.json();
+        }).catch(function(err) {
+            return { success: false, message: '请求失败: ' + (err.message || '网络错误') };
+        });
     },
 
     _pushUndo: function(action) {
@@ -468,7 +478,7 @@ var FileBase = {
         try {
             var res = await this.api('/api/fb/' + kbId + '/sync-status', 'GET');
             if (!res.success) {
-                showToast('获取同步状态失败', 'error');
+                showToast('获取同步状态失败: ' + (res.message || '网络错误，请刷新重试'), 'error');
                 return;
             }
 

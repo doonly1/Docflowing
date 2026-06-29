@@ -9,7 +9,7 @@ from functools import wraps
 from server.auth import login_required
 from kb.database import get_db
 from kb.search import search_wiki
-from kb.llm import is_llm_available, call_llm
+from kb.llm import is_llm_available, call_llm, get_effective_llm_config
 from kb.context_compressor import ContextCompressor
 from kb.session_db import get_session_db
 from kb.agent_tools import _extract_relevant_snippets
@@ -456,14 +456,37 @@ def agent_context():
             skills_index = _build_skills_index(usr_id)
 
             kb_context = f"获取信息时优选wiki_search工具，以下是首次search结果：\n{kb_context}" if kb_context else "没有结果，可能需要尝试更多关键词。\n"
-            system_prompt = f"""你是全力满足用户需求的助手（需求不明时可提问）。
-
+            system_prompt = f"""你是全力满足用户需求的AI助手（需求不明时可提问）。
 {kb_context}
 你的记忆：{memory_context}
 你的技能：{skills_index}"""
 
+            from .config import get_llm_config
+            _llm_cfg = get_llm_config(usr_id)
+            _provider = _llm_cfg.get('provider', 'openai')
+
+            _use_tools = True
             from .agent_tools import ALL_TOOL_SCHEMAS, execute_tool_call
-            from .llm import call_llm_with_tools, call_llm_with_tools_stream
+
+            # 根据 CC Switch 路由选择 API 格式
+            if _provider == 'cc_switch':
+                _cc_route = (_llm_cfg.get('cc_switch', {}) or {}).get('route', 'codex')
+                import logging as _logging
+                _logging.getLogger(__name__).info("CC Switch route=%s, proxy_url=%s", _cc_route, _llm_cfg.get('cc_switch', {}).get('proxy_url', ''))
+                if _cc_route == 'claude':
+                    # Claude 路由：使用 Anthropic Messages 格式（支持 tool_use）
+                    from .llm import call_anthropic_messages, call_anthropic_messages_stream
+                    _stream_func = call_anthropic_messages_stream
+                    _non_stream_func = call_anthropic_messages
+                else:
+                    # Codex / Gemini 等路由：使用 OpenAI Chat 兼容格式（推荐和默认）
+                    from .llm import call_llm_with_tools, call_llm_with_tools_stream
+                    _stream_func = call_llm_with_tools_stream
+                    _non_stream_func = call_llm_with_tools
+            else:
+                from .llm import call_llm_with_tools, call_llm_with_tools_stream
+                _stream_func = call_llm_with_tools_stream
+                _non_stream_func = call_llm_with_tools
 
             messages_history = None
             if session_id:
@@ -503,19 +526,23 @@ def agent_context():
 
             # === 流式分支 ===
             if stream:
+                _stream_kwargs = {}
+                if _use_tools:
+                    _stream_kwargs['tools'] = ALL_TOOL_SCHEMAS
+                    _stream_kwargs['tool_executor'] = _tool_exec
+
                 def generate():
                     try:
                         full_content = ""
-                        for event in call_llm_with_tools_stream(
+                        for event in _stream_func(
                             system_prompt=system_prompt,
                             user_query=query,
                             messages_history=messages_history,
-                            tools=ALL_TOOL_SCHEMAS,
                             max_tool_rounds=5,
-                            tool_executor=_tool_exec,
                             user_id=usr_id,
                             interrupt_event=interrupt_event,
                             sources=sources,
+                            **_stream_kwargs,
                         ):
                             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -543,17 +570,20 @@ def agent_context():
 
                 return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
-            # === 非流式分支（原逻辑） ===
+            # === 非流式分支 ===
+            _non_stream_kwargs = {}
+            if _use_tools:
+                _non_stream_kwargs['tools'] = ALL_TOOL_SCHEMAS
+                _non_stream_kwargs['tool_executor'] = _tool_exec
             try:
-                llm_result = call_llm_with_tools(
+                llm_result = _non_stream_func(
                     system_prompt=system_prompt,
                     user_query=query,
                     messages_history=messages_history,
-                    tools=ALL_TOOL_SCHEMAS,
                     max_tool_rounds=5,
-                    tool_executor=_tool_exec,
                     user_id=usr_id,
                     interrupt_event=interrupt_event,
+                    **_non_stream_kwargs,
                 )
             finally:
                 interrupt_reg.unregister(session_key)
@@ -586,7 +616,7 @@ def agent_context():
             else:
                 message = 'AI 助手暂时不可用，请稍后重试。'
         else:
-            message = '没有匹配内容，请配置 AI 模型。'
+            message = '没有匹配内容。'
 
         return jsonify({
             'success': True,
@@ -736,6 +766,21 @@ def _build_chat_url(base_url):
     return base_url + '/v1/chat/completions'
 
 
+@wiki_bp.route('/cc-switch-status', methods=['GET'])
+@login_required
+@_require_wiki_permission('view')
+def get_cc_switch_status():
+    """检测 CC Switch 本地代理运行状态"""
+    from .llm import detect_cc_switch
+    from .config import get_llm_config
+    cfg = get_llm_config(g.user_id)
+    cc_cfg = cfg.get('cc_switch', {})
+    proxy_url = cc_cfg.get('proxy_url', '')
+    status = detect_cc_switch(proxy_url)
+    status['configured_proxy_url'] = proxy_url
+    return jsonify({'success': True, 'status': status})
+
+
 @wiki_bp.route('/llm-config', methods=['GET'])
 @login_required
 @_require_wiki_permission('view')
@@ -851,7 +896,7 @@ def get_llm_models():
 @login_required
 @_require_wiki_permission('view')
 def test_llm_connection():
-    """测试 LLM 连接：验证网络 → 验证 API Key → 验证模型名称 → 发送测试消息"""
+    """测试 LLM 连接：根据 provider 分支处理"""
     data = request.get_json() or {}
     test_cfg = data.get('llm', {})
 
@@ -861,7 +906,27 @@ def test_llm_connection():
         if k in test_cfg and test_cfg[k]:
             if '****' not in test_cfg[k]:
                 current[k] = test_cfg[k]
+    # 优先使用前端传入的 provider（用户可能尚未保存）
+    if 'provider' in test_cfg and test_cfg['provider']:
+        current['provider'] = test_cfg['provider']
 
+    provider = current.get('provider', 'openai')
+
+    # === CC Switch 模式 ===
+    if provider == 'cc_switch':
+        from .llm import detect_cc_switch
+        # 优先从前端传入数据获取代理地址
+        cc_cfg = test_cfg.get('cc_switch', {}) or current.get('cc_switch', {})
+        proxy_url = cc_cfg.get('proxy_url', '') if isinstance(cc_cfg, dict) else ''
+        if not proxy_url:
+            return jsonify({'success': False, 'message': '请先在 LLM 设置中填写 CC Switch 代理地址'}), 200
+        status = detect_cc_switch(proxy_url)
+        if status.get('reachable'):
+            return jsonify({'success': True, 'message': f'CC Switch 代理连接成功！当前代理地址: {status["base_url"]}'}), 200
+        else:
+            return jsonify({'success': False, 'message': f'CC Switch 代理连接失败: {status.get("error", "未知错误")}'}), 200
+
+    # === OpenAI 兼容模式（原逻辑） ===
     if not current.get('api_key') or not current.get('base_url') or not current.get('model'):
         return jsonify({'success': False, 'message': '请先填写 API Key、API 地址和模型名称'}), 200
 

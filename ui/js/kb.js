@@ -151,6 +151,7 @@ var WikiKnowledge = {
             return resp.json();
         }).then(function(data) {
             if (data.success && data.messages) {
+                self.messages = [];  // 清空后重新加载，避免重复
                 for (var i = 0; i < data.messages.length; i++) {
                     var m = data.messages[i];
                     var d = new Date(m.timestamp * 1000);
@@ -419,6 +420,10 @@ var WikiKnowledge = {
         var self = this;
         this.isLoading = true;
 
+        // 递增 nonce，使旧流回调失效（同一标签重新请求时）
+        this._streamNonce = (this._streamNonce || 0) + 1;
+        var currentNonce = this._streamNonce;
+
         var typingHtml =
             '<div class="kb-chat-message assistant" id="kb-typing">' +
                 '<div class="kb-chat-message-content">' +
@@ -468,12 +473,25 @@ var WikiKnowledge = {
                 self._handleJsonResponse(data, query);
             });
         }).catch(function(e) {
+            // nonce 不匹配 → 已发起新流，忽略旧错误
+            if (self._streamNonce !== currentNonce) return;
+
             var typingEl = document.getElementById('kb-typing');
             if (typingEl) typingEl.remove();
 
+            var msg = (e && e.message) || '';
+            var displayMsg = '';
+            if (msg.indexOf('abort') !== -1 || msg.indexOf('BodyStreamBuffer') !== -1) {
+                displayMsg = '连接已断开，请重新发送。';
+            } else if (/[\u4e00-\u9fff]/.test(msg)) {
+                displayMsg = msg;
+            } else {
+                displayMsg = '抱歉，发生了错误: ' + msg + '。请稍后重试。';
+            }
+
             self.messages.push({
                 role: 'assistant',
-                content: '抱歉，发生了错误: ' + e.message + '。请稍后重试。',
+                content: displayMsg,
                 time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
             });
 
@@ -486,6 +504,7 @@ var WikiKnowledge = {
 
     _handleStreamResponse: function(response, query) {
         var self = this;
+        var streamSession = self.sessionId;  // 捕获发起流时的会话 ID
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
@@ -493,6 +512,29 @@ var WikiKnowledge = {
         var sources = [];
         var doneContent = '';
         var hasFirstToken = false;
+        var tokenCount = 0;          // 累计 token 数，用于批量更新
+        var renderPending = false;    // 防止重复调度 rAF
+        var isAborted = false;        // 标记是否非正常中断
+
+        // 检查当前标签的会话是否还是当初发起流的那个
+        function isStreamValid() {
+            return self.sessionId === streamSession;
+        }
+
+        // 批量渲染：只在新 token 到达足够多或收到 done 时才刷新 DOM
+        function scheduleRender() {
+            if (renderPending) return;
+            renderPending = true;
+            requestAnimationFrame(function() {
+                renderPending = false;
+                var streamEl = document.getElementById('kb-streaming');
+                var bubble = streamEl ? streamEl.querySelector('.kb-chat-message-bubble') : null;
+                if (bubble && fullContent) {
+                    bubble.innerHTML = self._formatContent(fullContent);
+                    self._scrollToBottom();
+                }
+            });
+        }
 
         function processSSELine(line) {
             if (!line.startsWith('data: ')) return;
@@ -513,10 +555,13 @@ var WikiKnowledge = {
                     if (!hasFirstToken) {
                         hasFirstToken = true;
                         self._replaceTypingWithStreaming(event.content);
-                    } else {
-                        self._appendStreamContent(event.content);
                     }
                     fullContent += event.content;
+                    tokenCount++;
+                    // 每 3 个 token 或首次 token 时刷新 DOM
+                    if (tokenCount % 3 === 1 || tokenCount <= 2) {
+                        scheduleRender();
+                    }
                     break;
 
                 case 'tool_call':
@@ -567,15 +612,18 @@ var WikiKnowledge = {
                     break;
 
                 case 'done':
+                    if (!isStreamValid()) return;
                     doneContent = event.content || fullContent;
                     self._finalizeStream(doneContent, sources, query, event);
                     break;
 
                 case 'interrupted':
+                    if (!isStreamValid()) return;
                     self._finalizeStream(fullContent || '(已中断)', sources, query, {interrupted: true});
                     break;
 
                 case 'error':
+                    if (!isStreamValid()) return;
                     self._finalizeStreamError(event.message || '未知错误');
                     break;
             }
@@ -594,6 +642,7 @@ var WikiKnowledge = {
                     }
                     // 流结束但未收到 done 事件（降级）
                     if (!doneContent && fullContent) {
+                        if (!isStreamValid()) return;
                         self._finalizeStream(fullContent, sources, query, {});
                     }
                     return;
@@ -610,7 +659,34 @@ var WikiKnowledge = {
 
                 pump();
             }).catch(function(e) {
-                self._finalizeStreamError(e.message);
+                var msg = (e && e.message) || '';
+                var isAbort = (
+                    msg.indexOf('abort') !== -1 ||
+                    msg.indexOf('BodyStreamBuffer') !== -1 ||
+                    msg.indexOf('network error') !== -1
+                );
+
+                if (isAbort) {
+                    // 流被中止（如切换标签页导致 WebView2 终止 ReadableStream）
+                    isAborted = true;
+                    if (!isStreamValid()) {
+                        self.isLoading = false;
+                        return;
+                    }
+                    // 如果已经有返回内容，保留已收到的部分
+                    if (fullContent) {
+                        self._finalizeStream(fullContent, sources, query, {interrupted: true});
+                    } else {
+                        // 完全没有内容，显示友好的断开提示
+                        self._finalizeStreamError('连接已断开，请重新发送');
+                    }
+                } else {
+                    if (!isStreamValid()) {
+                        self.isLoading = false;
+                        return;
+                    }
+                    self._finalizeStreamError(msg);
+                }
             });
         }
 
@@ -653,18 +729,24 @@ var WikiKnowledge = {
         if (el) el.remove();
 
         var interrupted = event.interrupted || false;
+        var responseModel = event.model || null;
 
         self.messages.push({
             role: 'assistant',
             content: content || '',
             sources: sources || [],
             interrupted: interrupted,
+            model: responseModel,
             time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         });
 
         self._recordMessage('assistant', content || '', sources);
         self.isLoading = false;
-        self._renderMessages();
+
+        // 只在 KB 聊天标签可见时才渲染，否则切回来后 _restoreSession 会从服务端加载
+        if (document.getElementById('kb-messages-inner')) {
+            self._renderMessages();
+        }
     },
 
     _finalizeStreamError: function(message) {
@@ -674,14 +756,19 @@ var WikiKnowledge = {
         var el = streamEl || typingEl;
         if (el) el.remove();
 
+        // 已经是友好的中文错误信息，直接使用；否则添加通用前缀
+        var displayMsg = (/[\u4e00-\u9fff]/.test(message)) ? message : '抱歉，发生了错误: ' + message + '。请稍后重试。';
+
         self.messages.push({
             role: 'assistant',
-            content: '抱歉，发生了错误: ' + message + '。请稍后重试。',
+            content: displayMsg,
             time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
         });
 
         self.isLoading = false;
-        self._renderMessages();
+        if (document.getElementById('kb-messages-inner')) {
+            self._renderMessages();
+        }
     },
 
     _handleJsonResponse: function(data, query) {
@@ -716,7 +803,9 @@ var WikiKnowledge = {
 
         self._recordMessage('assistant', answer, data.sources);
         self.isLoading = false;
-        self._renderMessages();
+        if (document.getElementById('kb-messages-inner')) {
+            self._renderMessages();
+        }
     },
 
     stopResponse: function() {
@@ -909,6 +998,7 @@ var WikiKnowledge = {
 
             html += '<div class="kb-chat-message-time">' +
                         '<span>' + msg.time + '</span>' +
+                        (msg.model ? '<span style="margin-left:8px;font-size:10px;color:#aaa;">' + this._escapeHtml(msg.model) + '</span>' : '') +
                         actionsHtml +
                     '</div>';
 
@@ -1780,27 +1870,35 @@ var WikiKnowledge = {
 
     showLLMSettings: function() {
         var self = this;
-        apiFetch('/api/kb/llm-config', { method: 'GET' }).then(function(resp) {
-            return resp.json();
-        }).then(function(data) {
+        Promise.all([
+            apiFetch('/api/kb/llm-config', { method: 'GET' }).then(function(r) { return r.json(); }),
+            // 同时检测 CC Switch 状态
+            apiFetch('/api/kb/cc-switch-status', { method: 'GET' }).catch(function() { return null; })
+        ]).then(function(results) {
+            var data = results[0];
+            var ccData = results[1];
             if (!data.success) {
                 self.openSidebar('LLM 设置', '<div style="padding: 20px; text-align: center; color: #c00;">加载配置失败</div>');
                 return;
             }
-            self._renderLLMSettings(data.config || {});
+            var ccStatus = ccData && ccData.success ? ccData.status : null;
+            self._renderLLMSettings(data.config || {}, ccStatus);
         }).catch(function(e) {
             self.openSidebar('LLM 设置', '<div style="padding: 20px; text-align: center; color: #c00;">加载失败: ' + self._escapeHtml(e.message) + '</div>');
         });
     },
 
-    _renderLLMSettings: function(config) {
+    _renderLLMSettings: function(config, ccStatus) {
         var self = this;
         var enabled = config.enabled ? 'checked' : '';
+        var provider = config.provider || 'openai';
         var apiKey = config.api_key || '';
         var baseUrl = config.base_url || '';
         var model = config.model || '';
         var temperature = config.temperature !== undefined ? config.temperature : 0.7;
         var maxTokens = config.max_tokens !== undefined ? config.max_tokens : 4096;
+        var ccProxyUrl = (config.cc_switch && config.cc_switch.proxy_url) || 'http://127.0.0.1:15721';
+        var ccRoute = (config.cc_switch && config.cc_switch.route) || 'codex';
 
         // 根据 base_url 匹配提供商
         var matchedProvider = '';
@@ -1842,8 +1940,47 @@ var WikiKnowledge = {
             modelOptions = '<option value="">-- 手动输入 --</option>';
         }
 
+        // CC Switch 状态
+        var ccStatusHtml = '';
+        if (ccStatus) {
+            var isRunning = ccStatus.reachable;
+            ccStatusHtml = '<div style="margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:12px;' +
+                (isRunning ? 'background:#f6ffed;border:1px solid #b7eb8f;color:#52c41a;' : 'background:#fff2f0;border:1px solid #ffccc7;color:#ff4d4f;') + '">' +
+                '<strong>CC Switch:</strong> ' + (isRunning ? '✅ 运行中' : '❌ 未运行') +
+                (ccStatus.base_url ? ' <code style="font-size:11px;">' + self._escapeHtml(ccStatus.base_url) + '</code>' : '') +
+                (ccStatus.error ? ' (' + self._escapeHtml(ccStatus.error) + ')' : '') +
+                '</div>';
+        }
+
+        // 引擎选择
+        var engineOptions = [
+            { value: 'openai', label: 'OpenAI 兼容模式' },
+            { value: 'cc_switch', label: 'CC Switch 模式' },
+        ];
+        var engineHtml = '';
+        for (var i = 0; i < engineOptions.length; i++) {
+            var eo = engineOptions[i];
+            var sel = (eo.value === provider) ? ' checked' : '';
+            engineHtml += '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;">' +
+                '<input type="radio" name="kb-llm-engine" value="' + eo.value + '"' + sel + ' onchange="WikiKnowledge._onEngineChange()">' +
+                self._escapeHtml(eo.label) +
+                '</label>';
+        }
+
+        // OpenAI 字段区域
+        var openaiVisible = (provider === 'openai') ? '' : ' style="display:none"';
+        // CC Switch 字段区域
+        var ccVisible = (provider === 'cc_switch') ? '' : ' style="display:none"';
+
         var html =
             '<div style="padding: 16px;">' +
+                // 引擎选择
+                '<div class="kb-settings-section">' +
+                    '<label class="kb-settings-label">AI 引擎</label>' +
+                    engineHtml +
+                '</div>' +
+
+                // 启用开关
                 '<div class="kb-settings-section">' +
                     '<label class="kb-settings-label">启用 LLM</label>' +
                     '<label class="kb-settings-toggle">' +
@@ -1852,47 +1989,69 @@ var WikiKnowledge = {
                     '</label>' +
                 '</div>' +
 
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">模型提供商</label>' +
-                    '<select id="kb-llm-provider" onchange="WikiKnowledge._onProviderChange()" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
-                        providerOptions +
-                    '</select>' +
-                '</div>' +
-
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">API 地址</label>' +
-                    '<input id="kb-llm-base-url" type="text" value="' + self._escapeHtml(baseUrl) + '" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
-                '</div>' +
-
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">API Key</label>' +
-                    '<div style="display:flex;gap:8px;">' +
-                        '<input id="kb-llm-api-key" type="text" value="' + self._escapeHtml(apiKey) + '" placeholder="sk-..." style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;font-family:monospace;">' +
-                        '<button onclick="WikiKnowledge._toggleApiKeyVisibility()" style="padding:8px 10px;border:1px solid #d9d9d9;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;" title="切换可见性">👁</button>' +
-                    '</div>' +
-                '</div>' +
-
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">模型</label>' +
-                    '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
-                        '<select id="kb-llm-model-select" onchange="WikiKnowledge._onModelSelectChange()" style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
-                            '<option value="">-- 手动输入 --</option>' +
+                // ====== OpenAI 模式字段 ======
+                '<div id="kb-llm-openai-fields"' + openaiVisible + '>' +
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">模型提供商</label>' +
+                        '<select id="kb-llm-provider" onchange="WikiKnowledge._onProviderChange()" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
+                            providerOptions +
                         '</select>' +
-                        '<button onclick="WikiKnowledge._fetchModels()" id="kb-llm-fetch-models" style="padding:8px 12px;border:1px solid #4a90d9;border-radius:6px;background:white;color:#4a90d9;cursor:pointer;font-size:12px;white-space:nowrap;">🔄 获取列表</button>' +
                     '</div>' +
-                    '<input id="kb-llm-model-input" type="text" value="' + self._escapeHtml(model) + '" placeholder="输入模型名称，如: gpt-4o-mini" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
-                    '<div id="kb-llm-model-status" style="margin-top:4px;font-size:11px;color:#999;"></div>' +
+
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">API 地址</label>' +
+                        '<input id="kb-llm-base-url" type="text" value="' + self._escapeHtml(baseUrl) + '" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                    '</div>' +
+
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">API Key</label>' +
+                        '<div style="display:flex;gap:8px;">' +
+                            '<input id="kb-llm-api-key" type="text" value="' + self._escapeHtml(apiKey) + '" placeholder="sk-..." style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;font-family:monospace;">' +
+                            '<button onclick="WikiKnowledge._toggleApiKeyVisibility()" style="padding:8px 10px;border:1px solid #d9d9d9;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;" title="切换可见性">👁</button>' +
+                        '</div>' +
+                    '</div>' +
+
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">模型</label>' +
+                        '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+                            '<select id="kb-llm-model-select" onchange="WikiKnowledge._onModelSelectChange()" style="flex:1;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
+                                '<option value="">-- 手动输入 --</option>' +
+                            '</select>' +
+                            '<button onclick="WikiKnowledge._fetchModels()" id="kb-llm-fetch-models" style="padding:8px 12px;border:1px solid #4a90d9;border-radius:6px;background:white;color:#4a90d9;cursor:pointer;font-size:12px;white-space:nowrap;">🔄 获取列表</button>' +
+                        '</div>' +
+                        '<input id="kb-llm-model-input" type="text" value="' + self._escapeHtml(model) + '" placeholder="输入模型名称，如: gpt-4o-mini" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                        '<div id="kb-llm-model-status" style="margin-top:4px;font-size:11px;color:#999;"></div>' +
+                    '</div>' +
+
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">温度: <span id="kb-llm-temp-value">' + temperature + '</span></label>' +
+                        '<input id="kb-llm-temperature" type="range" min="0" max="2" step="0.1" value="' + temperature + '" oninput="WikiKnowledge._updateTempValue(this.value)" style="width:100%;">' +
+                        '<div style="display:flex;justify-content:space-between;font-size:11px;color:#999;"><span>精确 (0)</span><span>创意 (2)</span></div>' +
+                    '</div>' +
+
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">最大 Token</label>' +
+                        '<input id="kb-llm-max-tokens" type="number" value="' + maxTokens + '" min="1" max="131072" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                    '</div>' +
                 '</div>' +
 
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">温度: <span id="kb-llm-temp-value">' + temperature + '</span></label>' +
-                    '<input id="kb-llm-temperature" type="range" min="0" max="2" step="0.1" value="' + temperature + '" oninput="WikiKnowledge._updateTempValue(this.value)" style="width:100%;">' +
-                    '<div style="display:flex;justify-content:space-between;font-size:11px;color:#999;"><span>精确 (0)</span><span>创意 (2)</span></div>' +
-                '</div>' +
-
-                '<div class="kb-settings-section">' +
-                    '<label class="kb-settings-label">最大 Token</label>' +
-                    '<input id="kb-llm-max-tokens" type="number" value="' + maxTokens + '" min="1" max="131072" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                // ====== CC Switch 模式 ======
+                '<div id="kb-llm-cc-fields"' + ccVisible + '>' +
+                    ccStatusHtml +
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">CC Switch 代理地址</label>' +
+                        '<input id="kb-llm-cc-proxy" type="text" value="' + self._escapeHtml(ccProxyUrl) + '" placeholder="http://127.0.0.1:15721/v1" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+                    '</div>' +
+                    '<div class="kb-settings-section">' +
+                        '<label class="kb-settings-label">CC Switch 应用路由</label>' +
+                        '<select id="kb-llm-cc-route" style="width:100%;padding:8px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;">' +
+                            '<option value="codex" ' + (ccRoute === 'codex' ? 'selected' : '') + '>Codex（推荐）</option>' +
+                            '<option value="claude" ' + (ccRoute === 'claude' ? 'selected' : '') + '>Claude</option>' +
+                            '<option value="gemini" ' + (ccRoute === 'gemini' ? 'selected' : '') + '>Gemini</option>' +
+                        '</select>' +
+                        '<div style="color:#999;font-size:11px;margin-top:4px;">选择 CC Switch 中已启用的应用路由。Codex 和 Gemini 使用 OpenAI 兼容格式，Claude 使用 Anthropic Messages 格式。</div>' +
+                    '</div>' +
+                    '<div style="color:#999;font-size:12px;margin-bottom:12px;">请在 CC Switch 应用中开启"本地代理模式"并设置端口，然后将代理地址填到上方。</div>' +
                 '</div>' +
 
                 '<div style="display:flex;gap:8px;margin-top:20px;">' +
@@ -1903,6 +2062,21 @@ var WikiKnowledge = {
             '</div>';
 
         self.openSidebar('⚙️ LLM 设置', html);
+    },
+
+    _onEngineChange: function() {
+        var radios = document.getElementsByName('kb-llm-engine');
+        var provider = 'openai';
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) {
+                provider = radios[i].value;
+                break;
+            }
+        }
+        var openaiFields = document.getElementById('kb-llm-openai-fields');
+        var ccFields = document.getElementById('kb-llm-cc-fields');
+        if (openaiFields) openaiFields.style.display = (provider === 'openai') ? '' : 'none';
+        if (ccFields) ccFields.style.display = (provider === 'cc_switch') ? '' : 'none';
     },
 
     _onProviderChange: function() {
@@ -2050,11 +2224,15 @@ var WikiKnowledge = {
         statusEl.innerHTML = '<span style="color:#999;">正在测试连接...</span>';
 
         var llm = self._collectLLMFormData();
-        if (!llm.api_key || !llm.base_url || !llm.model) {
-            statusEl.innerHTML = '<span style="color:#c00;">请先填写 API Key、API 地址和模型名称</span>';
-            btn.disabled = false;
-            btn.textContent = '🔌 测试连接';
-            return;
+        var provider = llm.provider || 'openai';
+        // CC Switch 模式不需要 api_key/base_url/model（由 CC Switch 管理）
+        if (provider !== 'cc_switch') {
+            if (!llm.api_key || !llm.base_url || !llm.model) {
+                statusEl.innerHTML = '<span style="color:#c00;">请先填写 API Key、API 地址和模型名称</span>';
+                btn.disabled = false;
+                btn.textContent = '🔌 测试连接';
+                return;
+            }
         }
 
         apiFetch('/api/kb/llm-test', {
@@ -2112,13 +2290,27 @@ var WikiKnowledge = {
     },
 
     _collectLLMFormData: function() {
+        // 获取选中的引擎
+        var provider = 'openai';
+        var radios = document.getElementsByName('kb-llm-engine');
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) {
+                provider = radios[i].value;
+                break;
+            }
+        }
+        // 构建 cc_switch 子配置
+        var ccProxyUrl = document.getElementById('kb-llm-cc-proxy') ? document.getElementById('kb-llm-cc-proxy').value.trim() : '';
+        var ccRoute = document.getElementById('kb-llm-cc-route') ? document.getElementById('kb-llm-cc-route').value : 'codex';
         return {
             enabled: document.getElementById('kb-llm-enabled') ? document.getElementById('kb-llm-enabled').checked : false,
+            provider: provider,
             base_url: document.getElementById('kb-llm-base-url') ? document.getElementById('kb-llm-base-url').value.trim() : '',
             api_key: document.getElementById('kb-llm-api-key') ? document.getElementById('kb-llm-api-key').value.trim() : '',
             model: document.getElementById('kb-llm-model-input') ? document.getElementById('kb-llm-model-input').value.trim() : '',
             temperature: document.getElementById('kb-llm-temperature') ? parseFloat(document.getElementById('kb-llm-temperature').value) : 0.7,
             max_tokens: document.getElementById('kb-llm-max-tokens') ? parseInt(document.getElementById('kb-llm-max-tokens').value) || 4096 : 4096,
+            cc_switch: { proxy_url: ccProxyUrl, route: ccRoute },
         };
     },
 

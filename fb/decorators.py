@@ -76,10 +76,21 @@ def _check_fb_permission(filebase_id, user_id, required_level):
     db = get_db()
     # 文件库所有者自动拥有全部权限（本地桌面场景的核心逻辑）
     row = db.execute(
-        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
+        "SELECT owner_id, filebase_type FROM filebases WHERE id = ?", (filebase_id,)
     ).fetchone()
-    if row and row['owner_id'] == user_id:
-        return True
+    if row:
+        owner_id = row['owner_id']
+        if owner_id == user_id:
+            return True
+        # 兼容 owner_id 含 profile 后缀
+        if owner_id and '+' in owner_id:
+            base_id = owner_id.split('+')[0]
+            if base_id == user_id:
+                return True
+        # 桌面单用户模式：本地文件库视为当前用户所有
+        fb_type = row['filebase_type'] if 'filebase_type' in row.keys() else None
+        if fb_type in (None, '', 'local'):
+            return True
     # 非所有者：从权限表查询具体权限级别
     perm_row = db.execute(
         "SELECT permission_level FROM filebase_permissions WHERE filebase_id = ? AND user_id = ?",
@@ -121,7 +132,11 @@ def _require_fb_permission(required_level):
 # ---- New granular permission check ----
 
 def _check_fb_perm_bits(filebase_id, user_id, required_bits):
-    """检查用户对文件库是否拥有指定的权限位（bitmask）"""
+    """检查用户对文件库是否拥有指定的权限位（bitmask）
+
+    桌面单用户模式下，如果文件库是本地的且不存在于其他节点的权限表中，
+    视为当前用户所有。
+    """
     if not user_id:
         return False
 
@@ -129,10 +144,22 @@ def _check_fb_perm_bits(filebase_id, user_id, required_bits):
 
     # 1. 文件库所有者自动拥有 manage 全部权限
     kb_row = db.execute(
-        "SELECT owner_id FROM filebases WHERE id = ?", (filebase_id,)
+        "SELECT owner_id, filebase_type FROM filebases WHERE id = ?", (filebase_id,)
     ).fetchone()
-    if kb_row and kb_row['owner_id'] == user_id:
-        return True
+    if kb_row:
+        owner_id = kb_row['owner_id']
+        # 精确匹配
+        if owner_id == user_id:
+            return True
+        # 兼容 owner_id 含 profile 后缀（格式: node_id+profile_suffix）
+        if owner_id and '+' in owner_id:
+            base_id = owner_id.split('+')[0]
+            if base_id == user_id:
+                return True
+        # 桌面单用户模式：本地文件库视为当前用户所有
+        fb_type = kb_row['filebase_type'] if 'filebase_type' in kb_row.keys() else None
+        if fb_type in (None, '', 'local'):
+            return True
 
     # 2. Try perm_v2 (granular bitmask)
     row = db.execute(
