@@ -4,10 +4,12 @@
  1. workspaces/config/kb_config.yaml（用户持久化配置）
  2. 代码内置默认值
 
-API Key 以明文存储在同 YAML 文件中，配置文件权限设为仅当前用户可读。"""
+API Key 使用 p2p node_id 做 XOR 混淆后存储（防 YAML 误同步泄漏）。
+同机恶意软件仍可读取两文件解码，桌面单用户模式可接受。"""
 
 import os
 import yaml
+import base64
 from pathlib import Path
 from typing import Any, Dict
 
@@ -63,7 +65,12 @@ _DEFAULT_KB_CONFIG = {
     },
 }
 
-# ==================== API Key 处理 ====================
+# ==================== API Key 处理（node_id XOR 混淆） ====================
+#
+# API Key 使用 p2p 节点 node_id 的前 16 字节做 XOR 混淆后存储。
+# API Key 和 node_id 在同一机器的不同 YAML 文件中（kb_config.yaml vs p2p_node.yaml），
+# 意外同步到云端时不会同时泄漏两者，起到防误泄漏的作用。
+# 同机恶意软件仍能读取两文件解码，这是桌面单用户应用的可接受安全模型。
 
 
 def _get_user_config_dir(user_id: str = None) -> str:
@@ -74,14 +81,50 @@ def _get_user_config_dir(user_id: str = None) -> str:
     return config_dir
 
 
+def _get_node_key() -> bytes:
+    """获取节点密钥（node_id 前 16 字节），用于 API Key 混淆"""
+    try:
+        from p2p.node import _get_config_path as _p2p_config
+        import yaml
+        cfg_path = _p2p_config()
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f) or {}
+            node_id = cfg.get('node_id', '')
+            if node_id:
+                return node_id.encode('utf-8')[:16]
+    except Exception:
+        pass
+    return b'docflowing-fallback'  # 极低概率回退（无 p2p 配置时）
+
+
+def _xor_obfuscate(data: bytes, key: bytes) -> bytes:
+    """XOR 混淆/去混淆"""
+    return bytes(data[i] ^ key[i % len(key)] for i in range(len(data)))
+
+
 def _encrypt_api_key(api_key: str, user_id: str = None) -> str:
-    """API Key 以明文存储（配置依赖文件系统权限保护）"""
-    return api_key
+    """用 node_id 做 XOR 混淆后存储"""
+    if not api_key:
+        return ''
+    key = _get_node_key()
+    raw = api_key.encode('utf-8')
+    obfuscated = _xor_obfuscate(raw, key)
+    return '!xor:' + base64.b64encode(obfuscated).decode()
 
 
 def _decrypt_api_key(value: str, user_id: str = None) -> str:
-    """API Key 直接返回（加密已移除，保留接口兼容）"""
-    return value
+    """用 node_id 解码 XOR 混淆"""
+    if not value:
+        return value
+    if not value.startswith('!xor:'):
+        return value  # 明文兼容（旧配置）
+    key = _get_node_key()
+    try:
+        obfuscated = base64.b64decode(value[5:])
+        return _xor_obfuscate(obfuscated, key).decode('utf-8')
+    except Exception:
+        return value
 
 
 def _mask_api_key(api_key: str) -> str:
