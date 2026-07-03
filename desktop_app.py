@@ -16,6 +16,11 @@ import threading
 import time
 import webbrowser
 
+# 提前将 sys.argv[0] 转为绝对路径，防止后续 os.chdir 导致
+# webview.util.get_app_root() 基于错误的工作目录解析相对路径。
+if sys.argv and sys.argv[0]:
+    sys.argv[0] = os.path.realpath(sys.argv[0])
+
 # 提前导入 PIL，避免打包后惰性导入时 _imaging.pyd 加载失败
 # （UPX 压缩可能损坏 .pyd 文件，提前导入可尽早暴露问题）
 from PIL import Image  # noqa: E402
