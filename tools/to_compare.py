@@ -2291,15 +2291,19 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         elif next_orig_idx not in matched_orig:
-                            if not orig_paras[next_orig_idx]['text']:
-                                # 未匹配的空段落 → 从 DOM 删除，不留空行
-                                _remove_element_safe(result_paras[next_orig_idx]._element)
-                            else:
+                            o_text = orig_paras[next_orig_idx]['text']
+                            if o_text:
                                 _set_para_red_with_deletion(
                                     result_paras[next_orig_idx],
-                                    orig_paras[next_orig_idx]['text'],
+                                    o_text,
                                     orig_font_info[next_orig_idx]
                                 )
+                            elif _is_pure_image_para(result_paras[next_orig_idx]):
+                                # 纯图片段落（无文字）保留原样，避免误删图片
+                                pass
+                            else:
+                                # 未匹配的空白段落 → 从 DOM 删除，不留空行
+                                _remove_element_safe(result_paras[next_orig_idx]._element)
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         else:
@@ -2321,15 +2325,19 @@ def compare_with_python_inplace(original_path, final_path, output_path):
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         elif next_orig_idx not in matched_orig:
-                            if not orig_paras[next_orig_idx]['text']:
-                                # 未匹配的空段落 → 从 DOM 删除，不留空行
-                                _remove_element_safe(result_paras[next_orig_idx]._element)
-                            else:
+                            o_text = orig_paras[next_orig_idx]['text']
+                            if o_text:
                                 _set_para_red_with_deletion(
                                     result_paras[next_orig_idx],
-                                    orig_paras[next_orig_idx]['text'],
+                                    o_text,
                                     orig_font_info[next_orig_idx]
                                 )
+                            elif _is_pure_image_para(result_paras[next_orig_idx]):
+                                # 纯图片段落（无文字）保留原样，避免误删图片
+                                pass
+                            else:
+                                # 未匹配的空白段落 → 从 DOM 删除，不留空行
+                                _remove_element_safe(result_paras[next_orig_idx]._element)
                             processed_orig.add(next_orig_idx)
                             next_orig_idx += 1
                         else:
@@ -2442,15 +2450,19 @@ def compare_with_python_inplace(original_path, final_path, output_path):
         while next_orig_idx < len(orig_paras):
             if next_orig_idx not in processed_orig:
                 if next_orig_idx not in matched_orig:
-                    if not orig_paras[next_orig_idx]['text']:
-                        # 未匹配的空段落 → 从 DOM 删除，不留空行
-                        _remove_element_safe(result_paras[next_orig_idx]._element)
-                    else:
+                    o_text = orig_paras[next_orig_idx]['text']
+                    if o_text:
                         _set_para_red_with_deletion(
                             result_paras[next_orig_idx],
-                            orig_paras[next_orig_idx]['text'],
+                            o_text,
                             orig_font_info[next_orig_idx]
                         )
+                    elif _is_pure_image_para(result_paras[next_orig_idx]):
+                        # 纯图片段落（无文字）保留原样，避免误删图片
+                        pass
+                    else:
+                        # 未匹配的空白段落 → 从 DOM 删除，不留空行
+                        _remove_element_safe(result_paras[next_orig_idx]._element)
                 elif next_orig_idx in moved_para_orig_set:
                     # 移动段落的新位置已在前方输出，
                     # 原位置标记为蓝色删除
