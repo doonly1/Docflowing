@@ -25,6 +25,8 @@ zeroconf==0.132.2
 pywebview==5.3.1
 pystray==0.19.5
 Pillow==10.4.0
+# pythonnet 提供 .NET CLR 桥接，pywebview edgechromium 后端必需（打包时需收集 runtime DLL）
+pythonnet==3.1.0; sys_platform == "win32"
 
 # 测试
 pytest==8.3.2
