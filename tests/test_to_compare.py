@@ -530,6 +530,11 @@ class TestParagraphSplitE2E:
         self.orig_path = os.path.join(self.test_dir, '1学子.docx')
         self.final_path = os.path.join(self.test_dir, '2学子.docx')
         self.output_path = os.path.join(self.test_dir, self.OUTPUT_NAME)
+        # 端到端用例依赖本地真实 docx fixture（从未入库，属开发机私有数据）。
+        # 文件缺失时优雅跳过，避免 CI/其他机器上整套件报红；
+        # 文件存在（如原开发机）时照常执行，不改变测试语义。
+        if not os.path.exists(self.orig_path) or not os.path.exists(self.final_path):
+            pytest.skip('缺少端到端 fixture：tests/1学子.docx 与 tests/2学子.docx')
         # 清理上次运行残留
         if os.path.exists(self.output_path):
             os.remove(self.output_path)

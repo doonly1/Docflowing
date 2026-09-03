@@ -1,4 +1,8 @@
-"""测试认证系统改进（X-Forwarded-For 支持）"""
+"""测试认证系统的 IP 判定契约。
+
+安全设计：_get_real_ip 只信 request.remote_addr（TCP 层真实远端），
+X-Forwarded-For 请求头可被客户端伪造，一律忽略 —— 防止伪造 XFF 绕过仅本机认证。
+"""
 
 import sys
 import os
@@ -29,8 +33,8 @@ class TestGetRealIP:
             result = _get_real_ip()
             assert result == '127.0.0.1'
 
-    def test_xff_client_ip(self, app):
-        """有 X-Forwarded-For 时返回第一个 IP（客户端真实 IP）"""
+    def test_xff_is_ignored_multiple_ips(self, app):
+        """多级 X-Forwarded-For 被忽略，只信 remote_addr（防伪造绕过）"""
         from server.auth import _get_real_ip
 
         with app.test_request_context(headers={
@@ -39,22 +43,22 @@ class TestGetRealIP:
             from flask import request
             request.remote_addr = '10.0.0.1'
             result = _get_real_ip()
-            assert result == '192.168.1.100'
+            assert result == '10.0.0.1'
 
-    def test_xff_local_ip(self, app):
-        """X-Forwarded-For 为本机地址时返回本机 IP"""
+    def test_xff_local_ip_spoof_still_remote_addr(self, app):
+        """XFF 伪造为本机 IP 也无效，仍以 remote_addr 为准"""
         from server.auth import _get_real_ip
 
         with app.test_request_context(headers={
             'X-Forwarded-For': '127.0.0.1'
         }):
             from flask import request
-            request.remote_addr = '127.0.0.1'
+            request.remote_addr = '10.0.0.1'
             result = _get_real_ip()
-            assert result == '127.0.0.1'
+            assert result == '10.0.0.1'
 
-    def test_xff_single_ip(self, app):
-        """X-Forwarded-For 只有一个 IP"""
+    def test_xff_single_ip_ignored(self, app):
+        """单个 XFF IP 同样被忽略"""
         from server.auth import _get_real_ip
 
         with app.test_request_context(headers={
@@ -63,10 +67,10 @@ class TestGetRealIP:
             from flask import request
             request.remote_addr = '10.0.0.1'
             result = _get_real_ip()
-            assert result == '10.0.0.5'
+            assert result == '10.0.0.1'
 
     def test_xff_empty_header(self, app):
-        """X-Forwarded-For 为空字符串时回退到 remote_addr"""
+        """X-Forwarded-For 为空/缺失时正常返回 remote_addr（XFF 本就不参与判定）"""
         from server.auth import _get_real_ip
 
         with app.test_request_context(headers={
@@ -110,8 +114,8 @@ class TestLoginRequired:
             assert resp[1] == 403
             assert '仅允许本机访问' in str(resp[0].json)
 
-    def test_xff_localhost_passes(self, app):
-        """通过 X-Forwarded-For 传来的本机地址应通过认证"""
+    def test_xff_localhost_spoof_blocked(self, app):
+        """伪造 X-Forwarded-For: 127.0.0.1 不能绕过本机认证（remote_addr 非回环 → 403）"""
         from server.auth import login_required
 
         @login_required
@@ -122,6 +126,7 @@ class TestLoginRequired:
             'X-Forwarded-For': '127.0.0.1'
         }):
             from flask import request
-            request.remote_addr = '10.0.0.1'  # 代理 IP
+            request.remote_addr = '10.0.0.1'  # 真实远端是代理/非本机
             resp = fake_view()
-            assert resp == 'ok'
+            assert resp[1] == 403
+            assert '仅允许本机访问' in str(resp[0].json)

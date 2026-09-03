@@ -360,12 +360,12 @@ class TestFlaskIntegration:
 
     def test_flask_server_startup(self):
         """Flask 后台线程启动应提供服务"""
-        from desktop_app import _start_flask, _wait_for_flask, _flask_ready
+        from desktop_app import _start_flask, _wait_for_flask, _flask_ready, _get_runtime_dir
 
         port = 5888
         os.environ['PORT'] = str(port)
         os.environ['DOCFLOWING_PACKAGED'] = '0'
-        os.environ['DOCFLOWING_RUNTIME_DIR'] = desktop_app._get_runtime_dir()
+        os.environ['DOCFLOWING_RUNTIME_DIR'] = _get_runtime_dir()
 
         # 重置事件
         _flask_ready.clear()
