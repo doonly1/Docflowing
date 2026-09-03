@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import platform
 import random
 import re
 import sqlite3
@@ -16,10 +15,18 @@ from server.workspace import _get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
-# FTS5 simple 分词器扩展路径（平台相关 + PyInstaller 兼容）
-# - 开发模式：kb/fts_ext/（相对于本文件）
-# - PyInstaller frozen 模式：sys._MEIPASS/kb/fts_ext/
+# FTS 分词器演进说明（重要）：
+# 旧版本依赖 kb/fts_ext/simple 外部扩展（simple.dll/.so/.dylib）。该扩展在当前
+# SQLite（>=3.49，随 Python 3.12+ 分发）下任何 FTS 写入都会触发原生崩溃
+# （access violation / SIGSEGV，进程级且无法被 try/except 捕获），曾导致
+# 「同步到知识库」首次写入即闪退、应用无法启动。
+# 自 SCHEMA_VERSION=4 起，messages_fts 一律改用 SQLite **内建 trigram 分词器**
+# （sqlite>=3.34），运行时不加载任何外部扩展。trigram 对长度 <3 的查询词
+# （如常见中文 2 字词）无法命中，search_messages 会走 LIKE 兜底，不丢结果。
+#
+# 下方 _resolve_fts_extension_dir 仅为兼容旧调用方保留，不再被运行时使用。
 def _resolve_fts_extension_dir() -> str:
+    """[已废弃] 旧 simple 分词器扩展目录解析；运行时已不再加载该扩展。"""
     this_dir = os.path.dirname(os.path.abspath(__file__))
     if getattr(sys, 'frozen', False):
         meipass = getattr(sys, '_MEIPASS', None)
@@ -33,23 +40,9 @@ def _resolve_fts_extension_dir() -> str:
             return exe_sibling
     return os.path.join(this_dir, 'fts_ext')
 
-
-_EXTENSION_DIR = _resolve_fts_extension_dir()
-_SYS = platform.system()
-_MACH = platform.machine()
-
-if _SYS == 'Windows':
-    _FTS_NAME = 'simple.dll'
-elif _SYS == 'Linux':
-    _FTS_NAME = 'simple.so'
-elif _SYS == 'Darwin':
-    # macOS: Intel (x86_64) / Apple Silicon (arm64)
-    _FTS_NAME = 'simple_arm64.dylib' if _MACH == 'arm64' else 'simple_x64.dylib'
-else:
-    _FTS_NAME = ''
-_FTS_EXTENSION = os.path.join(_EXTENSION_DIR, _FTS_NAME)
-
-SCHEMA_VERSION = 3
+# v4: messages_fts 弃用 simple 外部扩展分词器，改用内建 trigram（修复 FTS 写入
+# 原生崩溃）。从 v3 升级时会自动重建 FTS 表并回填索引。
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -138,10 +131,6 @@ class SessionDB:
         self.db_path = Path(db_path) if db_path else Path(data_dir) / 'state.db'
         self._lock = threading.Lock()
         self._write_count = 0
-        self._simple_loaded = False
-
-        # 启用扩展加载（Python < 3.12 需在 connect 前全局启用）
-        self._enable_sqlite_extensions()
 
         self._conn = sqlite3.connect(
             str(self.db_path),
@@ -153,40 +142,11 @@ class SessionDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
 
-        # 加载 simple 分词器扩展
-        self._simple_loaded = self._load_fts_extension()
-        self._fts_tokenizer = 'simple' if self._simple_loaded else 'unicode61'
+        # 内建 trigram 分词器：不加载任何外部扩展（见文件头部注释）。
+        # 注意：长度 <3 的查询词 trigram 无法命中，search_messages 会走 LIKE 兜底。
+        self._fts_tokenizer = 'trigram'
 
         self._init_schema()
-
-    @staticmethod
-    def _enable_sqlite_extensions() -> None:
-        """启用 SQLite 扩展加载能力。
-        Python < 3.12 需在 connect 前全局启用，>= 3.12 支持 per-connection 启用。"""
-        try:
-            sqlite3.enable_load_extension(True)
-        except AttributeError:
-            # Python >= 3.12：conn.enable_load_extension() 已足够
-            pass
-
-    def _load_fts_extension(self) -> bool:
-        """加载 FTS5 simple 分词器扩展。返回 True 表示加载成功。"""
-        if not os.path.isfile(_FTS_EXTENSION):
-            logger.warning("FTS5 simple 扩展未找到: %s，将使用 unicode61 作为备选", _FTS_EXTENSION)
-            return False
-        try:
-            conn = self._conn
-            # Python >= 3.12 per-connection 启用
-            try:
-                conn.enable_load_extension(True)
-            except AttributeError:
-                pass  # 已在全局启用
-            conn.load_extension(_FTS_EXTENSION)
-            logger.info("FTS5 simple 分词器扩展加载成功")
-            return True
-        except Exception as e:
-            logger.warning("加载 FTS5 simple 扩展失败 (%s): %s，将使用 unicode61 备选", _FTS_EXTENSION, e)
-            return False
 
     def _execute_write(self, fn: Callable[[sqlite3.Connection], Any]) -> Any:
         last_err: Optional[Exception] = None
@@ -229,7 +189,20 @@ class SessionDB:
             pass
 
     def _migrate_fts_v2_to_v3(self, cursor) -> None:
-        """迁移 FTS 表：删除旧 unicode61 表，用 simple 分词器重建并重新索引。"""
+        """迁移 FTS 表（旧库升级路径）：删除旧表，按当前分词器重建并回填。"""
+        self._rebuild_messages_fts(cursor)
+
+    def _migrate_fts_v3_to_v4(self, cursor) -> None:
+        """v3 → v4：弃用 simple 外部扩展分词器，重建为内建 trigram 并回填。
+
+        simple 扩展在当前 SQLite 下任何 FTS 写入都会触发原生崩溃（access
+        violation，进程级），因此必须重建表——重建与回填只使用内建分词器，
+        不再触碰任何外部扩展。
+        """
+        self._rebuild_messages_fts(cursor)
+
+    def _rebuild_messages_fts(self, cursor) -> None:
+        """DROP 并重建 messages_fts（FTS_SQL 会连带重建触发器），随后全量回填。"""
         try:
             cursor.execute("DROP TABLE IF EXISTS messages_fts")
             cursor.executescript(FTS_SQL.format(tokenizer=self._fts_tokenizer))
@@ -237,9 +210,9 @@ class SessionDB:
                 "INSERT INTO messages_fts(rowid, content) "
                 "SELECT id, COALESCE(content, '') FROM messages"
             )
-            logger.info("FTS 表已重建为 simple 分词器")
+            logger.info("messages_fts 已重建为 %s 分词器并回填", self._fts_tokenizer)
         except Exception as e:
-            logger.error("FTS 迁移失败: %s", e)
+            logger.error("FTS 重建失败: %s", e)
             raise
 
     def close(self):
@@ -277,9 +250,23 @@ class SessionDB:
                 db_version = 2
 
             if db_version < 3:
-                # v2 → v3: migrate FTS to simple tokenizer
+                # v2 → v3: 历史 FTS 重建（按当前分词器 trigram）
                 self._migrate_fts_v2_to_v3(cursor)
                 cursor.execute("UPDATE schema_version SET version = 3")
+                db_version = 3
+
+            if db_version < 4:
+                # v3 → v4: simple 扩展分词器 → 内建 trigram（修复 FTS 写入原生崩溃）
+                row_fts = cursor.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='messages_fts'"
+                ).fetchone()
+                if row_fts and 'trigram' in (row_fts['sql'] or ''):
+                    # 从 v2 直接升上来时已在 v2→v3 用 trigram 重建过，无需重复重建
+                    logger.info("messages_fts 已是 trigram，跳过 v4 重建")
+                else:
+                    self._migrate_fts_v3_to_v4(cursor)
+                cursor.execute("UPDATE schema_version SET version = 4")
             else:
                 # 确保 FTS 表存在
                 try:
@@ -547,6 +534,14 @@ class SessionDB:
         if not keywords:
             return []
 
+        # trigram 分词器对长度 <3 的查询词无法命中（返回 0 行而非报错），
+        # 直接走 LIKE 兜底，避免常见中文 2 字词（如「项目」）搜不到任何结果。
+        if any(len(k) < 3 for k in keywords):
+            result = self._like_search(keywords, user_id, limit, mode='AND')
+            if result:
+                return result
+            return self._like_search(keywords, user_id, limit, mode='OR')
+
         # 第一阶段：FTS5 AND（最精准）
         result = self._fts_search(keywords, user_id, limit, mode='AND')
         if result:
@@ -554,16 +549,14 @@ class SessionDB:
 
         # 第二阶段：FTS5 OR（宽松召回）
         result = self._fts_search(keywords, user_id, limit, mode='OR')
-        return result
+        if result:
+            return result
 
-        # TODO: 以下 LIKE 兜底暂注释，有 simple 分词扩展后基本用不到
-        # 第三阶段：LIKE AND（兜底精准）
-        # result = self._like_search(keywords, user_id, limit, mode='AND')
-        # if result:
-        #     return result
-        # 第四阶段：LIKE OR（兜底召回）
-        # result = self._like_search(keywords, user_id, limit, mode='OR')
-        # return result
+        # 第三、四阶段：LIKE 兜底（分词边界、标点粘连等 FTS 漏召回场景）
+        result = self._like_search(keywords, user_id, limit, mode='AND')
+        if result:
+            return result
+        return self._like_search(keywords, user_id, limit, mode='OR')
 
     def delete_messages(self, session_id: str, message_ids: List[int]) -> int:
         def _do(conn):

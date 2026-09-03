@@ -1,43 +1,17 @@
 import logging
 import os
-import platform
 import sqlite3
 import threading
 
 from server.workspace import _get_workspace_dir
-from kb.session_db import _resolve_fts_extension_dir
 
 logger = logging.getLogger(__name__)
 
-_FTS_SYS = platform.system()
-if _FTS_SYS == 'Windows':
-    _FTS_NAME = 'simple.dll'
-else:
-    _FTS_NAME = 'simple.so'
-_FTS_EXTENSION = os.path.join(_resolve_fts_extension_dir(), _FTS_NAME)
-
-# 启用 SQLite 扩展加载
-try:
-    sqlite3.enable_load_extension(True)
-except AttributeError:
-    pass
-
-def _load_simple_extension(conn):
-    """加载 simple 扩展到当前连接（每个 SQLite 连接都需要单独加载）"""
-    if not os.path.isfile(_FTS_EXTENSION):
-        logger.warning("FTS5 simple 扩展未找到: %s", _FTS_EXTENSION)
-        return False
-    try:
-        try:
-            conn.enable_load_extension(True)
-        except AttributeError:
-            pass
-        conn.load_extension(_FTS_EXTENSION)
-        return True
-    except Exception as e:
-        logger.warning("加载 FTS5 simple 扩展失败: %s", e)
-        return False
-
+# 注：旧版本在模块导入时还会加载 kb/fts_ext/simple 外部扩展（simple.dll/.so）。
+# 该扩展在当前 SQLite（>=3.49，随 Python 3.12+ 分发）下任何 FTS 写入都会触发
+# 原生 access violation（进程级崩溃，无法 try/except），曾导致「同步到知识库」
+# 首次写入即闪退、应用启动即崩。本模块已彻底移除扩展加载，FTS 一律使用
+# SQLite 内建 trigram 分词器（见 _WIKI_FTS_TOKENIZER）。
 
 ALL_TABLES = [
     """
@@ -81,8 +55,12 @@ CREATE_INDEXES = [
 
 _local = threading.local()
 
-# 使用 simple 分词器（需 fts_ext/simple.dll 扩展），支持中文分词
-_WIKI_FTS_TOKENIZER = 'simple'
+# 使用内建 trigram 分词器（sqlite>=3.34）：支持中文子串检索且无需外部扩展。
+# 背景：旧版依赖 fts_ext/simple.dll 自定义扩展，该扩展在当前 sqlite（3.49）
+# 环境下任何 FTS 写入都会触发原生 access violation（段错误，无法 try/except），
+# 曾导致「同步到知识库」首次写入即闪退、应用启动即崩。改为内建分词器后，
+# 查询词长度 <3 字符时 trigram 无法命中（返回 0 行），由上层搜索的 LIKE 兜底处理。
+_WIKI_FTS_TOKENIZER = 'trigram'
 
 
 
@@ -112,7 +90,16 @@ def _create_wiki_fts(conn):
 
 
 def _migrate_fts_tokenizer(conn):
-    """检查并迁移 wiki_fts 到目标分词器"""
+    """检查 wiki_fts 是否使用目标分词器，必要时重建表。
+
+    旧版本依赖 kb/fts_ext/simple 自定义扩展（tokenize='simple'），该扩展在当前
+    SQLite（3.49，随 Python 3.12+ 分发）下任何 FTS 写入都会触发原生 access
+    violation（进程级崩溃，无法被 Python try/except 捕获），曾导致「同步到知识库」
+    首次写入即闪退、应用启动即崩。
+
+    迁移策略：**不再加载外部扩展**。读取 FTS 表原始列内容不需要分词器，是安全的；
+    即使读取失败也按空表重建（写入路径从此只走内建 trigram，彻底绕开崩溃点）。
+    """
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='wiki_fts'"
     ).fetchone()
@@ -126,20 +113,19 @@ def _migrate_fts_tokenizer(conn):
     if _WIKI_FTS_TOKENIZER in current_sql:
         return  # 已是目标分词器，无需迁移
 
-    # 旧表可能是 simple 或 trigram——需要先加载 simple 扩展才能读取
-    # 然后转存数据到 unicode61 的新表
-    _load_simple_extension(conn)
-
+    # 旧表（tokenize='simple'）：安全读取原始内容列后重建为 trigram
+    old_data = []
     try:
         old_data = conn.execute(
             "SELECT usr_id, title, content, path FROM wiki_fts"
         ).fetchall()
     except Exception as e:
-        logger.warning("无法读取旧 wiki_fts 数据 (tokenizer=%r): %s，直接重建空表", current_sql, e)
-        old_data = []
+        logger.warning("无法读取旧 wiki_fts 数据 (tokenizer=%r): %s，按空表重建",
+                       current_sql, e)
 
     conn.execute("DROP TABLE IF EXISTS wiki_fts")
-    _create_wiki_fts(conn)  # 用 unicode61 创建
+    _create_wiki_fts(conn)  # 用内建 trigram 分词器重建
+    reindexed = 0
     for old in old_data:
         try:
             conn.execute(
@@ -147,11 +133,12 @@ def _migrate_fts_tokenizer(conn):
                 "VALUES (?, ?, ?, ?)",
                 (old['usr_id'], old['title'], old['content'], old['path'])
             )
+            reindexed += 1
         except Exception:
             pass
     conn.commit()
-    logger.info("wiki_fts tokenizer migrated to %s (from %s)",
-                _WIKI_FTS_TOKENIZER, current_sql)
+    logger.info("wiki_fts tokenizer migrated to %s (from %s), reindexed %d rows",
+                _WIKI_FTS_TOKENIZER, current_sql, reindexed)
 
 
 def init_db(conn):
@@ -159,8 +146,7 @@ def init_db(conn):
         conn.execute(sql)
     for sql in CREATE_INDEXES:
         conn.execute(sql)
-    # 先加载扩展，再处理 FTS 表——每个连接都必须加载
-    _load_simple_extension(conn)
+    # FTS 统一使用内建 trigram 分词器，无需加载任何外部扩展
     _migrate_fts_tokenizer(conn)
     conn.commit()
 
