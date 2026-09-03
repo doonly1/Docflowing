@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'       # 推送 v1.0.0, v1.1.0 等标签时触发
 
+permissions:
+  contents: write   # 允许创建 Release 并上传资产
+
 jobs:
   build-windows:
     runs-on: windows-latest
