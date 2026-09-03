@@ -249,31 +249,47 @@ AI 核心模块，融合 Hermes Agent，实现记忆与技能的自主进化。
 
 ## 数据存储
 
+所有运行时数据保存在**用户数据目录**，开发模式与打包模式一致：
+
+| 平台 | 默认位置 |
+|------|----------|
+| Windows | `%APPDATA%\Docflowing` |
+| Linux / macOS | `~/.docflowing` |
+
+> 桌面版以 `--portable` 参数启动时，数据目录改为可执行文件同级的 `data/`；
+> 设置环境变量 `DOCFLOWING_DATA_DIR` 可自定义数据目录位置（对开发/测试最有用）。
+
+首次启动自动创建目录结构，所有知识库、文件库、配置数据均在其中：
+
 ```
-workspaces/
-├── data/
-│   ├── fb/fb.db                # 文件库数据库
-│   └── kb/                     # 知识库
-│       ├── wiki.db             # 知识库 FTS 数据库
-│       ├── state.db            # 会话消息数据库
-│       ├── memories/           # 持久记忆文件
-│       └── skills/             # 技能文件
+Docflowing/
 ├── config/                     # 用户配置
 │   ├── user_config.yaml        # 公文/工具配置（从代码默认值生成）
-│   ├── kb_config.yaml          # 知识库 LLM 配置（含加密密钥）
+│   ├── kb_config.yaml          # 知识库 LLM 配置（含加密密钥，首次运行 KB 后生成）
 │   ├── p2p_node.yaml           # P2P 节点身份（自动生成）
-└── trash/                      # 回收站
+│   └── app_settings.json       # 桌面窗口状态与设置
+├── data/
+│   ├── fb/                     # 文件库
+│   │   └── fb.db               # 文件库数据库
+│   ├── kb/                     # 知识库
+│   │   ├── wiki.db             # 知识库 FTS 数据库
+│   │   ├── state.db            # 会话消息数据库
+│   │   ├── memories/           # 持久记忆文件
+│   │   └── skills/             # 技能文件（system/ 预置 + user/ 自定义）
+│   └── p2p/                    # P2P 共享数据
+├── trash/                      # 回收站
+└── user_tools/                 # 用户自定义工具脚本（打包后可持久化写入）
 ```
 
 ---
 
 ## 配置
 
-默认值内置于代码中，首次运行自动生成到 `workspaces/config/`。通过 Web UI 修改配置后持久化保存。
+默认值内置于代码中，首次运行自动生成到数据目录的 `config/`（见上文[数据存储](#数据存储)）。通过 Web UI 修改配置后持久化保存。
 
-- **公文配置**：`server/settings.py` `_DEFAULT_DOC_CONFIG` → `workspaces/config/user_config.yaml`
-- **知识库配置**：`kb/config.py` `_DEFAULT_KB_CONFIG` → `workspaces/config/kb_config.yaml`（含加密 LLM 密钥）
-- **P2P 节点身份**：`workspaces/config/p2p_node.yaml`（自动生成）
+- **公文配置**：`server/settings.py` `_DEFAULT_DOC_CONFIG` → `config/user_config.yaml`
+- **知识库配置**：`kb/config.py` `_DEFAULT_KB_CONFIG` → `config/kb_config.yaml`（含加密 LLM 密钥）
+- **P2P 节点身份**：`config/p2p_node.yaml`（自动生成）
 
 ---
 
