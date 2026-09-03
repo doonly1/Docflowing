@@ -20,18 +20,65 @@ function toggleSidebarCollapse() {
     localStorage.setItem('docflow_sidebar_collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0');
 }
 
-// ==================== 窗口控制（Electron IPC） ====================
+// ==================== 窗口控制（pywebview API / Electron shim 双通道） ====================
+
+// frameless 状态缓存：null=未查询。注意 shim 会把 electronAPI 恒设为 pywebview.api，
+// 所以不能用「electronAPI 是否存在」判断 frameless（会恒真）。
+var _framelessCache = null;
+
+function _queryFrameless() {
+    var api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.windowIsFrameless === 'function') {
+        try {
+            Promise.resolve(api.windowIsFrameless()).then(function(v) {
+                _framelessCache = !!v;
+                if (typeof tabManager !== 'undefined') tabManager._renderBar();
+            }).catch(function() { _framelessCache = false; });
+            return;
+        } catch (e) {}
+    }
+    // pywebview 尚未就绪：保持 null，等 pywebviewready 事件重查
+    _framelessCache = null;
+}
+
+function isFramelessMode() {
+    // 真 Electron（无 pywebview shim）一直是自绘标题栏
+    if (window.electronAPI && !window.pywebview) return true;
+    // 纯浏览器（无任何桌面桥）
+    if (!window.electronAPI && !window.pywebview) return false;
+
+    if (_framelessCache === null) {
+        _queryFrameless();
+        return false; // 查询完成前按 native 处理，避免闪出双份按钮
+    }
+    return _framelessCache;
+}
+
+// pywebview api 注入完成后刷新 frameless 状态（DOMContentLoaded 时 api 可能未就绪）
+window.addEventListener('pywebviewready', function() {
+    _framelessCache = null;
+    if (typeof tabManager !== 'undefined') tabManager._renderBar();
+});
 
 function windowMinimize() {
-    if (window.electronAPI) window.electronAPI.windowMinimize();
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.windowMinimize) {
+        return window.pywebview.api.windowMinimize();
+    }
+    if (window.electronAPI) return window.electronAPI.windowMinimize();
 }
 
 function windowMaximizeRestore() {
-    if (window.electronAPI) window.electronAPI.windowToggleMaximize();
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.windowToggleMaximize) {
+        return window.pywebview.api.windowToggleMaximize();
+    }
+    if (window.electronAPI) return window.electronAPI.windowToggleMaximize();
 }
 
 function windowClose() {
-    if (window.electronAPI) window.electronAPI.windowClose();
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.windowClose) {
+        return window.pywebview.api.windowClose();
+    }
+    if (window.electronAPI) return window.electronAPI.windowClose();
 }
 
 // ==================== Tab Manager - 浏览器风格多标签页 ====================
@@ -252,6 +299,11 @@ window.tabManager = {
         centerHtml += '<button class="tab-add-btn" onclick="tabManager.createTab(\'home\')" title="新建标签页">+</button>';
         center.innerHTML = centerHtml;
 
+        // 原生标题栏模式下系统自带三按钮，自绘按钮只服务 frameless 分支
+        if (!isFramelessMode()) {
+            right.innerHTML = '';
+            return;
+        }
         right.innerHTML =
             '<button class="tab-win-btn" onclick="windowMinimize()" title="最小化">' +
             '<svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +

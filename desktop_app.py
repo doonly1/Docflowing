@@ -25,9 +25,22 @@ if sys.argv and sys.argv[0]:
 # （UPX 压缩可能损坏 .pyd 文件，提前导入可尽早暴露问题）
 from PIL import Image  # noqa: E402
 
+# 桌面窗口层：后端探测、各后端的无边框策略、min_size 兜底。
+# 该模块内部延迟导入 webview，所以放在这里不会影响上面的路径修正。
+from desktop_window import (  # noqa: E402
+    create_window as _create_desktop_window,
+    describe as _describe_gui,
+    detect_backend as _detect_gui_backend,
+    start as _start_gui,
+)
+
 # ==================== 配置 ====================
 
+# APP_NAME 既是打包产品名，也是运行时数据目录（%APPDATA%/APP_NAME/）——
+# 改名会破坏老用户的工作目录与本地索引。**不要**为改显示名而动它。
 APP_NAME = 'Docflowing'
+# 用户可见的产品名（窗口标题栏、托盘、消息框、页面 <title> 等）。
+DISPLAY_NAME = '文澜'
 DEFAULT_PORT = 5000
 DEV_MODE = os.environ.get('DOCFLOWING_DEV') == '1'
 
@@ -124,7 +137,7 @@ def _start_flask():
     debug = os.environ.get('DEBUG', '0').lower() in ('1', 'true', 'yes')
     if debug:
         import warnings
-        warnings.warn('[Docflowing] DEBUG 模式已启用，生产环境请勿使用！', UserWarning)
+        warnings.warn(f'[{DISPLAY_NAME}] DEBUG 模式已启用，生产环境请勿使用！', UserWarning)
 
     # 添加隐藏端点
     @_flask_app.route('/__pywebview_show__')
@@ -156,6 +169,7 @@ class DesktopAPI:
         self._close_action = 'exit'  # 'exit' 或 'minimize'
         self._is_quitting = False
         self._is_maximized = False
+        self._frameless = False
         self._word_keep_alive_proc = None
         self._tray_icon = None
 
@@ -164,6 +178,8 @@ class DesktopAPI:
         # 监听最大化/恢复事件以更新状态
         window.events.maximized += lambda: setattr(self, '_is_maximized', True)
         window.events.restored += lambda: setattr(self, '_is_maximized', False)
+        # 前端据此决定是否渲染自绘窗口按钮（原生标题栏模式下系统已提供）
+        self._frameless = bool(getattr(window, 'frameless', False))
 
     def set_tray_icon(self, icon):
         self._tray_icon = icon
@@ -193,6 +209,9 @@ class DesktopAPI:
 
     def windowIsMaximized(self):
         return self._is_maximized
+
+    def windowIsFrameless(self):
+        return self._frameless
 
     def windowShow(self):
         if self._window:
@@ -420,12 +439,14 @@ def _create_tray(api, window):
             window.destroy()
 
     menu = pystray.Menu(
-        pystray.MenuItem(f'打开 {APP_NAME}', on_show, default=True),
+        pystray.MenuItem(f'打开 {DISPLAY_NAME}', on_show, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem('退出', on_exit),
     )
 
-    icon = pystray.Icon(APP_NAME, img, APP_NAME, menu)
+    # Icon(name=APP_NAME, title=DISPLAY_NAME)：name 是托盘程序 id（要稳），
+    # title 是鼠标悬停气泡，display_name 跟着改。
+    icon = pystray.Icon(APP_NAME, img, DISPLAY_NAME, menu)
     api._tray_icon = icon
 
     t = threading.Thread(target=icon.run, daemon=True, name='TrayIcon')
@@ -435,60 +456,9 @@ def _create_tray(api, window):
 
 # ==================== 窗口创建 ====================
 
-def _enable_frameless_resize(window):
-    """为 frameless 窗口添加 WS_THICKFRAME 并关闭 DWM NC 渲染，实现无白边缩放"""
-    if platform.system() != 'Windows':
-        return
-
-    # 守卫：无论成败只执行一次
-    if getattr(_enable_frameless_resize, '_done', False):
-        return
-
-    import ctypes
-
-    # ──── 获取 HWND ────
-    hwnd = None
-    for attempt in range(3):  # 重试 3 次，应对窗口尚未完全创建的情况
-        gui = getattr(window, 'gui', None)
-        if gui and hasattr(gui, 'hwnd'):
-            hwnd = gui.hwnd
-        if not hwnd:
-            hwnd = ctypes.windll.user32.FindWindowW(None, APP_NAME)
-        if hwnd:
-            break
-        time.sleep(0.3)
-
-    if not hwnd:
-        print('[Desktop] 无法获取窗口句柄，跳过边缘缩放')
-        return
-
-    # 标记 done 在 HWND 确认后立刻置位，避免多线程反复尝试
-    _enable_frameless_resize._done = True
-
-    # ──── 添加 WS_THICKFRAME 启用缩放 ────
-    GWL_STYLE = -16
-    WS_THICKFRAME = 0x00040000
-    style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
-    if not (style & WS_THICKFRAME):
-        style |= WS_THICKFRAME
-        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
-                                          0x0001 | 0x0002 | 0x0020)
-
-    # ──── 关闭 DWM 非客户区渲染（消除 1px 白边）───
-    try:
-        hwnd_int = ctypes.c_int64(hwnd) if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_int32(hwnd)
-        DWMWA_NCRENDERING_POLICY = 2
-        DWMNCRP_DISABLED = 2
-        policy = ctypes.c_int(DWMNCRP_DISABLED)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd_int, DWMWA_NCRENDERING_POLICY,
-            ctypes.byref(policy), ctypes.sizeof(policy)
-        )
-    except Exception as e:
-        print(f'[Desktop] DWM NC 渲染关闭失败（不影响缩放）: {e}')
-
-    print('[Desktop] 已启用窗口边缘缩放（WS_THICKFRAME + DWMNCRP_DISABLED）')
+# 注：标题栏策略与 min_size 兜底已迁到 desktop_window.py，由后端探测结果
+# 决定（winui3 用 XAML 自定义标题栏，其余后端默认原生标题栏）。
+# frameless 逃生门不再补 WS_THICKFRAME —— Win10 下会渲染出单侧黑边。
 
 
 def _wait_for_flask(timeout=30):
@@ -603,7 +573,7 @@ def main():
             import ctypes
             ctypes.windll.user32.MessageBoxW(
                 0, '后端服务启动超时，请重试。\n若问题持续，请重启应用。',
-                'Docflowing 启动失败',
+                f'{DISPLAY_NAME} 启动失败',
                 0x00000010 | 0x00000000  # MB_ICONERROR | MB_OK
             )
         except Exception:
@@ -620,27 +590,23 @@ def main():
             _show_error('导入 webview 失败，请检查环境。')
             return
 
-        # 尝试各后端：edgechromium → winforms → win32（不用 pythonnet）
-        _GUI_BACKEND = 'edgechromium'
-        try:
-            import webview.platforms.edgechromium as _edge
-        except Exception:
-            try:
-                import webview.platforms.winforms as _edge
-                _GUI_BACKEND = 'winforms'
-            except Exception:
-                try:
-                    import webview.platforms.win32 as _edge
-                    _GUI_BACKEND = 'win32'
-                except Exception:
-                    _show_error('桌面窗口后端加载失败，请检查系统环境。')
-                    return
+        # 自动探测后端：winui3 → edgechromium → winforms。
+        # winui3 在本机缺 Windows App Runtime 时会自动降级，不会弹下载界面。
+        _GUI_BACKEND = _detect_gui_backend()
+        if not _GUI_BACKEND:
+            _show_error('桌面窗口后端加载失败，请检查系统环境。')
+            return
+        print(f'[Desktop] {_describe_gui(_GUI_BACKEND)}')
 
-        # edgechromium 时需要补充 create_file_dialog
+        # edgechromium 后端没有自己的 create_file_dialog，借 WinForms 的。
+        # （winui3 后端原生实现了，不需要打这个补丁）
         if _GUI_BACKEND == 'edgechromium':
-            import webview.platforms.winforms as _wforms
+            import webview.platforms.edgechromium as _edge
             from webview.platforms.winforms import create_file_dialog as _wfd
-            _edge.EdgeChrome.create_file_dialog = lambda self, dt, d, am, sf, ft, uid: _wfd(dt, d, am, sf, ft, uid)
+
+            _edge.EdgeChrome.create_file_dialog = (
+                lambda self, dt, d, am, sf, ft, uid: _wfd(dt, d, am, sf, ft, uid)
+            )
 
         # 创建窗口前算好居中坐标，直接传给 create_window（WinForms 用 Manual 定位）
         _cx = 0
@@ -655,34 +621,22 @@ def main():
             pass  # 获取失败就用 0,0，pywebview 会自行居中
 
         api = DesktopAPI()
-        window = webview.create_window(
-            APP_NAME,
+        window = _create_desktop_window(
+            DISPLAY_NAME,
             url=f'http://127.0.0.1:{port}',
+            backend=_GUI_BACKEND,
             width=1100,
             height=700,
             x=_cx, y=_cy,          # 预计算居中坐标，WinForms 用 Manual 模式定位
             min_size=(800, 500),
-            frameless=True,
-            easy_drag=False,       # 关闭全局拖拽，避免吃点击事件
-            draggable=True,        # 启用 CSS class 限定区域拖拽
-            text_select=True,      # 允许文本选择（默认 False 会注入 user-select: none）
+            # 标题栏策略按后端自动选：winui3 用 XAML 自绘（保留系统缩放/吸附），
+            # 其余后端用原生标题栏；显式强制 frameless 仅作逃生门（无系统缩放）。
+            title_bar='auto',
             js_api=api,
         )
         api.set_window(window)
 
         # ──── 窗口事件 ────
-
-        # loaded 事件触发时启用边缘缩放（此时窗口已存在）
-        window.events.loaded += lambda: _enable_frameless_resize(window)
-
-        # 后台线程兜底（loaded 可能早于 getgui.hwnd 就绪）
-        threading.Thread(
-            target=lambda: (
-                time.sleep(1.5),
-                _enable_frameless_resize(window),
-            ),
-            daemon=True, name='EnableFramelessResize'
-        ).start()
         window.events.closing += lambda: _on_closing(api)
 
         # ──── 系统托盘 ────
@@ -692,10 +646,7 @@ def main():
         api._start_word_keep_alive()
 
         # ──── 主循环 ────
-        webview.start(
-            gui=_GUI_BACKEND,
-            http_server=False,
-        )
+        _start_gui(_GUI_BACKEND)
 
         # ──── 直接退出 ────
         # webview.start() 返回后程序即将退出，不执行 _cleanup 中的
@@ -709,7 +660,7 @@ def main():
         try:
             import ctypes
             ctypes.windll.user32.MessageBoxW(
-                0, message, 'Docflowing 启动失败',
+                0, message, f'{DISPLAY_NAME} 启动失败',
                 0x00000010 | 0x00000000  # MB_ICONERROR | MB_OK
             )
         except Exception:

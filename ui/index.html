@@ -4,13 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="max-age=86400">
-    <title>Docflowing</title>
+    <title>文澜</title>
     <link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23e94560'/%3E%3Ctext x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ED%3C/text%3E%3C/svg%3E" type="image/svg+xml">
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+        }
+
+        /* html 与 body 同色 —— pywebview 窗口默认背景 #FFFFFF，
+           若 WebView 边缘有亚像素留白，会透出 1px 白边。desktop_window
+           create_window 已传 background_color='#f2f2f2'，这里 html
+           再铺一层同色兜底，确保 body 之外任何空隙也吃同一色。
+           （2026-09-02 清理） */
+        html {
+            background: #f2f2f2;
         }
 
         body {
@@ -21,7 +30,10 @@
             overflow: hidden;
             padding: 0;
             margin: 0;
-            border: 1px solid #d0d0d0;
+            /* 旧 Electron frameless 时代给 body 加的全周 1px 浅灰描边
+               已删除：原生标题栏自带系统边框，frameless 逃生门也不再
+               补 WS_THICKFRAME —— 这条 CSS 描边紧贴窗口边缘成为杂线。
+               （2026-09-02 清理） */
         }
 
 
@@ -52,7 +64,6 @@
             display: flex;
             align-items: center;
             z-index: 300;
-            -webkit-app-region: drag;
         }
         .app-header .header-left {
             display: flex;
@@ -61,7 +72,6 @@
             padding: 0;
             width: 56px;
             justify-content: center;
-            -webkit-app-region: no-drag;
         }
         .app-header .header-center {
             display: flex;
@@ -70,7 +80,6 @@
             overflow-x: auto;
             overflow-y: hidden;
             gap: 0;
-            -webkit-app-region: drag;
         }
         .app-header .header-center::-webkit-scrollbar {
             height: 0;
@@ -79,7 +88,6 @@
             display: flex;
             align-items: center;
             flex-shrink: 0;
-            -webkit-app-region: no-drag;
         }
 
         .container {
@@ -334,7 +342,6 @@
             color: #999;
             flex-shrink: 0;
             margin-right: 4px;
-            -webkit-app-region: no-drag;
         }
         .tab-add-btn:hover {
             background: #ddd;
@@ -358,7 +365,6 @@
             flex-shrink: 0;
             margin-right: 4px;
             position: relative;
-            -webkit-app-region: no-drag;
         }
         .tab-item:hover {
             background: #ddd;
@@ -1129,7 +1135,7 @@
     <!-- 全局标题栏（贯穿窗口两端） -->
     <div class="app-header" id="app-header">
         <div class="header-left" id="header-left"></div>
-        <div class="header-center pywebview-drag-region" id="header-center" ondblclick="toggleMaximize()"></div>
+        <div class="header-center" id="header-center"></div>
         <div class="header-right" id="header-right"></div>
     </div>
 
@@ -1426,13 +1432,5 @@
     <!-- 应用设置弹窗 -->
     <div id="settingsOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.25);z-index:2000;justify-content:center;align-items:center;opacity:0;transition:opacity 0.2s ease;"></div>
 
-    <script>
-    // 标题栏双击最大化/还原（pywebview frameless 模式）
-    window.toggleMaximize = function() {
-        if (window.pywebview?.api?.windowToggleMaximize) {
-            window.pywebview.api.windowToggleMaximize();
-        }
-    };
-    </script>
 </body>
 </html>

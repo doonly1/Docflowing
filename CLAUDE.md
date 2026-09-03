@@ -88,7 +88,7 @@ Docflowing is a **document management desktop app** with pywebview shell + Flask
 
 ### Key Architecture Decisions
 
-1. **pywebview 替代 Electron**: frameless 窗口 + 自定义标题栏。`_enable_frameless_resize()` 通过 Win32 API 添加 `WS_THICKFRAME` 和关闭 DWM NC 渲染实现无白边缩放
+1. **pywebview 替代 Electron**: 默认走系统原生标题栏（winui3 用 XAML 自绘，保留缩放/吸附）。frameless 仅是逃生门，**不再**补 `WS_THICKFRAME`（Win10 下 DWM 会残留单侧黑边，已移除）——逃生门窗口无系统缩放，详见 `desktop_window.py` 模块 docstring
 2. **前后端通信**: 前端通过 `fetch()` 调用 Flask API，不使用 Electron IPC。`DesktopAPI` 仅提供窗口控制、文件对话框、OS shell 等纯桌面功能
 3. **数据存储**: 开发模式写入 `%APPDATA%/Docflowing/workspaces/`，便携版写入 exe 同级的 `data/`，打包版写入 `%APPDATA%/Docflowing/`
 4. **单实例锁**: 绑定 `port + 1000` 的 TCP 端口，重复启动时通知已有实例显示窗口
@@ -180,7 +180,7 @@ Docflowing/
 ## Important Notes
 
 - 前端代码大量使用 `window.electronAPI` 调用桌面功能，这是通过 `server/__init__.py` 注入的 shim 映射到 `window.pywebview.api`，**不要直接删除或重命名**
-- `_enable_frameless_resize()` 通过 Win32 API 工作，需要在 `window.events.loaded` 触发后执行，且用一个后台线程兜底（防 HWND 未就绪）
+- frameless 逃生门（`DOCFLOWING_TITLEBAR=frameless`）**不支持系统缩放**：曾经靠 `enable_frameless_resize()` 补 `WS_THICKFRAME`，但 Win10 下 DWM 会渲染单侧残留黑边，该补丁已整体删除。窗口仍可拖动（header 拖动区由服务端在逃生门模式注入）
 - 测试使用 pytest，`test_pywebview.py` 覆盖了 `DesktopAPI`、Flask 集成、单实例锁等核心桌面功能
 - `requirements-lock.txt` 是完全锁定的版本清单（用于 CI 构建），`requirements.txt` 是宽松范围
 - `--word-keepalive` 和 `--run-tool` 是打包版 exe 的 CLI 参数，用于在后台调用文档处理工具和 Word 保活

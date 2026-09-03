@@ -78,6 +78,54 @@ class TestPywebviewShim:
             assert len(html) > 10000  # 确保不是错误页面
 
 
+class TestDragRegion:
+    """页面内窗口拖动区（pywebview-drag-region）注入逻辑
+
+    默认（原生标题栏）不注入；仅 DOCFLOWING_TITLEBAR=frameless 逃生门时，
+    服务端在返回 HTML 前把 header-center 标为拖动区（拖动 JS 是静态扫描，
+    运行时动态添加无效）。
+    """
+
+    def _fetch(self, monkeypatch, titlebar=None):
+        if titlebar is None:
+            monkeypatch.delenv('DOCFLOWING_TITLEBAR', raising=False)
+        else:
+            monkeypatch.setenv('DOCFLOWING_TITLEBAR', titlebar)
+        from server import create_app
+        app = create_app()
+        with app.test_client() as c:
+            resp = c.get('/')
+            assert resp.status_code == 200
+            return resp.get_data(as_text=True)
+
+    def test_no_drag_region_by_default(self, monkeypatch):
+        """默认原生标题栏：首页不含 pywebview-drag-region"""
+        html = self._fetch(monkeypatch)
+        assert 'pywebview-drag-region' not in html
+        # header-center 不带多余 class
+        assert '<div class="header-center" id="header-center">' in html
+
+    def test_drag_region_injected_when_frameless(self, monkeypatch):
+        """强制 frameless：header-center 被注入拖动 class"""
+        html = self._fetch(monkeypatch, 'frameless')
+        assert '<div class="header-center pywebview-drag-region" id="header-center">' in html
+
+    def test_drag_region_env_case_insensitive(self, monkeypatch):
+        """环境变量大小写不敏感（与 resolve_title_bar_mode 一致）"""
+        html = self._fetch(monkeypatch, 'FRAMELESS')
+        assert 'pywebview-drag-region' in html
+
+    def test_drag_region_not_injected_for_native(self, monkeypatch):
+        """显式 native 不注入拖动区"""
+        html = self._fetch(monkeypatch, 'native')
+        assert 'pywebview-drag-region' not in html
+
+    def test_drag_region_not_injected_for_custom(self, monkeypatch):
+        """显式 custom 不注入拖动区"""
+        html = self._fetch(monkeypatch, 'custom')
+        assert 'pywebview-drag-region' not in html
+
+
 class TestPathDetection:
     """路径检测逻辑在开发模式下应正确"""
 
