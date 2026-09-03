@@ -347,6 +347,30 @@ def build(mode: str):
     print('[build-desktop] 完成')
 
 
+def _find_makensis():
+    """查找 makensis：PATH → 系统安装目录 → 便携版 bundle
+
+    支持两种常见安装形态：
+    1. 标准安装（NSIS 官网安装器）：makensis.exe 在 NSIS 根目录，
+       Stubs/Include/Plugins 与其同级，直接执行即可。
+    2. electron-builder 便携 bundle：makensis.exe 位于 windows/ 子目录，
+       需要设置 NSISDIR 指向其所在目录才能定位 Stubs/Include/Plugins。
+    """
+    exe = shutil.which('makensis')
+    if exe:
+        return exe, None
+    candidates = [
+        r'C:\Program Files (x86)\NSIS\makensis.exe',
+        r'C:\Program Files\NSIS\makensis.exe',
+        os.path.expanduser(r'~\.workbuddy\tools\nsis-eb\nsis-bundle\windows\makensis.exe'),
+        os.path.expanduser(r'~\.workbuddy\tools\nsis\nsis-3.10.0\makensis.exe'),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p, os.path.dirname(p)  # NSISDIR 指向 exe 所在目录
+    return None, None
+
+
 def build_installer():
     """构建 onedir + NSIS 安装包（需要机器上安装 NSIS）"""
     print('[build-desktop] ... 先生成 onedir 包 ...')
@@ -358,7 +382,7 @@ def build_installer():
         sys.exit(1)
 
     nsis_script = os.path.join(ROOT, 'installer.nsi')
-    makensis = shutil.which('makensis')
+    makensis, nsis_dir = _find_makensis()
 
     if not makensis:
         print('[build-desktop] WARNING 未找到 NSIS (makensis)，跳过安装包生成')
@@ -366,16 +390,22 @@ def build_installer():
         print(f'[build-desktop] onedir 产物已在: {dist_path}，可手动压缩分发')
         return
 
-    # 生成 installer.nsi
+    # 生成 installer.nsi（UTF-8 BOM，避免中文 Windows 下 makensis 编码报错）
     _create_nsis_script(nsis_script, dist_path)
     print('[build-desktop] ... 生成安装包 ...')
+    env = os.environ.copy()
+    if nsis_dir:
+        env['NSISDIR'] = nsis_dir
     result = subprocess.run([makensis, nsis_script], cwd=ROOT,
-                            capture_output=True, text=True, encoding='utf-8', errors='replace')
+                            capture_output=True, text=True, encoding='utf-8', errors='replace',
+                            env=env)
     if result.returncode == 0:
         print(f'[build-desktop] OK 安装包已生成: {os.path.join(ROOT, "dist", f"{OUTPUT_NAME}_Setup.exe")}')
     else:
         print('[build-desktop] ERROR 安装包生成失败:')
-        print(result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr)
+        # stdout 常含具体错误行，优先展示；stdout 为空时回退 stderr
+        err_text = result.stdout if result.stdout.strip() else result.stderr
+        print(err_text[-2000:] if len(err_text) > 2000 else err_text)
     print('[build-desktop] 完成')
 
 
@@ -385,6 +415,8 @@ def _create_nsis_script(nsis_path: str, source_dir: str):
 ; 由 build-desktop.py 自动生成
 
 Unicode true
+SetCompressor /SOLID lzma
+SetCompressorDictSize 64
 
 !define PRODUCT_NAME "{OUTPUT_NAME}"
 !define PRODUCT_VERSION "1.0.0"
@@ -397,7 +429,7 @@ RequestExecutionLevel admin
 
 Section "安装主程序" SEC01
   SetOutPath "$INSTDIR"
-  File /r "{source_dir}\\*.*"
+  File /r "{source_dir}\\*"
 SectionEnd
 
 Section "创建快捷方式" SEC02
@@ -417,7 +449,7 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\\${{PRODUCT_NAME}}"
 SectionEnd
 '''
-    with open(nsis_path, 'w', encoding='utf-8') as f:
+    with open(nsis_path, 'w', encoding='utf-8-sig') as f:
         f.write(script)
     print(f'[build-desktop] OK 已生成 NSIS 脚本: {nsis_path}')
 
