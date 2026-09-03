@@ -6,6 +6,10 @@ Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会�
 
 基于 P2P 节点共享，局域网内多台机器可互相发现并共享文件库。
 
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="文澜主界面" width="860">
+</p>
+
 ---
 
 ## 快速开始
@@ -83,6 +87,10 @@ git push origin v1.0.0
 | `mystyle.py` | 公文样式库 | 符合中文公文规范的样式定义 |
 | `doc_process.py` | 文档基础库 | 标题解析、附件处理、日期排版、格式转换 |
 
+<p align="center">
+  <img src="docs/screenshots/tools.png" alt="工具集 - 文档比较" width="860">
+</p>
+
 ### 🗂️ 文件库管理（`fb/`）
 
 - **文件库 CRUD**：创建本地文件库、复制、重命名、删除（移入回收站）
@@ -91,6 +99,10 @@ git push origin v1.0.0
 - **工具集成**：SSE 流式执行文档处理工具，按工具类型过滤
 - **KB 同步**：文件库→知识库自动增量同步（FTS5 索引，不落盘 .md 文件）
 - **格式转换**：批量 .doc → .docx 转换
+
+<p align="center">
+  <img src="docs/screenshots/file-library.png" alt="文件库管理" width="860">
+</p>
 
 ### 🧠 知识库系统（`kb/`）
 
