@@ -1,8 +1,11 @@
 """
 FB 文件库同步 - 文件转换器模块
 
-支持将 doc/docx/pdf/pptx/xlsx/xls/md/txt 转换为 Markdown 格式
+支持将 doc/docx/pptx/xlsx/xls/md/txt 转换为 Markdown 格式
 使用 MarkItDown 内部转换器（跳过 magika/onnxruntime），保持高质量同时降低内存
+
+⚠️ PDF 已移除同步/预览：知识库同步直接排除 PDF，
+预览改用用户本地默认程序打开。
 """
 
 import os
@@ -13,7 +16,10 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
-MARKITDOWN_EXTENSIONS = {'.pdf', '.docx', '.pptx', '.xlsx', '.xls'}
+# 同步支持的扩展名（PDF 已从同步链移除）
+MARKITDOWN_EXTENSIONS = {'.docx', '.pptx', '.xlsx', '.xls'}
+# PDF 扩展名集合：同步时跳过，预览时交给本地默认程序
+SKIPPED_PDF_EXTENSIONS = {'.pdf'}
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -58,7 +64,6 @@ class MarkItDownConverter(BaseConverter):
     _converter_cache: Dict[str, object] = {}
 
     _EXTENSION_MAP = {
-        '.pdf':  ('markitdown.converters._pdf_converter', 'PdfConverter'),
         '.docx': ('markitdown.converters._docx_converter', 'DocxConverter'),
         '.pptx': ('markitdown.converters._pptx_converter', 'PptxConverter'),
         '.xlsx': ('markitdown.converters._xlsx_converter', 'XlsxConverter'),
@@ -91,15 +96,7 @@ class MarkItDownConverter(BaseConverter):
                 stream_info = _StreamInfo(extension=ext)
                 result = converter.convert(f, stream_info=stream_info)
 
-            content = result.markdown if result else None
-
-            # 检测扫描版 PDF（无文本层），跳过不同步
-            if ext == '.pdf' and (not content or len(content.strip()) < 20):
-                import logging
-                logging.getLogger(__name__).info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
-                return None
-
-            return content
+            return result.markdown if result else None
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(
@@ -164,64 +161,6 @@ class DOCXConverter(BaseConverter):
             if i == 0:
                 rows.append("| " + " | ".join(["---"] * len(cells)) + " |")
         return "\n".join(rows)
-
-
-class PDFConverter(BaseConverter):
-    """PDF 文件转换器（MarkItDown 不可用时的备用方案）"""
-
-    @property
-    def file_type(self) -> str:
-        return "pdf"
-
-    def can_convert(self, file_path: str) -> bool:
-        return file_path.lower().endswith('.pdf')
-
-    def convert(self, source_path: str) -> Optional[str]:
-        try:
-            import pdfplumber
-
-            all_text = []
-            with pdfplumber.open(source_path) as pdf:
-                for page_num, page in enumerate(pdf.pages, 1):
-                    text = page.extract_text()
-                    if text:
-                        text = self._clean_pdf_text(text)
-                        all_text.append(f"## 第 {page_num} 页\n\n{text}")
-
-            content = "\n\n".join(all_text) if all_text else None
-
-            # 检测扫描版 PDF（无文本层），跳过不同步
-            if not content or len(content.strip()) < 20:
-                import logging
-                logging.getLogger(__name__).info(f"PDF 内容为空（可能是扫描版），跳过: {source_path}")
-                return None
-
-            return content
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"PDF conversion failed: {source_path}, error: {e}")
-            return None
-
-    def _clean_pdf_text(self, text: str) -> str:
-        """清理 PDF 提取的文本"""
-        lines = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-
-            if re.match(r'^-?\d+-?$', line):
-                continue
-            if re.match(r'^第\s*\d+\s*页$', line):
-                continue
-            if line.isdigit() and len(line) <= 3:
-                continue
-            if '版权所有' in line or '翻印必究' in line:
-                continue
-
-            lines.append(line)
-
-        return '\n'.join(lines)
 
 
 class MDConverter(BaseConverter):

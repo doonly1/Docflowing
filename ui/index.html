@@ -1339,68 +1339,33 @@
         return window._markedPromise;
     };
     window._ensurePdfJs = function() {
-        if (window._pdfJsPromise) return window._pdfJsPromise;
-        if (typeof pdfjsLib !== 'undefined') return Promise.resolve();
-        window._pdfJsPromise = window._loadScriptAsync(
-            '/js/lib/pdf.min.js',
-            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
-        );
-        return window._pdfJsPromise;
+        // PDF 预览已移除，改为调用系统默认程序打开。
+        // 此函数保留以兼容旧代码，直接 resolve（不做任何事）。
+        return Promise.resolve();
     };
     window._renderPdfInContainer = async function(fileUrl, contentEl) {
+        // ⚠️ 已移除 pdf.js 渲染链。PDF 统一用系统默认程序打开。
+        // 回退策略：在预览容器里显示提示按钮，点击后调用 DesktopAPI.openExternalFile()
+        // 或让用户先下载文件，再由本机 PDF 阅读器打开。
+        var url = fileUrl || '';
+        // 从 /...fb_id/... 路径推断 open-with-app 可用，再引导用户「用系统默认程序打开」
+        var openUrl = '';
         try {
-            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">正在加载PDF...</div>';
-            await window._ensurePdfJs();
-            pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/lib/pdf.worker.min.js';
-
-            var resp = await fetch(fileUrl);
-            if (!resp.ok) throw new Error('获取PDF失败 (HTTP ' + resp.status + ')');
-            var arrayBuffer = await resp.arrayBuffer();
-            var pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            var totalPages = pdfDoc.numPages;
-            var currentPage = 1;
-
-            contentEl.innerHTML =
-                '<div class="pdf-viewer-wrap" style="display:flex;flex-direction:column;height:100%;">' +
-                '  <div class="pdf-viewer-pages" style="flex:1;overflow:auto;text-align:center;padding:16px;background:#e8e8e8;display:flex;flex-direction:column;align-items:center;"></div>' +
-                '  <div class="pdf-viewer-bar" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:6px 12px;background:#f8f9fa;border-top:1px solid #ddd;flex-shrink:0;">' +
-                '    <button class="pdf-btn" data-page="prev" style="padding:4px 14px;cursor:pointer;border:1px solid #bbb;border-radius:4px;background:#fff;font-size:13px;color:#333;">&larr; 上一页</button>' +
-                '    <span class="pdf-page-info" style="font-size:13px;color:#555;user-select:none;">1 / ' + totalPages + '</span>' +
-                '    <button class="pdf-btn" data-page="next" style="padding:4px 14px;cursor:pointer;border:1px solid #bbb;border-radius:4px;background:#fff;font-size:13px;color:#333;">下一页 &rarr;</button>' +
-                '  </div>' +
-                '</div>';
-
-            var pagesEl = contentEl.querySelector('.pdf-viewer-pages');
-            var infoEl = contentEl.querySelector('.pdf-page-info');
-
-            function renderPage(num) {
-                return pdfDoc.getPage(num).then(function(page) {
-                    var viewport = page.getViewport({ scale: 1.5 });
-                    var canvas = document.createElement('canvas');
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
-                    canvas.style.maxWidth = '100%';
-                    canvas.style.height = 'auto';
-                    canvas.style.boxShadow = '0 2px 12px rgba(0,0,0,0.15)';
-                    canvas.style.background = '#fff';
-                    canvas.style.borderRadius = '2px';
-                    pagesEl.innerHTML = '';
-                    pagesEl.appendChild(canvas);
-                    return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
-                });
-            }
-
-            renderPage(1);
-
-            contentEl.querySelector('.pdf-btn[data-page="prev"]').addEventListener('click', function() {
-                if (currentPage > 1) { currentPage--; infoEl.textContent = currentPage + ' / ' + totalPages; renderPage(currentPage); }
-            });
-            contentEl.querySelector('.pdf-btn[data-page="next"]').addEventListener('click', function() {
-                if (currentPage < totalPages) { currentPage++; infoEl.textContent = currentPage + ' / ' + totalPages; renderPage(currentPage); }
-            });
-        } catch (e) {
-            contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">PDF加载失败: ' + (e.message || '未知错误') + '</div>';
-        }
+            var tmp = document.createElement('a');
+            tmp.href = fileUrl;
+            openUrl = tmp.pathname;
+        } catch(e) { openUrl = url || ''; }
+        contentEl.innerHTML =
+            '<div style="height:100%;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;">' +
+            '  <div>' +
+            '    <div style="font-size:48px;margin-bottom:16px;">📄</div>' +
+            '    <div style="font-size:15px;color:#444;margin-bottom:12px;">PDF 预览已移除，请使用您系统默认的 PDF 阅读器打开</div>' +
+            '    <div style="font-size:13px;color:#888;margin-bottom:20px;">Docflowing 不再内置 PDF.js 以减小安装包体积</div>' +
+            '    <button class="btn btn-primary" onclick="window.open(\'' + (url || '') + '\', \'_blank\')">' +
+            '      下载 / 用系统默认程序打开' +
+            '    </button>' +
+            '  </div>' +
+            '</div>';
     };
     window._ensureTurndown = function() {
         if (window._turndownPromise) return window._turndownPromise;

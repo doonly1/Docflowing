@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""测试 desktop_window 的后端策略分支。
+"""测试 desktop_window 的后端选择与窗口创建。
 
 这些测试全部不需要真实 GUI —— 用桩模块替换 webview，只验证
-「不同后端 + 不同标题栏策略」下传给 pywebview 的参数是否正确。
+「不同后端」下传给 pywebview 的参数是否正确。
 """
 
 import os
@@ -74,100 +74,30 @@ def fake_webview(monkeypatch):
     return captured
 
 
-@pytest.fixture
-def no_native_calls(monkeypatch):
-    """屏蔽真正碰 Win32 / WinUI 的函数，但记录它们是否被调用。
-
-    install_winui3_title_bar 的替身仍会往 before_show 挂一个空钩子，
-    这样上层断言才看得到「确实注册了标题栏」这件事。
-
-    frameless_resize 键恒为空：WS_THICKFRAME 缩放补丁已整体移除，
-    保留它只为让旧断言（== []）表达「从未触发任何缩放补丁」。
-    """
-    calls = {'title_bar': [], 'frameless_resize': []}
-
-    def _install(window, title):
-        calls['title_bar'].append(title)
-        window.events.before_show += lambda *_a: None
-
-    monkeypatch.setattr(dw, 'install_winui3_title_bar', _install)
-    return calls
-
-
-class TestTitleBarResolution:
-    def test_winui3_defaults_to_custom(self):
-        assert dw.resolve_title_bar_mode('winui3', None) == dw.TITLE_BAR_CUSTOM
-
-    def test_non_winui3_defaults_to_native(self):
-        """非 winui3 后端默认用原生标题栏（frameless=False）。
-
-        之前默认 frameless：自绘 header 的窗口按钮调 Electron IPC，
-        在 pywebview 下是死的，缩放还得靠 WS_THICKFRAME hack（现也已移除）。
-        """
-        assert dw.resolve_title_bar_mode('edgechromium', None) == dw.TITLE_BAR_NATIVE
-        assert dw.resolve_title_bar_mode('winforms', None) == dw.TITLE_BAR_NATIVE
-
-    def test_explicit_mode_wins(self):
-        assert dw.resolve_title_bar_mode('winui3', 'frameless') == 'frameless'
-
-    def test_env_var_respected(self, monkeypatch):
-        monkeypatch.setenv('DOCFLOWING_TITLEBAR', 'native')
-        assert dw.resolve_title_bar_mode('winui3', None) == 'native'
-
-
 class TestCreateWindow:
-    def test_winui3_custom_keeps_border(self, fake_webview, no_native_calls):
-        """winui3 + custom 绝不能传 frameless=True，否则丢掉缩放和吸附。"""
-        window = dw.create_window('App', 'http://x', backend='winui3')
-
-        assert fake_webview['kwargs']['frameless'] is False
-        assert no_native_calls['title_bar'] == ['App']
-        assert len(window.handlers['before_show']) == 1
-
-    def test_edgechromium_defaults_to_native_title_bar(self, fake_webview, no_native_calls):
-        """默认策略下非 winui3 后端必须 frameless=False，缩放/吸附交给系统。"""
+    def test_edgechromium_uses_native_title_bar(self, fake_webview):
+        """edgechromium 后端必须用系统原生标题栏（frameless=False）。"""
         dw.create_window('App', 'http://x', backend='edgechromium')
-        assert fake_webview['kwargs']['frameless'] is False
-        assert no_native_calls['frameless_resize'] == []
 
-    def test_forced_frameless_is_borderless_escape_hatch(
-        self, fake_webview, no_native_calls, caplog
-    ):
-        """显式强制 frameless：无边框逃生门，不再补 WS_THICKFRAME。
+        kwargs = fake_webview['kwargs']
+        assert kwargs['frameless'] is False
 
-        旧实现会给 HWND 补 WS_THICKFRAME 提供缩放抓手，但 Win10 下
-        DWM 会残留单侧黑边（左缘 1px 线），已整体移除。
-        逃生门只保证显示与拖动，不支持系统缩放。
-        """
-        import logging
+    def test_winforms_uses_native_title_bar(self, fake_webview):
+        """winforms 逃生门同样走原生标题栏（frameless=False）。"""
+        dw.create_window('App', 'http://x', backend='winforms')
 
-        with caplog.at_level(logging.WARNING, logger='docflowing.desktop_window'):
-            dw.create_window(
-                'App', 'http://x', backend='edgechromium', title_bar='frameless'
-            )
+        kwargs = fake_webview['kwargs']
+        assert kwargs['frameless'] is False
 
-        assert fake_webview['kwargs']['frameless'] is True
-        # 不再挂 enable_frameless_resize（loaded 事件 + 后台线程都不该有）
-        assert no_native_calls['frameless_resize'] == []
-        assert any('不支持系统缩放' in r.message for r in caplog.records)
-
-    def test_custom_on_non_winui3_degrades_to_native(self, fake_webview, no_native_calls):
-        """custom 仅 winui3 支持；其他后端应退化为原生标题栏而非 frameless。"""
-        dw.create_window('App', 'http://x', backend='winforms', title_bar='custom')
-        assert fake_webview['kwargs']['frameless'] is False
-        assert no_native_calls['title_bar'] == []
-        assert no_native_calls['frameless_resize'] == []
-
-    def test_drag_settings_preserved(self, fake_webview, no_native_calls):
+    def test_drag_settings_preserved(self, fake_webview):
         """easy_drag 必须关掉，否则会吃掉页面里的点击。"""
         dw.create_window('App', 'http://x', backend='edgechromium')
 
         kwargs = fake_webview['kwargs']
         assert kwargs['easy_drag'] is False
-        assert kwargs['draggable'] is True
         assert kwargs['text_select'] is True
 
-    def test_min_size_forwarded(self, fake_webview, no_native_calls):
+    def test_min_size_forwarded(self, fake_webview):
         dw.create_window(
             'App', 'http://x', backend='edgechromium', min_size=(800, 500)
         )
@@ -218,10 +148,35 @@ class TestMinSize:
 
 
 class TestBackendDetection:
+    def test_fixed_backend(self, monkeypatch, fake_webview):
+        """默认固定 edgechromium。"""
+        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('edgechromium',))
+
+        def fake_import(name, *a, **k):
+            if name.endswith('edgechromium'):
+                return types.ModuleType(name)
+            raise ImportError(name)
+
+        monkeypatch.setattr('builtins.__import__', fake_import)
+        assert dw.detect_backend() == 'edgechromium'
+
     def test_invalid_forced_backend_ignored(self, monkeypatch):
         """'win32' 不是合法 gui 值，应被忽略而不是静默退回。"""
         monkeypatch.setenv('DOCFLOWING_GUI', 'win32')
-        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('winforms',))
+        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('edgechromium',))
+
+        def fake_import(name, *a, **k):
+            if name.endswith('edgechromium'):
+                return types.ModuleType(name)
+            raise ImportError(name)
+
+        monkeypatch.setattr('builtins.__import__', fake_import)
+        assert dw.detect_backend() == 'edgechromium'
+
+    def test_forced_winforms_when_edgechromium_missing(self, monkeypatch):
+        """缺 WebView2 时可用 DOCFLOWING_GUI=winforms 手动降级。"""
+        monkeypatch.setenv('DOCFLOWING_GUI', 'winforms')
+        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('edgechromium', 'winforms'))
 
         def fake_import(name, *a, **k):
             if name.endswith('winforms'):
@@ -232,7 +187,7 @@ class TestBackendDetection:
         assert dw.detect_backend() == 'winforms'
 
     def test_returns_none_when_nothing_available(self, monkeypatch):
-        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('winui3',))
+        monkeypatch.setattr(dw, '_VALID_BACKENDS', ('edgechromium',))
 
         def fake_import(name, *a, **k):
             raise ImportError(name)
@@ -240,9 +195,9 @@ class TestBackendDetection:
         monkeypatch.setattr('builtins.__import__', fake_import)
         assert dw.detect_backend() is None
 
-    def test_local_runtime_below_binding_requirement(self):
-        """本机是 App Runtime 1.5，winui3 绑定要 1.7 —— 应判为不满足。"""
-        versions = dw._installed_app_runtime_versions()
-        if not versions:
-            pytest.skip('本机未安装 Windows App Runtime，跳过版本比对')
-        assert max(versions)[0] < 7000
+
+class TestDescribe:
+    def test_describe_reports_backend(self):
+        s = dw.describe('edgechromium')
+        assert 'edgechromium' in s
+        assert '原生' in s

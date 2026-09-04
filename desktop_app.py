@@ -13,7 +13,6 @@ import socket
 import subprocess
 import sys
 import threading
-import time
 import webbrowser
 
 # 提前将 sys.argv[0] 转为绝对路径，防止后续 os.chdir 导致
@@ -355,7 +354,9 @@ class DesktopAPI:
             self._stop_word_keep_alive()
 
     def _start_word_keep_alive(self):
-        """启动 WordKeepAlive 脚本"""
+        """启动 WordKeepAlive 脚本（仅 Windows 可用，其它平台强制禁用）"""
+        if platform.system() != 'Windows':
+            return
         if self._word_keep_alive_proc:
             return
         script = os.path.join(_get_root_dir(), 'tools', 'WordKeepAlive.py')
@@ -454,27 +455,72 @@ def _create_tray(api, window):
     return icon
 
 
+# 注：min_size 兜底在 desktop_window.py 内统一处理，窗口一律用系统原生标题栏
+# （不再有 winui3 自绘标题栏和 frameless）。
+
 # ==================== 窗口创建 ====================
 
-# 注：标题栏策略与 min_size 兜底已迁到 desktop_window.py，由后端探测结果
-# 决定（winui3 用 XAML 自定义标题栏，其余后端默认原生标题栏）。
-# frameless 逃生门不再补 WS_THICKFRAME —— Win10 下会渲染出单侧黑边。
 
+def _build_loading_html(port: int) -> str:
+    """生成启动加载页：轮询后端，就绪后自动跳转主界面。
 
-def _wait_for_flask(timeout=30):
-    """轮询等待 Flask 就绪"""
-    port = int(os.environ.get('PORT', DEFAULT_PORT))
-    import urllib.request
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            resp = urllib.request.urlopen(f'http://127.0.0.1:{port}/api/user/me', timeout=1)
-            if resp.status < 400:
-                return True
-        except Exception:
-            pass
-        time.sleep(0.2)
-    return False
+    「先出窗口」的关键：窗口一出现就立刻渲染这个页面（含加载动画和
+    错误提示），后台 Flask 继续再初始化。轮询到后端就绪后 `location`
+    跳到真实主界面，用户不再面对漫长的空白等待。
+    """
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{DISPLAY_NAME}</title>
+<style>
+  html, body {{ margin:0; height:100%; background:#f2f2f2; font-family:"Microsoft YaHei",sans-serif; }}
+  .wrap {{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; }}
+  .spinner {{
+    width:36px; height:36px; border:4px solid #e0e0e0; border-top-color:#4675e0;
+    border-radius:50%; animation:spin 0.9s linear infinite;
+  }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  .text {{ color:#555; font-size:14px; }}
+  .err {{ color:#c0392b; font-size:14px; line-height:1.7; text-align:center; display:none; max-width:360px; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="spinner"></div>
+  <div class="text">正在启动…</div>
+  <div class="err" id="err"></div>
+</div>
+<script>
+(function() {{
+  var port = {port};
+  var start = Date.now();
+  var MAX = 45000;
+  function fail() {{
+    var el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = '连接后端失败，请关闭本窗口后重试。若反复失败，可能是残留进程占用了端口，'
+      + '请先在任务管理器中结束所有 Docflowing 进程再启动。';
+  }}
+  function check() {{
+    if (Date.now() - start > MAX) {{ fail(); return; }}
+    try {{
+      var x = new XMLHttpRequest();
+      x.open('GET', 'http://127.0.0.1:' + port + '/api/user/me', true);
+      x.timeout = 1500;
+      x.onload = function() {{
+        if (x.status < 400) {{ location.href = 'http://127.0.0.1:' + port + '/'; }}
+        else {{ setTimeout(check, 400); }}
+      }};
+      x.onerror = function() {{ setTimeout(check, 400); }};
+      x.send();
+    }} catch (e) {{ setTimeout(check, 400); }}
+  }}
+  check();
+}})();
+</script>
+</body>
+</html>"""
 
 
 def run_word_keepalive():
@@ -562,23 +608,10 @@ def main():
         _signal_existing_instance(port)
         return
 
-    # ──── 启动 Flask ────
+    # ──── 启动 Flask（后台线程）与窗口并行 ────
+    # 不再阻塞等后端就绪：窗口立即出现，加载页轮询后端，就绪后自动跳转主界面。
     flask_thread = threading.Thread(target=_start_flask, daemon=True, name='Flask')
     flask_thread.start()
-    _flask_ready.wait(timeout=5)
-
-    if not _wait_for_flask():
-        print('[Desktop] Flask 启动失败')
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0, '后端服务启动超时，请重试。\n若问题持续，请重启应用。',
-                f'{DISPLAY_NAME} 启动失败',
-                0x00000010 | 0x00000000  # MB_ICONERROR | MB_OK
-            )
-        except Exception:
-            pass
-        return
 
     # ──── 创建 pywebview 窗口 ────
     def _create_window():
@@ -590,8 +623,9 @@ def main():
             _show_error('导入 webview 失败，请检查环境。')
             return
 
-        # 自动探测后端：winui3 → edgechromium → winforms。
-        # winui3 在本机缺 Windows App Runtime 时会自动降级，不会弹下载界面。
+        # 自动探测后端：edgechromium → winforms。
+        # 默认用 edgechromium（依赖系统 WebView2）；缺 WebView2 时可用
+        # DOCFLOWING_GUI=winforms 手动降级。
         _GUI_BACKEND = _detect_gui_backend()
         if not _GUI_BACKEND:
             _show_error('桌面窗口后端加载失败，请检查系统环境。')
@@ -599,7 +633,6 @@ def main():
         print(f'[Desktop] {_describe_gui(_GUI_BACKEND)}')
 
         # edgechromium 后端没有自己的 create_file_dialog，借 WinForms 的。
-        # （winui3 后端原生实现了，不需要打这个补丁）
         if _GUI_BACKEND == 'edgechromium':
             import webview.platforms.edgechromium as _edge
             from webview.platforms.winforms import create_file_dialog as _wfd
@@ -621,17 +654,15 @@ def main():
             pass  # 获取失败就用 0,0，pywebview 会自行居中
 
         api = DesktopAPI()
+        # 先渲染加载页「先出窗口」，后端就绪后由加载页跳转到主界面。
         window = _create_desktop_window(
             DISPLAY_NAME,
-            url=f'http://127.0.0.1:{port}',
             backend=_GUI_BACKEND,
+            html=_build_loading_html(port),
             width=1100,
             height=700,
             x=_cx, y=_cy,          # 预计算居中坐标，WinForms 用 Manual 模式定位
             min_size=(800, 500),
-            # 标题栏策略按后端自动选：winui3 用 XAML 自绘（保留系统缩放/吸附），
-            # 其余后端用原生标题栏；显式强制 frameless 仅作逃生门（无系统缩放）。
-            title_bar='auto',
             js_api=api,
         )
         api.set_window(window)
@@ -642,8 +673,8 @@ def main():
         # ──── 系统托盘 ────
         tray_icon = _create_tray(api, window)
 
-        # 启动 WordKeepAlive（默认启用）
-        api._start_word_keep_alive()
+        # WordKeepAlive 默认不再自动启动（Windows 需在设置中手动开启，
+        # 其它平台强制禁用）。启动后不主动拉起该后台进程。
 
         # ──── 主循环 ────
         _start_gui(_GUI_BACKEND)

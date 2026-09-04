@@ -831,7 +831,7 @@
 
                     <div style="margin-bottom:14px;">
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#333;">
-                            <input type="checkbox" id="settingWordKeepAlive" ${appSettings.word_keep_alive !== false ? 'checked' : ''}>
+                            <input type="checkbox" id="settingWordKeepAlive" ${appSettings.word_keep_alive ? 'checked' : ''}>
                             Word 保活
                         </label>
                         <div style="font-size:11px;color:#999;margin:4px 0 0 24px;">保持 Word 进程常驻，提升响应速度</div>

@@ -128,15 +128,6 @@ def create_app():
         )
         content = content.replace('</head>', shim + '</head>')
 
-        # 默认（原生标题栏）页面内不含拖动区域；仅强制 frameless（逃生门）时恢复
-        # 拖动区。pywebview 的拖动 JS 在页面加载时静态扫描 .pywebview-drag-region，
-        # 运行时动态添加无效，必须由服务端在返回 HTML 前注入。
-        # 判定信号与 desktop_window.resolve_title_bar_mode 一致：DOCFLOWING_TITLEBAR=frameless
-        if os.environ.get('DOCFLOWING_TITLEBAR', '').lower() == 'frameless':
-            content = content.replace(
-                '<div class="header-center" id="header-center">',
-                '<div class="header-center pywebview-drag-region" id="header-center">'
-            )
         return app.response_class(content, mimetype='text/html; charset=utf-8')
 
     # 请求体过大处理

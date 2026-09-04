@@ -92,15 +92,13 @@ def start_hidden_word():
         _is_starting = False
         return
 
+    # 仅保活 MS Word（WINWORD），WPS 无需保活
     word_app = None
-    for prog_id in ("Word.Application", "KWPS.Application"):
-        try:
-            pythoncom.CoInitialize()
-            word_app = win32com.client.Dispatch(prog_id)
-            if word_app is not None:
-                break
-        except Exception:
-            continue
+    try:
+        pythoncom.CoInitialize()
+        word_app = win32com.client.Dispatch("Word.Application")
+    except Exception:
+        word_app = None
 
     if word_app is not None:
         try:

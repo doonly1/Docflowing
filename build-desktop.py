@@ -35,29 +35,60 @@ def _ensure_skills_init():
             f.write("# 自动生成：保证 kb.skills 被识别为 Python 包\n")
 
 
-def _datas_lines():
-    """组装 datas 元组列表"""
-    lines = []
-    mapping = {
-        os.path.join(ROOT, 'ui'):                'ui',
-        os.path.join(ROOT, 'kb', 'skills', 'system'): 'kb/skills/system',
-        os.path.join(ROOT, 'tools'):             'tools',
-        os.path.join(ROOT, 'kb', 'fts_ext'):     'kb/fts_ext',
-    }
+def _rel_to_root(abs_path: str) -> str:
+    """把绝对路径转成相对项目根的 posix 相对路径（spec 用 SPECPATH 再拼回）。"""
+    return os.path.relpath(abs_path, ROOT).replace(os.sep, '/')
 
-    # pythonnet .NET runtime DLL（pywebview/edgechromium 必需）
+
+def _datas_lines():
+    """组装 datas 元组列表。
+
+    项目内资源一律输出 `os.path.join(SPECPATH, '<相对路径>')`——SPECPATH 是
+    PyInstaller 执行 spec 时注入的「spec 文件所在目录」绝对路径，因此生成的
+    build.spec 不依赖构建机的盘符/目录，整个项目文件夹移到任何位置都能直接
+    `pyinstaller build.spec`，无需重新生成。
+    仅 site-packages 类构建机环境路径（pythonnet runtime 等）保留绝对路径。
+    """
+    lines = []
+
+    # 1. 前端 ui/：剔除 pdf.min.js / pdf.worker.min.js（不再内置 PDF 预览）
+    ui_src = os.path.join(ROOT, 'ui')
+    if os.path.isdir(ui_src):
+        for root, dirs, files in os.walk(ui_src):
+            rel_root = os.path.relpath(root, ui_src)
+            dst_root = 'ui' if rel_root == '.' else f"ui/{rel_root.replace(os.sep, '/')}"
+            for f in files:
+                if f.lower().startswith('pdf.') and f.lower().endswith(('.min.js', '.js')):
+                    continue  # 跳过 pdf.min.js / pdf.worker.min.js
+                src_f = os.path.join(root, f)
+                rel = _rel_to_root(src_f)
+                dst_f = dst_root if dst_root.endswith('/') else dst_root
+                lines.append(f"    (os.path.join(SPECPATH, '{rel}'), '{dst_f}'),")
+
+    # 2. kb/skills/system
+    if os.path.isdir(os.path.join(ROOT, 'kb', 'skills', 'system')):
+        lines.append("    (os.path.join(SPECPATH, 'kb/skills/system'), 'kb/skills/system'),")
+
+    # 3. tools
+    if os.path.isdir(os.path.join(ROOT, 'tools')):
+        lines.append("    (os.path.join(SPECPATH, 'tools'), 'tools'),")
+
+    # 4. kb/fts_ext：保留全部跨平台二进制（Windows .dll + Linux .so + macOS .dylib/.so），
+    #    确保同一工作区文件库跨平台运行时 FTS5 中文分词扩展都能加载。
+    if os.path.isdir(os.path.join(ROOT, 'kb', 'fts_ext')):
+        lines.append("    (os.path.join(SPECPATH, 'kb/fts_ext'), 'kb/fts_ext'),")
+
+    # 5. pythonnet .NET runtime DLL（固定 edgechromium 后端仍保留，用于与 WebView2 COM 互操作的运行时）
+    #    注：该路径位于构建机 site-packages，不属于项目目录，无法用 SPECPATH 相对化，只能写绝对路径。
     try:
         import pythonnet
         pynt_dir = os.path.dirname(pythonnet.__file__)
         rt_dir = os.path.join(pynt_dir, 'runtime')
         if os.path.isdir(rt_dir):
-            mapping[rt_dir] = 'pythonnet/runtime'
+            lines.append(f"    (r'{rt_dir}', 'pythonnet/runtime'),")
     except ImportError:
         pass
 
-    for src, dst in mapping.items():
-        if os.path.isdir(src):
-            lines.append(f"    (r'{src}', '{dst}'),")
     return '\n'.join(lines) if lines else "    # 暂无额外资源"
 
 
@@ -93,7 +124,7 @@ _HIDDEN_IMPORTS = [
     'load_config', 'tool_defs', 'WordKeepAlive',
     # ========== 第三方隐式依赖 ==========
     'flask', 'flask_cors', 'zeroconf', 'yaml', 'requests',
-    'pdfplumber', 'bs4', 'beautifulsoup4', 'markitdown', 'openpyxl',
+    'bs4', 'beautifulsoup4', 'markitdown', 'openpyxl',
     'docx', 'pptx', 'pystray',
     'PIL', 'PIL._imaging', 'PIL._tkinter_finder', 'PIL.Image',
     'PIL.ImageTk', 'packaging',
@@ -110,6 +141,23 @@ _EXCLUDES = [
     'pandas', 'cefpython3',
     # 已移除的依赖，残留时防止误打包
     'cryptography',
+    # markitdown 死重链：代码走 converters 子模块（跳过 magika），
+    # 顶层 _markitdown 会 import magika → onnxruntime → onnx/numpy。
+    # 运行时永不触发，排除后大幅缩小安装包。
+    'magika', 'onnxruntime', 'onnx',
+    # win32ui 是 Pythonwin IDE 组件，win32com.client 不依赖它，
+    # 排除后连带不打包 mfc140u.dll（~6 MB）。
+    'win32ui',
+    # PIL 格式插件：代码只用 Image.new('RGBA') 和 Image.open(ico)，
+    # 不涉及 AVIF/WebP/FreeType/色彩管理等格式编解码。
+    'PIL._avif', 'PIL._webp', 'PIL._imagingft', 'PIL._imagingcms',
+    # numpy 由 PIL.Image.fromarray()（numpy 数组→图像）惰性导入拉入，
+    # 但代码只用 Image.new/Image.open，从不调用 fromarray，完全不需 numpy。
+    # 排除后连带去掉 numpy.libs 里的 OpenBLAS（~19.4MB）+ numpy（~6.6MB）。
+    'numpy',
+    # ────── PDF 处理全栈已移除（预览改用系统默认程序、同步直接排除 PDF）──────
+    # 原占用: pdfminer 7.5 + pypdfium2_raw/pdfium.dll 6.8 + 前端 pdf*.js 1.3 ≈ 15.6 MB
+    'pdfminer', 'pdfplumber', 'pypdfium2', 'pypdfium2_raw',
 ]
 
 
@@ -122,11 +170,16 @@ def _common_analysis() -> str:
 import glob, os
 import PIL
 _pil_dir = PIL.__path__[0]
-_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))]
+# 只收集 PIL 核心 pyd，跳过 _avif(28MB)/_webp/_imagingft/_imagingcms 等格式插件
+_pil_skip = {{'_avif', '_webp', '_imagingft', '_imagingcms', '_imagingtk', '_imagingmorph'}}
+_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))
+             if os.path.basename(f).split('.')[0] not in _pil_skip]
 
+# SPECPATH：PyInstaller 注入的 spec 文件所在目录。用它派生所有项目内路径，
+# build.spec 即可跨盘符/跨机器直接使用（相对路径本身会按运行 cwd 解析，不可靠）。
 a = Analysis(
-    [r'{ROOT}/desktop_app.py'],
-    pathex=[r'{ROOT}'],
+    [os.path.join(SPECPATH, 'desktop_app.py')],
+    pathex=[SPECPATH],
     binaries=list(_pil_pyds),
     datas=[
 {datas}
@@ -152,7 +205,8 @@ ICON_PATH = os.path.join(ROOT, 'ui', 'favicon.ico')
 
 def _exe_block() -> str:
     """EXE 块（onedir / onefile 共用配置，不含 COLLECT）"""
-    icon_line = f"    icon=r'{ICON_PATH}'," if os.path.isfile(ICON_PATH) else ""
+    icon_line = ("    icon=os.path.join(SPECPATH, 'ui', 'favicon.ico'),"
+                 if os.path.isfile(ICON_PATH) else "")
     return f"""exe = EXE(
     pyz,
     a.scripts,
@@ -164,7 +218,7 @@ def _exe_block() -> str:
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=['*.pyd'],
+    upx_exclude=['*.pyd', '*.dll'],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=True,
@@ -195,7 +249,7 @@ def create_onedir_spec():
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=['*.pyd'],
+    upx_exclude=['*.pyd', '*.dll'],
     name='{OUTPUT_NAME}',
 )
 """
@@ -208,7 +262,8 @@ def create_onedir_spec():
 def create_onefile_spec():
     """生成 onefile 模式的 spec（全部嵌入 exe，运行时解压到临时目录）"""
     _ensure_skills_init()
-    icon_line = f"    icon=r'{ICON_PATH}'," if os.path.isfile(ICON_PATH) else ""
+    icon_line = ("    icon=os.path.join(SPECPATH, 'ui', 'favicon.ico'),"
+                 if os.path.isfile(ICON_PATH) else "")
     spec = (
         '# -*- mode: python ; coding: utf-8 -*-\n'
         'import sys\n'
@@ -225,7 +280,7 @@ def create_onefile_spec():
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=['*.pyd'],
+    upx_exclude=['*.pyd', '*.dll'],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=True,
@@ -344,7 +399,54 @@ def build(mode: str):
     else:
         print('[build-desktop] WARNING 输出文件未找到，请检查 dist/ 目录')
 
+    # ──── UPX 后处理：PyInstaller upx=True 只压 DLL，exe 和残留 DLL 手动补压 ────
+    _upx_post_process(final_dist, mode, OUTPUT_NAME)
+
     print('[build-desktop] 完成')
+
+
+def _upx_post_process(dist_dir: str, mode: str, app_name: str):
+    """PyInstaller upx=True 只处理部分 DLL，手动补压 exe 和残留 DLL。
+
+    GUARD_CF (Control Flow Guard) 的 exe 需要 --force。
+    *.pyd 不压缩（UPX 对 Python C 扩展有损坏风险）。
+    """
+    upx = shutil.which('upx')
+    if not upx:
+        print('[build-desktop] UPX 未找到，跳过 UPX 后处理')
+        return
+    print(f'[build-desktop] UPX 后处理: {upx}')
+
+    # 收集 exe + 所有 DLL（排除 pyd）
+    if mode == 'onedir':
+        exe = os.path.join(dist_dir, app_name, f'{app_name}.exe')
+        base = os.path.join(dist_dir, app_name)
+    else:
+        exe = os.path.join(dist_dir, f'{app_name}.exe')
+        base = dist_dir
+
+    targets = []
+    if os.path.exists(exe):
+        targets.append(exe)
+    for root, dirs, files in os.walk(base):
+        for f in files:
+            if f.lower().endswith('.dll'):
+                # fts_ext/ 下的 SQLite 扩展 DLL 不压缩：UPX 会改写 PE 加载行为，
+                # 对 sqlite load_extension 有不可预测风险（偶发加载失败/崩溃），保持原样。
+                if 'fts_ext' in os.path.relpath(root, base).replace('\\', '/').split('/'):
+                    continue
+                targets.append(os.path.join(root, f))
+
+    for t in targets:
+        result = subprocess.run(
+            [upx, '--best', '--lzma', '--force', t],
+            capture_output=True, text=True, timeout=120
+        )
+        short = os.path.relpath(t, dist_dir)
+        if result.returncode == 0:
+            print(f'  UPX OK: {short}')
+        else:
+            print(f'  UPX skip: {short}')
 
 
 def _find_makensis():
@@ -396,9 +498,18 @@ def build_installer():
     env = os.environ.copy()
     if nsis_dir:
         env['NSISDIR'] = nsis_dir
-    result = subprocess.run([makensis, nsis_script], cwd=ROOT,
-                            capture_output=True, text=True, encoding='utf-8', errors='replace',
-                            env=env)
+    try:
+        result = subprocess.run([makensis, nsis_script], cwd=ROOT,
+                                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                env=env)
+    finally:
+        # 清理 License 的 UTF-8 BOM 临时副本
+        _lic_bom = os.path.join(ROOT, '_nsis_license_bom.txt')
+        if os.path.exists(_lic_bom):
+            try:
+                os.remove(_lic_bom)
+            except OSError:
+                pass
     if result.returncode == 0:
         print(f'[build-desktop] OK 安装包已生成: {os.path.join(ROOT, "dist", f"{OUTPUT_NAME}_Setup.exe")}')
     else:
@@ -411,6 +522,29 @@ def build_installer():
 
 def _create_nsis_script(nsis_path: str, source_dir: str):
     """生成 NSIS 安装脚本"""
+    # NSIS(Unicode)的 License 页要求文本文件为 UTF-8 with BOM,
+    # 否则中文会按本地 ANSI 代码页(GBK)解析 → 安装向导显示乱码。
+    # 这里生成一个 BOM 副本供 makensis 引用,源 LICENSE 保持干净 UTF-8(无 BOM)。
+    license_ref = 'LICENSE'
+    license_bom = os.path.join(ROOT, '_nsis_license_bom.txt')
+    license_src = os.path.join(ROOT, 'LICENSE')
+    if os.path.isfile(license_src):
+        with open(license_src, 'r', encoding='utf-8') as f:
+            _lic_text = f.read()
+        with open(license_bom, 'w', encoding='utf-8-sig', newline='') as f:
+            f.write(_lic_text)
+        license_ref = os.path.basename(license_bom)
+
+    # 安装包图标：与主程序统一使用 ui/favicon.ico(相对 makensis 的 cwd=ROOT 解析)。
+    # NSIS 会读取 .ico 内嵌的 16/32/48/256 多尺寸位图,单尺寸 ico 也能用但资源管理器大图标会模糊。
+    icon_lines = ""
+    if os.path.isfile(os.path.join(ROOT, 'ui', 'favicon.ico')):
+        icon_lines = (
+            'Icon "ui\\\\favicon.ico"\n'
+            '!define MUI_ICON "ui\\\\favicon.ico"\n'
+            '!define MUI_UNICON "ui\\\\favicon.ico"\n'
+        )
+
     script = f'''; Docflowing 安装脚本 — NSIS
 ; 由 build-desktop.py 自动生成
 
@@ -426,6 +560,31 @@ Name "${{PRODUCT_NAME}}"
 OutFile "dist\\{OUTPUT_NAME}_Setup.exe"
 InstallDir "$PROGRAMFILES64\\${{PRODUCT_NAME}}"
 RequestExecutionLevel admin
+
+; ====== 安装程序与卸载程序图标(与主程序同款) ======
+{icon_lines}; ====== 安装向导页面（用户可选择安装目录） ======
+!include "MUI2.nsh"
+
+!define MUI_ABORTWARNING
+!define MUI_LANGDLL_ALLLANGUAGES
+
+!insertmacro MUI_PAGE_WELCOME                  ; 欢迎页
+!insertmacro MUI_PAGE_LICENSE "{license_ref}" ; 许可协议页(UTF-8 BOM 副本,避免中文乱码)
+!insertmacro MUI_PAGE_DIRECTORY                ; 目录选择页（用户可更改安装路径）
+!insertmacro MUI_PAGE_INSTFILES                ; 安装进度页
+!insertmacro MUI_PAGE_FINISH                   ; 完成页
+
+!insertmacro MUI_UNPAGE_WELCOME
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_UNPAGE_FINISH
+
+!insertmacro MUI_LANGUAGE "SimpChinese"
+!insertmacro MUI_LANGUAGE "English"
+
+; 许可协议页兜底：没有 LICENSE 文件时跳过
+!macro MUI_PAGE_LICENSE_TEXT_MACRO
+!macroend
 
 Section "安装主程序" SEC01
   SetOutPath "$INSTDIR"

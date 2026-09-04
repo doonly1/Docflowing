@@ -79,11 +79,10 @@ class TestPywebviewShim:
 
 
 class TestDragRegion:
-    """页面内窗口拖动区（pywebview-drag-region）注入逻辑
+    """页面内窗口拖动区（pywebview-drag-region）注入逻辑（已移除）
 
-    默认（原生标题栏）不注入；仅 DOCFLOWING_TITLEBAR=frameless 逃生门时，
-    服务端在返回 HTML 前把 header-center 标为拖动区（拖动 JS 是静态扫描，
-    运行时动态添加无效）。
+    不再有 winui3 自绘标题栏 / frameless 逃生门，窗口一律走系统原生标题栏，
+    服务端不再按 DOCFLOWING_TITLEBAR 注入任何拖动区。首页不应含该标记。
     """
 
     def _fetch(self, monkeypatch, titlebar=None):
@@ -99,31 +98,17 @@ class TestDragRegion:
             return resp.get_data(as_text=True)
 
     def test_no_drag_region_by_default(self, monkeypatch):
-        """默认原生标题栏：首页不含 pywebview-drag-region"""
+        """默认：首页不含 pywebview-drag-region"""
         html = self._fetch(monkeypatch)
         assert 'pywebview-drag-region' not in html
         # header-center 不带多余 class
         assert '<div class="header-center" id="header-center">' in html
 
-    def test_drag_region_injected_when_frameless(self, monkeypatch):
-        """强制 frameless：header-center 被注入拖动 class"""
+    def test_no_drag_region_even_when_env_forced(self, monkeypatch):
+        """标题栏逃生门已移除，即便设置旧环境变量也不注入拖动区"""
         html = self._fetch(monkeypatch, 'frameless')
-        assert '<div class="header-center pywebview-drag-region" id="header-center">' in html
-
-    def test_drag_region_env_case_insensitive(self, monkeypatch):
-        """环境变量大小写不敏感（与 resolve_title_bar_mode 一致）"""
-        html = self._fetch(monkeypatch, 'FRAMELESS')
-        assert 'pywebview-drag-region' in html
-
-    def test_drag_region_not_injected_for_native(self, monkeypatch):
-        """显式 native 不注入拖动区"""
-        html = self._fetch(monkeypatch, 'native')
         assert 'pywebview-drag-region' not in html
-
-    def test_drag_region_not_injected_for_custom(self, monkeypatch):
-        """显式 custom 不注入拖动区"""
-        html = self._fetch(monkeypatch, 'custom')
-        assert 'pywebview-drag-region' not in html
+        assert '<div class="header-center" id="header-center">' in html
 
 
 class TestPathDetection:
@@ -360,7 +345,7 @@ class TestFlaskIntegration:
 
     def test_flask_server_startup(self):
         """Flask 后台线程启动应提供服务"""
-        from desktop_app import _start_flask, _wait_for_flask, _flask_ready, _get_runtime_dir
+        from desktop_app import _start_flask, _flask_ready, _get_runtime_dir
 
         port = 5888
         os.environ['PORT'] = str(port)
@@ -375,10 +360,24 @@ class TestFlaskIntegration:
 
         # 等待 Flask 就绪
         assert _flask_ready.wait(timeout=5), "Flask 应在 5 秒内就绪"
-        assert _wait_for_flask(timeout=10), "HTTP 服务应在 10 秒内就绪"
+        # HTTP 服务就绪（与桌面加载页轮询同一探活端点）
+        import time
+        import urllib.request
+        deadline = time.time() + 10
+        ready = False
+        while time.time() < deadline:
+            try:
+                st = urllib.request.urlopen(
+                    f'http://127.0.0.1:{port}/api/user/me', timeout=1
+                ).status
+                if st < 400:
+                    ready = True
+                    break
+            except Exception:
+                time.sleep(0.2)
+        assert ready, "HTTP 服务应在 10 秒内就绪"
 
         # 测试首页
-        import urllib.request
         resp = urllib.request.urlopen(f'http://127.0.0.1:{port}/')
         assert resp.status == 200
         html = resp.read().decode('utf-8')

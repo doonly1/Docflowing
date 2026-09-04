@@ -6,18 +6,32 @@ sys.setrecursionlimit(10000)
 import glob, os
 import PIL
 _pil_dir = PIL.__path__[0]
-_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))]
+# 只收集 PIL 核心 pyd，跳过 _avif(28MB)/_webp/_imagingft/_imagingcms 等格式插件
+_pil_skip = {'_avif', '_webp', '_imagingft', '_imagingcms', '_imagingtk', '_imagingmorph'}
+_pil_pyds = [(f, 'PIL') for f in glob.glob(os.path.join(_pil_dir, '*.pyd'))
+             if os.path.basename(f).split('.')[0] not in _pil_skip]
 
+# SPECPATH：PyInstaller 注入的 spec 文件所在目录。用它派生所有项目内路径，
+# build.spec 即可跨盘符/跨机器直接使用（相对路径本身会按运行 cwd 解析，不可靠）。
 a = Analysis(
-    [r'E:\download\Tools\Docflowing/desktop_app.py'],
-    pathex=[r'E:\download\Tools\Docflowing'],
+    [os.path.join(SPECPATH, 'desktop_app.py')],
+    pathex=[SPECPATH],
     binaries=list(_pil_pyds),
     datas=[
-    (r'E:\download\Tools\Docflowing\ui', 'ui'),
-    (r'E:\download\Tools\Docflowing\kb\skills\system', 'kb/skills/system'),
-    (r'E:\download\Tools\Docflowing\tools', 'tools'),
-    (r'E:\download\Tools\Docflowing\kb\fts_ext', 'kb/fts_ext'),
-    (r'C:\Program Files\Python313\Lib\site-packages\pythonnet\runtime', 'pythonnet/runtime'),
+    (os.path.join(SPECPATH, 'ui/favicon.ico'), 'ui'),
+    (os.path.join(SPECPATH, 'ui/index.html'), 'ui'),
+    (os.path.join(SPECPATH, 'ui/js/fb.css'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/fb.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/kb.css'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/kb.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/main.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/tab-manager.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/tools.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'ui/js/utils.js'), 'ui/js'),
+    (os.path.join(SPECPATH, 'kb/skills/system'), 'kb/skills/system'),
+    (os.path.join(SPECPATH, 'tools'), 'tools'),
+    (os.path.join(SPECPATH, 'kb/fts_ext'), 'kb/fts_ext'),
+    (r'F:\Program Files\python312\Lib\site-packages\pythonnet\runtime', 'pythonnet/runtime'),
     ],
     hiddenimports=[
         'kb',
@@ -105,7 +119,6 @@ a = Analysis(
         'zeroconf',
         'yaml',
         'requests',
-        'pdfplumber',
         'bs4',
         'beautifulsoup4',
         'markitdown',
@@ -149,6 +162,19 @@ a = Analysis(
         'pandas',
         'cefpython3',
         'cryptography',
+        'magika',
+        'onnxruntime',
+        'onnx',
+        'win32ui',
+        'PIL._avif',
+        'PIL._webp',
+        'PIL._imagingft',
+        'PIL._imagingcms',
+        'numpy',
+        'pdfminer',
+        'pdfplumber',
+        'pypdfium2',
+        'pypdfium2_raw',
     ],
     noarchive=False,
 )
@@ -165,7 +191,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=['*.pyd'],
+    upx_exclude=['*.pyd', '*.dll'],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=True,
@@ -173,7 +199,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=r'E:\download\Tools\Docflowing\ui\favicon.ico',
+    icon=os.path.join(SPECPATH, 'ui', 'favicon.ico'),
     contents_directory='.',
     onefile=False,
 )
@@ -184,6 +210,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=['*.pyd'],
+    upx_exclude=['*.pyd', '*.dll'],
     name='Docflowing',
 )

@@ -34,7 +34,9 @@ _DEFAULT_DOC_CONFIG = {
 _DEFAULT_APP_SETTINGS = {
     'autostart': False,
     'close_action': 'exit',
-    'word_keep_alive': True,
+    # Word 保活默认关闭（Windows 用户需要时在设置中手动开启；
+    # 非 Windows 平台该功能强制禁用，见 desktop_app.setWordKeepAlive）
+    'word_keep_alive': False,
 }
 
 # ==================== 配置路径 / 初始化 ====================
