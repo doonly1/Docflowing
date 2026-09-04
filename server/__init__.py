@@ -24,6 +24,7 @@ from server.auth import auth_bp
 from server.workspace import workspace_bp
 from server.settings import settings_bp
 from server.runner import runner_bp
+from server.updater import updater_bp, start_background_check, restore_ready_state
 
 from p2p.node import NodeIdentity
 from p2p.discovery import NodeDiscovery
@@ -185,6 +186,7 @@ def create_app():
     app.register_blueprint(workspace_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(runner_bp)
+    app.register_blueprint(updater_bp)
 
     # 外部蓝图
     from fb.routes import fb_bp
@@ -215,6 +217,22 @@ def create_app():
         logger.info("Node identity loaded: %s (%s)", _node_identity.display_name, _node_identity.node_id[:8])
     except Exception as e:
         logger.warning("Failed to load node identity: %s", e)
+
+    # ──── 应用更新 ────
+    # 先同步恢复「上次已下载好、还没装」的状态（只读一个标记文件，很轻），
+    # 这样用户一进界面就能看到「新版本已就绪，点击安装」。
+    # 真正的网络检查延迟到后台线程，不拖慢启动。
+    try:
+        restore_ready_state()
+    except Exception as e:
+        logger.warning(f"Failed to restore update state: {e}")
+
+    if os.environ.get('DOCFLOWING_DISABLE_UPDATE_CHECK') != '1':
+        try:
+            start_background_check()
+            logger.info("Update background check scheduled")
+        except Exception as e:
+            logger.warning(f"Failed to schedule update check: {e}")
 
     # 后台启动 P2P 发现（mDNS 注册不阻塞主线程）
     def _start_p2p():

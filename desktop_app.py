@@ -6,7 +6,6 @@
   python desktop_app.py --portable   # 便携版模式（使用可执行文件所在目录作为数据目录）
 """
 
-import json
 import os
 import platform
 import socket
@@ -91,6 +90,26 @@ def _signal_existing_instance(port):
         urllib.request.urlopen(f'http://127.0.0.1:{port}/__pywebview_show__', timeout=2)
     except Exception:
         pass
+
+
+# ==================== 退出钩子 ====================
+
+# 程序退出前必须执行的清理动作（释放单实例锁端口等）。
+# DesktopAPI 暴露给 JS 的 installUpdate/quitApp 会主动触发它们，
+# 否则重装后重启的新进程会绑不上锁端口，被误判成「已有实例运行」而秒退。
+_shutdown_hooks = []
+
+
+def register_shutdown_hook(fn):
+    _shutdown_hooks.append(fn)
+
+
+def _run_shutdown_hooks():
+    for fn in list(_shutdown_hooks):
+        try:
+            fn()
+        except Exception:
+            pass
 
 
 # ==================== Flask 后端管理 ====================
@@ -328,14 +347,12 @@ class DesktopAPI:
             print(f'[Desktop] showItemInFolder error: {e}')
             return {'success': False, 'message': str(e)}
     def getAppVersion(self):
-        """获取应用版本"""
-        root = _get_root_dir()
-        pkg_json = os.path.join(root, 'package.json')
+        """获取应用版本（唯一来源：version.py）"""
         try:
-            with open(pkg_json, 'r', encoding='utf-8') as f:
-                return json.load(f).get('version', '1.0.0')
+            import version
+            return version.format_version()
         except Exception:
-            return '1.0.0'
+            return '0.0.0'
 
     # ──── 设置同步 ────
 
@@ -402,6 +419,93 @@ class DesktopAPI:
                 )
             except Exception:
                 pass
+
+    # ──── 应用更新 ────
+
+    def installUpdate(self, installer_path, relaunch=True):
+        """拉起安装包并退出当前进程，由安装包完成覆盖安装。
+
+        整个过程有三个必须踩对的点，否则用户会得到一个半新半旧、启动即崩的程序：
+
+        1. **先把自己的 PID 交给安装器**。onedir 模式下安装目录里有上百个
+           dll/pyd 被本进程占用，安装器必须先把我们杀掉才能覆盖；这里传
+           ``/PID=<pid>``，NSIS 侧用 taskkill 处理。
+        2. **安装器必须脱离本进程存活**。用 DETACHED_PROCESS 启动，我们随后
+           退出，安装器不受影响。
+        3. **退出前停掉后台子进程并释放单实例锁**，否则重装后重启的新进程会
+           绑不上端口，被误判成「已有实例运行」而直接退出。
+
+        installer_path 会被校验：必须是 .exe、必须存在、必须位于更新下载目录内
+        —— 这个方法是暴露给页面 JS 的，不能让它拉起任意可执行文件。
+        """
+        try:
+            if not installer_path or not isinstance(installer_path, str):
+                return {'success': False, 'message': '安装器路径为空'}
+            if not installer_path.lower().endswith('.exe'):
+                return {'success': False, 'message': '安装器必须是 .exe 文件'}
+
+            path = os.path.abspath(installer_path)
+            if not os.path.isfile(path):
+                return {'success': False, 'message': '安装器文件不存在: ' + path}
+
+            # 安全校验：只允许执行更新下载目录里的文件
+            try:
+                from server.updater import get_update_dir
+                allowed_root = os.path.abspath(get_update_dir())
+            except Exception as e:
+                return {'success': False, 'message': '无法定位更新目录: ' + str(e)}
+            if os.path.commonpath([allowed_root, path]) != allowed_root:
+                return {'success': False, 'message': '安装器路径不在更新目录内，已拒绝执行'}
+
+            args = [path, '/SILENT', '/PID=' + str(os.getpid())]
+            if not relaunch:
+                args.append('/NORUN')
+
+            creation = 0
+            if platform.system() == 'Windows':
+                creation = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+            subprocess.Popen(
+                args,
+                close_fds=True,
+                creationflags=creation,
+            )
+            print(f'[Desktop] 已拉起安装器: {path}')
+
+            # 安装器已独立启动，接下来把自己彻底让位
+            self._is_quitting = True
+            self._stop_word_keep_alive()
+            if self._tray_icon:
+                try:
+                    self._tray_icon.visible = False
+                except Exception:
+                    pass
+            if self._window:
+                try:
+                    self._window.destroy()
+                except Exception:
+                    pass
+            _run_shutdown_hooks()
+
+            # 兜底：某些后端下 destroy 不会立刻结束进程，3 秒后强制退出，
+            # 确保安装器能拿到文件句柄。
+            threading.Timer(3.0, lambda: os._exit(0)).start()
+            return {'success': True}
+        except Exception as e:
+            print(f'[Desktop] installUpdate error: {e}')
+            return {'success': False, 'message': str(e)}
+
+    def quitApp(self):
+        """彻底退出应用（供设置页等场景调用）"""
+        self._is_quitting = True
+        self._stop_word_keep_alive()
+        if self._window:
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+        _run_shutdown_hooks()
+        return {'success': True}
 
     # ──── 窗口状态监听（轮询替代事件） ────
 
@@ -607,6 +711,9 @@ def main():
         print('[Desktop] 已有实例运行，激活已有窗口')
         _signal_existing_instance(port)
         return
+
+    # 退出（含覆盖安装前的退出）时释放锁端口，保证紧接着启动的新进程能绑定
+    register_shutdown_hook(lambda: lock_sock.close())
 
     # ──── 启动 Flask（后台线程）与窗口并行 ────
     # 不再阻塞等后端就绪：窗口立即出现，加载页轮询后端，就绪后自动跳转主界面。

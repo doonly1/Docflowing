@@ -852,6 +852,9 @@
                         <div style="font-size:11px;color:#999;margin:4px 0 0 0;">最小化到托盘后可从系统托盘恢复窗口</div>
                     </div>
 
+                    <!-- 应用更新（内容由 updater.js 就地渲染并实时刷新） -->
+                    <div id="settingsUpdateCard"></div>
+
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button onclick="closeAppSettings()" style="padding:5px 16px;background:#6c757d;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">取消</button>
                         <button onclick="saveAppSettings()" style="padding:5px 16px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">保存</button>
@@ -863,13 +866,31 @@
                 overlay.querySelector('div').style.transform = 'scale(1)';
             });
             overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAppSettings(); });
+
+            // 填「应用更新」卡片，并注册回调让下载进度实时刷新
+            _renderUpdateCard();
+            if (typeof DocflowingUpdater !== 'undefined') {
+                DocflowingUpdater._settingsHook = function () { _renderUpdateCard(); };
+            }
         };
+
+        function _renderUpdateCard() {
+            const host = document.getElementById('settingsUpdateCard');
+            if (!host) return;
+            if (typeof DocflowingUpdater === 'undefined') return;
+            try {
+                host.innerHTML = DocflowingUpdater.renderSettingsSection();
+            } catch (e) {
+                host.innerHTML = '';
+            }
+        }
 
         window.closeAppSettings = function() {
             const overlay = document.getElementById('settingsOverlay');
             overlay.style.opacity = '0';
             overlay.querySelector('div').style.transform = 'scale(0.95)';
             setTimeout(() => { overlay.style.display = 'none'; overlay.innerHTML = ''; }, 200);
+            if (typeof DocflowingUpdater !== 'undefined') DocflowingUpdater._settingsHook = null;
         };
 
         window.saveAppSettings = async function() {

@@ -25,6 +25,11 @@ SPEC_NAME = os.path.join(ROOT, 'build.spec')
 OUTPUT_NAME = 'Docflowing'
 WORK_DIR = os.path.join(ROOT, 'build', 'pyi-build')
 
+# 版本号唯一来源（NSIS 安装包版本、应用内显示的运行时版本都取自这里）
+sys.path.insert(0, ROOT)
+import version as _version  # noqa: E402
+APP_VERSION = _version.format_version()
+
 
 def _ensure_skills_init():
     """确保 kb/skills/__init__.py 存在"""
@@ -522,6 +527,7 @@ def build_installer():
 
 def _create_nsis_script(nsis_path: str, source_dir: str):
     """生成 NSIS 安装脚本"""
+    app_version = APP_VERSION
     # NSIS(Unicode)的 License 页要求文本文件为 UTF-8 with BOM,
     # 否则中文会按本地 ANSI 代码页(GBK)解析 → 安装向导显示乱码。
     # 这里生成一个 BOM 副本供 makensis 引用,源 LICENSE 保持干净 UTF-8(无 BOM)。
@@ -553,20 +559,34 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 
 !define PRODUCT_NAME "{OUTPUT_NAME}"
-!define PRODUCT_VERSION "1.0.0"
+!define PRODUCT_VERSION "{app_version}"
 !define PRODUCT_PUBLISHER "Docflowing"
 
 Name "${{PRODUCT_NAME}}"
 OutFile "dist\\{OUTPUT_NAME}_Setup.exe"
 InstallDir "$PROGRAMFILES64\\${{PRODUCT_NAME}}"
+; 记住用户上次选择的目录：更新时若不读回，静默安装会把新版装到默认路径，
+; 用户桌面快捷方式还指着旧目录,等于没更新。
+InstallDirRegKey HKCU "Software\\${{PRODUCT_NAME}}" "InstallDir"
 RequestExecutionLevel admin
 
 ; ====== 安装程序与卸载程序图标(与主程序同款) ======
 {icon_lines}; ====== 安装向导页面（用户可选择安装目录） ======
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
+!include "WordFunc.nsh"
+!include "LogicLib.nsh"
 
 !define MUI_ABORTWARNING
 !define MUI_LANGDLL_ALLLANGUAGES
+
+; 命令行参数（由 desktop_app.DesktopAPI.installUpdate 传入）
+;   /PID=<pid>   覆盖安装前先杀掉这个进程,否则 dll/pyd 被占用无法写入
+;   /FORCE       允许降级安装(默认拦住)
+;   /NORUN       装完不自动启动应用
+Var APP_PID
+Var OPT_FORCE
+Var OPT_NORUN
 
 !insertmacro MUI_PAGE_WELCOME                  ; 欢迎页
 !insertmacro MUI_PAGE_LICENSE "{license_ref}" ; 许可协议页(UTF-8 BOM 副本,避免中文乱码)
@@ -582,13 +602,85 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
+!insertmacro GetParameters
+!insertmacro GetOptions
+
 ; 许可协议页兜底：没有 LICENSE 文件时跳过
 !macro MUI_PAGE_LICENSE_TEXT_MACRO
 !macroend
 
+Function .onInit
+  ; 注意：这里刻意不弹语言选择框(MUI_LANGDLL_DISPLAY)。默认首个语言
+  ; 即 SimpChinese,目标用户就是中文用户,多一步选择只是无谓的摩擦。
+  StrCpy $APP_PID ""
+  StrCpy $OPT_FORCE ""
+  StrCpy $OPT_NORUN ""
+
+  ${{GetParameters}} $R0
+  ClearErrors
+  ${{GetOptions}} $R0 "/PID=" $R1
+  IfErrors +2 0
+  StrCpy $APP_PID $R1
+  ClearErrors
+  ${{GetOptions}} $R0 "/FORCE" $R2
+  IfErrors +2 0
+  StrCpy $OPT_FORCE "/FORCE"
+  ClearErrors
+  ${{GetOptions}} $R0 "/NORUN" $R3
+  IfErrors +2 0
+  StrCpy $OPT_NORUN "/NORUN"
+
+  ; ——— 降级保护 ———
+  ; 知识库/文件库的数据库迁移是单向的(fb 的 _migrations、kb 的 SCHEMA_VERSION),
+  ; 老版本读不了新版本写出来的 schema。装个旧版本上去,用户会直接打不开数据。
+  ; 所以检测到目标目录版本更高就直接拒绝,除非显式 /FORCE。
+  IfFileExists "$INSTDIR\\VERSION" 0 _no_prev_version
+  ReadINIStr $R5 "$INSTDIR\\VERSION" "Docflowing" "Version"
+  StrCmp $R5 "" _no_prev_version
+  ${{VersionCompare}} "$R5" "${{PRODUCT_VERSION}}" $R6
+  ${{If}} $R6 == 1
+  ${{AndIf}} "$OPT_FORCE" != "/FORCE"
+    MessageBox MB_ICONSTOP|MB_OK "已安装的版本 $R5 高于本安装包的 ${{PRODUCT_VERSION}}。$\\r$\\n$\\r$\\n降级安装会导致本地数据无法读取。$\\r$\\n$\\r$\\n请先卸载当前版本,或改用更高版本的安装包。"
+    Abort
+  ${{EndIf}}
+_no_prev_version:
+FunctionEnd
+
 Section "安装主程序" SEC01
+  ; 更新场景:先把正在运行的旧进程杀掉。onedir 模式下安装目录里上百个
+  ; dll/pyd 被它占着,直接覆盖必然失败,或者更糟——写进去一半,
+  ; 用户得到一个半新半旧、启动即崩的程序。
+  ${{If}} "$APP_PID" != ""
+    ExecWait 'taskkill /PID $APP_PID /F' $R7
+    Sleep 1500
+  ${{EndIf}}
+
+  ; onedir 没有版本化目录,旧版本的 dll/pyd 残留会被新进程加载,
+  ; 这是「更新完反而打不开」最常见的根因,所以整目录清空后重新解压。
+  ; 用户数据在 %APPDATA%\\${{PRODUCT_NAME}} 而不是安装目录,不受影响。
+  FindFirst $R8 $R9 "$INSTDIR\\*.*"
+_loop_clear:
+  StrCmp $R9 "" _done_clear
+  StrCmp $R9 "." _next_clear
+  StrCmp $R9 ".." _next_clear
+  StrCmp $R9 "uninst.exe" _next_clear
+  IfFileExists "$INSTDIR\\$R9\\*.*" 0 _clear_file
+    RMDir /r "$INSTDIR\\$R9"
+    Goto _next_clear
+_clear_file:
+  Delete "$INSTDIR\\$R9"
+_next_clear:
+  FindNext $R8 $R9
+  Goto _loop_clear
+_done_clear:
+  FindClose $R8
+
   SetOutPath "$INSTDIR"
   File /r "{source_dir}\\*"
+
+  ; 版本号落地到安装目录,下次更新时用于降级判断
+  WriteINIStr "$INSTDIR\\VERSION" "Docflowing" "Version" "${{PRODUCT_VERSION}}"
+  WriteRegStr HKCU "Software\\${{PRODUCT_NAME}}" "InstallDir" "$INSTDIR"
 SectionEnd
 
 Section "创建快捷方式" SEC02
@@ -606,7 +698,16 @@ Section "Uninstall"
   RMDir /r "$INSTDIR"
   Delete "$DESKTOP\\${{PRODUCT_NAME}}.lnk"
   RMDir /r "$SMPROGRAMS\\${{PRODUCT_NAME}}"
+  DeleteRegKey HKCU "Software\\${{PRODUCT_NAME}}"
 SectionEnd
+
+Function .onInstSuccess
+  ; 更新完成后自动拉起新版本,用户不用自己去桌面找图标
+  ${{If}} "$OPT_NORUN" != "/NORUN"
+  ${{AndIf}} ${{FileExists}} "$INSTDIR\\{OUTPUT_NAME}.exe"
+    Exec '"$INSTDIR\\{OUTPUT_NAME}.exe"'
+  ${{EndIf}}
+FunctionEnd
 '''
     with open(nsis_path, 'w', encoding='utf-8-sig') as f:
         f.write(script)

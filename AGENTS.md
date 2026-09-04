@@ -28,7 +28,12 @@ python build-desktop.py --onefile
 
 # 打包（onedir + NSIS 安装包）
 python build-desktop.py --installer
+
+# 生成本地更新清单 version.json（CI 发版时自动跑，本地调试用）
+python make_update_manifest.py --file dist/Docflowing_Setup.exe --output dist/version.json --repo doonly1/Docflowing
 ```
+
+> **发版前必做**：先把根目录 `version.py` 的 `APP_VERSION` 改成目标版本（语义化 `X.Y.Z`），提交后再打同名 tag（`git tag vX.Y.Z && git push origin vX.Y.Z`）。`version.py` 是全项目唯一版本源，以下位置都引用它，禁止再写死：NSIS 的 `PRODUCT_VERSION`、`DesktopAPI.getAppVersion()`、`make_update_manifest.py`、CI 的 tag 一致性校验。
 
 ## Architecture
 
@@ -114,6 +119,26 @@ Docflowing is a **document management desktop app** with pywebview shell + Flask
 
 - `WordKeepAlive.py` — Windows COM 保活脚本
 
+**版本与自动更新 (Versioning & Auto-Update)**
+
+- `version.py` — **全项目唯一版本源**（`APP_VERSION` + `UPDATE_CHANNEL` + `parse_version`/`compare_versions` 语义化比对）。`DesktopAPI.getAppVersion()`、NSIS `PRODUCT_VERSION`、`make_update_manifest.py` 全部引用它，不要写死。
+
+- `server/updater.py` — 更新核心（Flask 蓝图 `updater_bp`，前缀 `/api/app`）：
+  - 状态机：`idle → checking → available → downloading → ready →(安装后重置) idle`，失败落 `failed`
+  - 后台**静默预下载**：启动后延迟 20s 检查清单，发现新版本即在后台线程断点续传下载安装包，sha256 校验通过后才提示用户安装（用户等待时间只有"安装"，没有"下载"）
+  - 清单走 `DOCFLOWING_UPDATE_URL`（默认 `…/releases/latest/download/version.json`，**不**直接打 `api.github.com`，避开国内网络不稳）；含 `min_required` 强制升级、`mirror` 镜像兜底、便携版独立包
+  - 应用设置键：`auto_download_update`（默认开）、`skip_update_version`（跳过某版本）
+
+- `desktop_app.py` 的 `DesktopAPI`：
+  - `installUpdate()` — **严格路径校验**（只允许执行更新目录里生成的 `.exe`，拒绝拉起任意程序）→ 脱离父进程 `detached` 拉起 NSIS 安装器并传自身 PID → 停 `WordKeepAlive` 子进程、释放单实例锁、退出
+  - `quitApp()` / `getAppVersion()`
+
+- `ui/js/updater.js` — 前端更新交互：右下角就绪提示条 + 设置面板「应用更新」卡片（版本号/状态/自动下载开关/检查/下载/安装/跳过）。首页知识库欢迎大标题现为「知识库」（`kb.js` 的 `kb-chat-greeting-title`）。
+
+- `make_update_manifest.py` — 发版时计算安装包 `size`/`sha256`，生成 `version.json`。
+
+**NSIS 安装器（`build-desktop.py` 生成的 `installer.nsi`）关键行为**：先 `taskkill` 传入的旧进程 PID 再整目录覆盖；`VersionCompare` 拦死降级安装（读 `$INSTDIR\VERSION`）；安装后可选自动重启应用；支持 `/SILENT` 静默安装。
+
 ### Key Architecture Decisions
 
 1. **pywebview 替代 Electron**: 默认走系统原生标题栏（winui3 用 XAML 自绘，保留缩放/吸附）。frameless 仅是逃生门，**不再**补 `WS_THICKFRAME`（Win10 下 DWM 会残留单侧黑边，已移除）——逃生门窗口无系统缩放，详见 `desktop_window.py` 模块 docstring
@@ -121,13 +146,17 @@ Docflowing is a **document management desktop app** with pywebview shell + Flask
 3. **数据存储**: 开发模式写入 `%APPDATA%/Docflowing/workspaces/`，便携版写入 exe 同级的 `data/`，打包版写入 `%APPDATA%/Docflowing/`
 4. **单实例锁**: 绑定 `port + 1000` 的 TCP 端口，重复启动时通知已有实例显示窗口
 
+5. **更新机制**: 版本号唯一源 = `version.py` 的 `APP_VERSION`；发版改它 → commit → `git tag v<版本>` → push tag 触发 `release.yml`（云端 Windows 重建安装包 + 生成 `version.json` 校验和并上传）。客户端 `server/updater.py` 静默预下载安装包（后台线程 + sha256 校验），就绪后提示安装；`desktop_app.installUpdate()` 传 `/PID` 给 NSIS 让其先 taskkill 旧进程再覆盖。清单地址默认 `…/releases/latest/download/version.json`，可用 `DOCFLOWING_UPDATE_URL` 覆盖到自建 CDN。降级安装被 NSIS 拦死（读 `$INSTDIR\VERSION`）。设置键：`auto_download_update`、`skip_update_version`
+
 ## Project Structure
 
 ```
 Docflowing/
 ├── desktop_app.py       # 主入口（桌面模式）
 ├── app_server.py        # 纯 Flask 入口
-├── build-desktop.py     # PyInstaller 构建脚本
+├── build-desktop.py     # PyInstaller 构建脚本（生成 NSIS installer.nsi）
+├── make_update_manifest.py  # 发版时生成 version.json（安装包 size/sha256 清单）
+├── version.py           # 全项目唯一版本源（APP_VERSION / UPDATE_CHANNEL）
 ├── AGENTS.md
 ├── README.md
 ├── requirements.txt
@@ -137,6 +166,7 @@ Docflowing/
 │   ├── middleware.py
 │   ├── workspace.py
 │   ├── settings.py
+│   ├── updater.py       # 更新蓝图（清单拉取/版本比对/后台静默下载/sha256 校验）
 │   ├── runner.py
 │   └── tool_runner.py
 ├── fb/                  # 文件库模块
@@ -183,8 +213,9 @@ Docflowing/
 │       ├── main.js      # FileBase 对象
 │       ├── fb.js        # 文件浏览器
 │       ├── tab-manager.js
-│       ├── kb.js
+│       ├── kb.js        # 知识库 UI（首页欢迎标题「知识库」）
 │       ├── tools.js
+│       ├── updater.js   # 更新交互（就绪提示条 + 设置面板更新卡片）
 │       └── utils.js
 ├── tools/               # 文档处理工具
 │   ├── to_docx.py
@@ -200,9 +231,10 @@ Docflowing/
 │   ├── test_pywebview.py
 │   ├── test_auth.py
 │   ├── test_llm.py
-│   └── test_to_compare.py
+│   ├── test_to_compare.py
+│   └── test_updater.py  # 更新器：版本比对/清单解析/下载校验/状态机
 └── .github/workflows/
-    └── release.yml      # CI: 构建 onefile exe 并发布 Release
+    └── release.yml      # CI: 云端 Windows 构建安装包 + 生成 version.json 并发布 Release
 ```
 
 ## Important Notes
@@ -220,4 +252,8 @@ Docflowing/
 - 前端 `index.html` 使用 CSP 限制严格，新增外部资源引用时需同步更新 CSP 头
 
 - **FTS5 中文搜索**：`kb/wiki_fts` 与 `kb/session_db.py` 的 `messages_fts`（SCHEMA_VERSION>=4）均使用 SQLite **内建 `trigram` 分词器**（sqlite>=3.34，Python 3.12+ 自带的 3.49+ 均满足），运行时不加载任何外部扩展。`kb/fts_ext/simple.dll` 等仅作为冗余资源随包保留——旧 `simple` 分词器扩展与新版 SQLite 不兼容（加载后 tokenizer 注册失败，且存在偶发原生崩溃史），勿再恢复 `load_extension` 调用。注意：trigram 对长度 <3 的查询词无法命中（如常见 2 字中文词），`kb/search.py` / `kb/session_db.py` 会走 LIKE 兜底，属正常降级路径，不是 bug
+
+- **版本单一来源**：版本号只在 `version.py` 的 `APP_VERSION` 定义，发版改它后必须打同名 git tag（如 `v1.0.5`）才能触发 CI 发版；CI 会校验二者一致，不一致直接失败。不要在任何文件里再写死版本号。
+
+- **首页知识库标题**：知识库首页居中欢迎标题为「知识库」（`kb.js` 的 `kb-chat-greeting-title`），对应 `kb-chat-initial-area`（仅在初始态显示）；会话激活后该区域隐藏、`#kb-messages` 内的空状态「开始对话 / 与AI助手对话…」才出现，二者是不同显示场景，勿混淆。
 

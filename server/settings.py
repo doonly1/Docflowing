@@ -37,6 +37,10 @@ _DEFAULT_APP_SETTINGS = {
     # Word 保活默认关闭（Windows 用户需要时在设置中手动开启；
     # 非 Windows 平台该功能强制禁用，见 desktop_app.setWordKeepAlive）
     'word_keep_alive': False,
+    # 更新：检测到新版本后后台静默预下载（用户点「安装」时无需再等下载）
+    'auto_download_update': True,
+    # 用户主动跳过、不再提示的版本号（强制更新不受此限）
+    'skip_update_version': '',
 }
 
 # ==================== 配置路径 / 初始化 ====================

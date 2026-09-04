@@ -306,7 +306,7 @@ var WikiKnowledge = {
                 '</div>' +
                 // 初始居中区（移除快捷按钮）
                 '<div class="kb-chat-initial-area" id="kb-initial-area">' +
-                    '<div class="kb-chat-greeting-title">开始会话</div>' +
+                    '<div class="kb-chat-greeting-title">知识库</div>' +
                 '</div>' +
                 // 输入区（始终在底部）
                 '<div class="kb-chat-input-area">' +

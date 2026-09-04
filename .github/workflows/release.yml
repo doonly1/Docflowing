@@ -30,6 +30,16 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
+      - name: 校验 tag 与 version.py 一致
+        shell: bash
+        run: |
+          PYVER=$(python -c "import sys; sys.path.insert(0,'.'); import version; print('v'+version.format_version())")
+          echo "tag=${GITHUB_REF_NAME}  version.py=${PYVER}"
+          if [ "${GITHUB_REF_NAME}" != "${PYVER}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 version.py 的 ${PYVER} 不一致。请先改 version.py 的 APP_VERSION，再打同名 tag。"
+            exit 1
+          fi
+
       - name: 构建 onedir 包并生成 NSIS 安装包
         run: python build-desktop.py --installer
         env:
@@ -41,9 +51,24 @@ jobs:
           $exe = Get-Item dist/Docflowing_Setup.exe -ErrorAction Stop
           Write-Host ("安装包: {0} ({1:N1} MB)" -f $exe.FullName, ($exe.Length / 1MB))
 
+      - name: 生成更新清单 version.json
+        shell: bash
+        run: |
+          NOTES_ARG=""
+          if [ -f RELEASE_NOTES.md ]; then NOTES_ARG="--notes-file RELEASE_NOTES.md"; fi
+          python make_update_manifest.py \
+            --file dist/Docflowing_Setup.exe \
+            --output dist/version.json \
+            --repo ${{ github.repository }} \
+            $NOTES_ARG
+
+      # 两个资产都要传：安装包给用户下载，version.json 给客户端做更新检查。
+      # make_latest 必须有，否则 releases/latest/download/version.json 解析不到。
       - name: 发布到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Docflowing_Setup.exe
+          files: |
+            dist/Docflowing_Setup.exe
+            dist/version.json
           generate_release_notes: true
           make_latest: true

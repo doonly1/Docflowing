@@ -148,11 +148,14 @@ class TestDesktopAPI:
         assert api._window is None
 
     def test_getAppVersion(self):
-        """版本信息应从 package.json 读取"""
+        """版本信息应取自 version.py（全项目唯一版本源）"""
         from desktop_app import DesktopAPI
+        import version as version_mod
         api = DesktopAPI()
-        version = api.getAppVersion()
-        assert version == '1.0.0'
+        assert api.getAppVersion() == version_mod.format_version()
+        # 必须是 X.Y.Z 三段数字，更新器依赖它做版本比对
+        import re
+        assert re.fullmatch(r'\d+\.\d+\.\d+', api.getAppVersion())
 
     def test_setCloseAction(self):
         """关闭行为设置"""
@@ -241,22 +244,25 @@ class TestDesktopAPI:
         api.openExternal('javascript:alert(1)')
         assert urls_opened == []
 
-    def test_getAppVersion_fallback(self, monkeypatch):
-        """package.json 不存在时返回默认版本"""
+    def test_getAppVersion_no_hardcoded_fallback(self, monkeypatch):
+        """拿不到 version.py 时不能谎报一个具体的版本号。
+
+        曾经这里读一个根本不存在的 package.json 并 fallback 成 '1.0.0'，
+        结果 UI 上永远显示 1.0.0，更新比对彻底失效。兜底必须是一个
+        明显无效的版本（0.0.0），让问题暴露而不是被掩盖。
+        """
         import builtins
-        original_open = builtins.open
+        real_import = builtins.__import__
 
-        def mock_open(path, *args, **kwargs):
-            if 'package.json' in str(path):
-                raise FileNotFoundError()
-            return original_open(path, *args, **kwargs)
+        def mock_import(name, *args, **kwargs):
+            if name == 'version':
+                raise ImportError('simulated missing version module')
+            return real_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(builtins, 'open', mock_open)
+        monkeypatch.setattr(builtins, '__import__', mock_import)
 
         from desktop_app import DesktopAPI
-        api = DesktopAPI()
-        version = api.getAppVersion()
-        assert version == '1.0.0'
+        assert DesktopAPI().getAppVersion() == '0.0.0'
 
 
 class TestEnvSetup:
