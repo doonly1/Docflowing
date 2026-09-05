@@ -23,6 +23,14 @@ import os
 import sys
 from datetime import datetime, timezone
 
+# 强制 stdout/stderr 使用 UTF-8 编码。
+# 不设的话,Windows 默认代码页(cp1252/GBK)下 print 中文直接
+# UnicodeEncodeError → CI 的「生成更新清单」步骤崩溃(build-desktop.py 同款兜底)。
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import version  # noqa: E402
 

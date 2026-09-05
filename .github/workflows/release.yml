@@ -53,6 +53,8 @@ jobs:
 
       - name: 生成更新清单 version.json
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           NOTES_ARG=""
           if [ -f RELEASE_NOTES.md ]; then NOTES_ARG="--notes-file RELEASE_NOTES.md"; fi
