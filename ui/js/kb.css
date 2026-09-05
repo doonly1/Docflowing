@@ -10,19 +10,27 @@
 	overflow: hidden;
 	font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", -apple-system, sans-serif;
 }
-/* 初始状态：初始区+输入框居中，顶栏贴顶 */
+/* 初始状态：欢迎标题 + 输入框作为整体在容器内垂直居中，顶栏悬浮右上角 */
+.kb-chat-container.initial {
+	justify-content: center;
+	position: relative;
+}
+.kb-chat-container.initial .kb-chat-topbar {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+}
 .kb-chat-container.initial .kb-chat-initial-area {
-	margin-top: auto;
 	flex: 0 0 auto;
-	padding: 0 20px 16px;
+	margin: 0;
+	padding: 0 20px 18px;
 }
 .kb-chat-container.initial .kb-chat-input-area {
 	width: 100%;
 	max-width: 560px;
-	margin-left: auto;
-	margin-right: auto;
-	margin-bottom: auto;
-	padding: 8px 20px 20px;
+	margin: 0 auto;
+	padding: 0 20px;
 	background: transparent;
 }
 

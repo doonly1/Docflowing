@@ -1,25 +1,48 @@
 """
 FB 文件库同步 - 文件转换器模块
 
-支持将 doc/docx/pptx/xlsx/xls/md/txt 转换为 Markdown 格式
+支持将 doc/docx/pptx/md/txt 转换为 Markdown 格式
 使用 MarkItDown 内部转换器（跳过 magika/onnxruntime），保持高质量同时降低内存
 
-⚠️ PDF 已移除同步/预览：知识库同步直接排除 PDF，
-预览改用用户本地默认程序打开。
+⚠️ 内容转换排除项：
+- PDF：已移除同步/预览，知识库同步直接排除，预览改用本地默认程序；
+- 表格（xlsx/xls/xlsm）：同样不做内容解析，只建立文件名索引。
+  否则需引入 pandas/xlrd（连带 numpy/OpenBLAS ~29MB），转换成本远高于收益。
 """
 
 import os
 import re
+import sys as _sys
+import types as _types
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
 from pathlib import Path
 from dataclasses import dataclass
 
+# ── magika 占位模块 ─────────────────────────────────────────
+# markitdown/__init__.py 顶层会 `from ._markitdown import ...`，而 _markitdown.py
+# 顶层 `import magika` —— 只要 import 任意 markitdown 子模块就必然触发。
+# 但 magika 只被 MarkItDown 引擎用于 mimetype 猜测，本模块直调 converters 子模块
+# 从不实例化 MarkItDown，实际用不到它；打包时为控制体积将其排除（否则连带
+# onnxruntime/numpy/onnx，+40MB+）。这里在 import markitdown 前垫一个占位模块，
+# 让包链能完成导入即可。
+if 'magika' not in _sys.modules:
+    _magika_stub = _types.ModuleType('magika')
 
-# 同步支持的扩展名（PDF 已从同步链移除）
-MARKITDOWN_EXTENSIONS = {'.docx', '.pptx', '.xlsx', '.xls'}
-# PDF 扩展名集合：同步时跳过，预览时交给本地默认程序
-SKIPPED_PDF_EXTENSIONS = {'.pdf'}
+    class _Magika:  # 仅保证 import 通过；被调用说明走了不该走的路径
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError('magika 未打包，此路径不应被调用')
+
+    _magika_stub.Magika = _Magika
+    _sys.modules['magika'] = _magika_stub
+    del _Magika
+
+
+# 同步做内容转换的扩展名（PDF/表格已从转换链排除，仅索引文件名）
+MARKITDOWN_EXTENSIONS = {'.docx', '.pptx'}
+# 不做内容转换、仅文件名索引的扩展名（表格与 PDF 同策略：
+# 避免 pandas/OpenBLAS 重依赖与解析开销）
+SKIPPED_CONTENT_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.xlsm'}
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -66,8 +89,6 @@ class MarkItDownConverter(BaseConverter):
     _EXTENSION_MAP = {
         '.docx': ('markitdown.converters._docx_converter', 'DocxConverter'),
         '.pptx': ('markitdown.converters._pptx_converter', 'PptxConverter'),
-        '.xlsx': ('markitdown.converters._xlsx_converter', 'XlsxConverter'),
-        '.xls':  ('markitdown.converters._xlsx_converter', 'XlsConverter'),
     }
 
     @property
@@ -232,7 +253,10 @@ def get_converter(file_path: str) -> Optional[BaseConverter]:
 
 
 def can_convert(file_path: str) -> bool:
-    """判断文件是否可转换"""
+    """判断文件是否可做内容转换（排除表格/PDF，这些只走文件名索引）"""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in SKIPPED_CONTENT_EXTENSIONS:
+        return False
     return get_converter(file_path) is not None
 
 

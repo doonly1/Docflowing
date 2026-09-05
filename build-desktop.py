@@ -146,8 +146,8 @@ _EXCLUDES = [
     'pandas', 'cefpython3',
     # 已移除的依赖，残留时防止误打包
     'cryptography',
-    # markitdown 死重链：代码走 converters 子模块（跳过 magika），
-    # 顶层 _markitdown 会 import magika → onnxruntime → onnx/numpy。
+    # markitdown 死重链：顶层 _markitdown 会 import magika → onnxruntime/onnx。
+    # kb/sync_converters 已注入 magika 占位模块（直调 converters 子模块用不到它），
     # 运行时永不触发，排除后大幅缩小安装包。
     'magika', 'onnxruntime', 'onnx',
     # win32ui 是 Pythonwin IDE 组件，win32com.client 不依赖它，
@@ -158,8 +158,9 @@ _EXCLUDES = [
     'PIL._avif', 'PIL._webp', 'PIL._imagingft', 'PIL._imagingcms',
     # numpy 由 PIL.Image.fromarray()（numpy 数组→图像）惰性导入拉入，
     # 但代码只用 Image.new/Image.open，从不调用 fromarray，完全不需 numpy。
+    # 表格同步已排除（xlsx/xls 只做文件名索引），pandas/xlrd 也不再需要。
     # 排除后连带去掉 numpy.libs 里的 OpenBLAS（~19.4MB）+ numpy（~6.6MB）。
-    'numpy',
+    'numpy', 'xlrd',
     # ────── PDF 处理全栈已移除（预览改用系统默认程序、同步直接排除 PDF）──────
     # 原占用: pdfminer 7.5 + pypdfium2_raw/pdfium.dll 6.8 + 前端 pdf*.js 1.3 ≈ 15.6 MB
     'pdfminer', 'pdfplumber', 'pypdfium2', 'pypdfium2_raw',

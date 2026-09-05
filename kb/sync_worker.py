@@ -345,6 +345,36 @@ class SyncWorker:
         if not heavy_files:
             return
 
+        # ─── 打包环境（PyInstaller frozen）降级路径 ───
+        # frozen 时 sys.executable 是应用 exe，无法当解释器执行 sync_subprocess.py
+        # （会把整个应用再启动一遍，stdout 是应用日志而非 JSON，导致 docx/xlsx/pptx
+        # 全部转换失败 "Expecting value...")。这里退化为与轻量文件一致的
+        # 主进程内串行转换（同线程调用 _convert_single，无并发 DB 写竞态），
+        # 保证打包版重文件同步可用；每轮给 15 分钟预算，剩余留待下轮轮询。
+        if getattr(sys, 'frozen', False):
+            deadline = time.time() + 900
+            heavy_updates = []
+            for relative_path, file_info in heavy_files:
+                if time.time() > deadline:
+                    logger.warning(
+                        f"Sync timeout for {filebase_id}: heavy inline conversion reached deadline"
+                    )
+                    break
+                result = self._convert_single(
+                    user_id, filebase_id, relative_path, file_info, state
+                )
+                if result:
+                    heavy_updates.append(result)
+            if heavy_updates:
+                self._state_manager.batch_update_file_states(
+                    user_id, filebase_id, heavy_updates
+                )
+                logger.info(
+                    f"Filebase {filebase_id}: inline converted {len(heavy_updates)} heavy files (frozen)"
+                )
+            self._index_non_syncable(user_id, filebase_id, current_files, state)
+            return
+
         heavy_updates_lock = threading.Lock()
         heavy_updates = []
         heavy_index_updates = []

@@ -249,6 +249,7 @@ var FileBase = {
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
             h += '<button onclick="FileBase.search()">🔍</button>';
             h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
+            h += '<button onclick="FileBase.showAddLocalFolder()" title="选择本地已有文件夹作为文件库">📂 添加本地文件库</button>';
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '</div>';
             h += '<div class="fb-file-body" id="fb-grid-container" oncontextmenu="FileBase.showKbListContextMenu(event)"><div class="fb-empty">刷新中...</div></div>';
@@ -328,6 +329,45 @@ var FileBase = {
 
     showCreateRootFolder: function() {
         this._showLocalPathDialog();
+    },
+
+    // ─────────────────── 添加本地文件库（选择本地已有文件夹） ───────────────────
+
+    showAddLocalFolder: async function() {
+        var self = this;
+        var path = '';
+        // 桌面壳：原生目录选择对话框（tkinter）
+        try {
+            if (window.electronAPI && window.electronAPI.selectDirectory) {
+                path = (await window.electronAPI.selectDirectory()) || '';
+            }
+        } catch (e) {
+            console.warn('selectDirectory failed:', e);
+        }
+        // 浏览器模式 / 对话框取消 / 失败：回退为手输绝对路径
+        if (!path) {
+            var manual = await showPrompt('请输入本地文件夹的绝对路径（如 D:\\我的资料）', '');
+            if (!manual || !manual.trim()) return;
+            path = manual.trim();
+        }
+        var folderName = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        if (!folderName) folderName = '本地文件库';
+        await this._addLocalFolder(folderName, path);
+    },
+
+    _addLocalFolder: async function(name, localPath) {
+        var self = this;
+        var res = await this.api('/api/fb/create-folder', 'POST', {
+            filebase_type: 'local',
+            name: name,
+            local_path: localPath
+        });
+        if (res.success) {
+            showToast('已添加文件库：' + name, 'success');
+            await self.renderKbList();
+        } else {
+            showToast(res.message || '添加失败', 'error');
+        }
     },
 
     _showLocalPathDialog: function() {
@@ -434,6 +474,7 @@ var FileBase = {
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
             var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
+            emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showAddLocalFolder();FileBase.hideContextMenu()"><span class="icon">📂</span> 添加本地文件库</div>';
             if (window.authRole === 'admin') {
                 emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
             }
