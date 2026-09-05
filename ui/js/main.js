@@ -764,17 +764,36 @@
 
         // ==================== 关于弹窗 ====================
 
+        // 项目对外链接（集中定义，便于维护）
+        var ABOUT_LINKS = {
+            project: 'https://github.com/doonly1/Docflowing',
+            docs: 'https://doonly1.github.io/Docflowing/',
+            releases: 'https://github.com/doonly1/Docflowing/releases/latest',
+            license: 'https://github.com/doonly1/Docflowing/blob/main/LICENSE'
+        };
+
         window.showAbout = function() {
             const overlay = document.getElementById('aboutOverlay');
             overlay.style.display = 'flex';
             overlay.innerHTML = `
-                <div id="about-dialog" style="background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:85%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;transform:scale(0.95);transition:transform 0.2s ease;">
-                    <div style="text-align:center;margin-bottom:12px;">
-                        <h2 style="margin:6px 0 2px;font-size:18px;"><a href="https://github.com/doonly1/" target="_blank" style="color:#1a1a2e;text-decoration:none;">文澜</a></h2>
-                        <div style="font-size:11px;color:#999;">Docflowing · 文涌清澜</div>
+                <div id="about-dialog" style="background:#fff;border-radius:12px;padding:22px 26px;max-width:420px;width:88%;box-shadow:0 4px 20px rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.08);font-size:13px;line-height:1.8;transform:scale(0.95);transition:transform 0.2s ease;">
+                    <div style="text-align:center;margin-bottom:4px;">
+                        <h2 style="margin:4px 0 0;font-size:20px;color:#1a1a2e;">文澜</h2>
+                        <div style="font-size:11px;color:#999;">Docflowing · Document Workflow</div>
                     </div>
-                    <div style="text-align:center;margin-top:14px;">
-                        <button onclick="closeAbout()" style="padding:5px 24px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
+                    <div style="text-align:center;font-size:11px;color:#bbb;margin:2px 0 10px;">公文处理与 AI 知识管理平台 · <span id="aboutVersion">版本读取中…</span></div>
+                    <div style="background:#f7f7fa;border-radius:8px;padding:10px 14px;font-size:12px;color:#555;margin-bottom:14px;">
+                        文档处理工具 · 文件库 · 知识库 AI 会话 · P2P 共享。<br>
+                        数据本地保存，离线可用；AI 功能需自行配置 LLM。
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+                        <a href="` + ABOUT_LINKS.project + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">GitHub 主页</a>
+                        <a href="` + ABOUT_LINKS.docs + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">在线文档</a>
+                        <a href="` + ABOUT_LINKS.releases + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">更新日志</a>
+                        <a href="` + ABOUT_LINKS.license + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">开源许可</a>
+                    </div>
+                    <div style="text-align:center;margin-top:4px;">
+                        <button onclick="closeAbout()" style="padding:5px 28px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
                     </div>
                 </div>
             `;
@@ -784,6 +803,23 @@
                 if (dialog) dialog.style.transform = 'scale(1)';
             });
             overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAbout(); });
+
+            // 异步补版本号：优先 updater 状态里的 current_version，桌面/浏览器通用
+            var verHost = document.getElementById('aboutVersion');
+            (async function() {
+                try {
+                    var r = await apiFetch('/api/updater/status', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({}), timeout: 8000, showError: false
+                    });
+                    var j = await r.json();
+                    var v = (j && j.status && j.status.current_version) || '';
+                    if (v) verHost.textContent = 'v' + v;
+                    else verHost.textContent = '';
+                } catch (e) {
+                    verHost.textContent = '';
+                }
+            })();
         };
 
         window.closeAbout = function() {

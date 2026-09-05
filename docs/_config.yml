@@ -1,0 +1,4 @@
+# Jekyll 站点配置 —— 仅用于 GitHub Pages 渲染 docs/ 下的 Markdown
+title: Docflowing · 文澜
+description: 公文处理与 AI 知识管理平台 —— 文档处理工具、文件库、知识库、P2P 共享
+theme: minima

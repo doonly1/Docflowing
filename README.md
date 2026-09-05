@@ -6,6 +6,8 @@ Docflowing（文澜）是一个涵盖**文件管理、多级共享、知识会�
 
 基于 P2P 节点共享，局域网内多台机器可互相发现并共享文件库。
 
+> 📖 **在线文档**：[文档站首页](https://doonly1.github.io/Docflowing/) · [快速上手](https://doonly1.github.io/Docflowing/guide.html) · [功能详解](https://doonly1.github.io/Docflowing/features.html)
+
 <p align="center">
   <img src="docs/screenshots/home.png" alt="文澜主界面" width="860">
 </p>
