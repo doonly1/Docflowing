@@ -149,6 +149,10 @@ def get_sync_status(filebase_id):
             syncable_count = total_files
 
         is_syncing = filebase_id in worker._processing_filebases
+        try:
+            failed_count = len(state.failed_files or [])
+        except Exception:
+            failed_count = 0
 
         return jsonify({
             'success': True,
@@ -159,6 +163,7 @@ def get_sync_status(filebase_id):
                 'total_files': total_files,
                 'syncable_files': syncable_count,
                 'synced_files': state.synced_files,
+                'failed_count': failed_count,
                 'last_sync': state.last_sync
             }
         })
@@ -174,6 +179,7 @@ def get_sync_status(filebase_id):
                 'total_files': 0,
                 'syncable_files': 0,
                 'synced_files': 0,
+                'failed_count': 0,
                 'last_sync': None
             }
         })

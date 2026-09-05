@@ -294,6 +294,8 @@ var FileBase = {
             for (var i = 0; i < kbs.length; i++) {
                 this._loadSyncStatus(kbs[i].id);
             }
+            // 首页列表期间每 5s 刷新一次同步状态,让后台 worker 的进度可见
+            this.startSyncPolling();
 
             this.initNodePolling();
         } catch (e) {
@@ -315,15 +317,75 @@ var FileBase = {
             var total = status.total_files || 0;
             var syncable = status.syncable_files || 0;
             var synced = status.synced_files || 0;
+            var failed = status.failed_count || 0;
 
-            var display = '文件数: ' + total;
-            if (res.enabled) {
-                display = '文件数: ' + total + ' | 同步: ' + total + '/' + syncable + '/' + synced;
+            var text = '文件数: ' + total;
+            var color = '#666';
+            if (res.enabled && syncable > 0) {
+                text = '文件数: ' + total + ' | 已同步: ' + synced + '/' + syncable;
+                if (res.is_syncing) {
+                    text = '⏳ 同步中: ' + synced + '/' + syncable;
+                    color = '#1a73e8';
+                } else if (synced >= syncable && failed === 0) {
+                    color = '#188038';
+                } else if (synced >= syncable && failed > 0) {
+                    color = '#b45309';
+                }
+                if (failed > 0) {
+                    text += ' | ⚠ 失败 ' + failed;
+                }
+            } else if (res.enabled) {
+                text = '文件数: ' + total + ' | 待同步';
+                color = '#1a73e8';
             }
 
-            statusEl.innerHTML = '<small style="color:#666;font-size:11px;">' + display + '</small>';
+            statusEl.innerHTML = '<small style="color:' + color + ';font-size:11px;">' + text + '</small>';
         } catch (e) {
             console.warn('Failed to load sync status for ' + kbId, e);
+        }
+    },
+
+    // ─────────────────── 同步状态轮询(首页列表 5s 刷新一次) ───────────────────
+    // 此前状态只在渲染列表/开关同步时刷一次,后台 worker 实际在跑用户也看不见;
+    // 这里在文件库首页期间定时刷新各卡片状态,离开首页(进入库内/切换视图)自动停止。
+
+    startSyncPolling: function() {
+        if (this._syncPollTimer) return;
+        var self = this;
+        this._syncPollAt = {};
+        this._syncPollTimer = setInterval(function() {
+            self._syncPollTick();
+        }, 5000);
+    },
+
+    stopSyncPolling: function() {
+        if (this._syncPollTimer) {
+            clearInterval(this._syncPollTimer);
+            this._syncPollTimer = null;
+        }
+        this._syncPollAt = {};
+    },
+
+    _syncPollTick: function() {
+        // 已进入某个库(详情页)或列表 DOM 已不存在 → 停止轮询
+        if (this.currentFbId) {
+            this.stopSyncPolling();
+            return;
+        }
+        var grid = document.getElementById('fb-grid-container');
+        if (!grid) {
+            this.stopSyncPolling();
+            return;
+        }
+        var cards = grid.querySelectorAll('.fb-card-sync-status[data-fb-id]');
+        for (var i = 0; i < cards.length; i++) {
+            var id = cards[i].getAttribute('data-fb-id');
+            if (!id) continue;
+            // 限频: 单库 4s 内不重复请求,避免接口慢时叠加
+            var now = Date.now();
+            if (this._syncPollAt[id] && now - this._syncPollAt[id] < 4000) continue;
+            this._syncPollAt[id] = now;
+            this._loadSyncStatus(id);
         }
     },
 
@@ -705,6 +767,8 @@ var FileBase = {
 
     renderDetail: async function() {
         var self = this;
+        // 离开首页列表,停止同步状态轮询
+        this.stopSyncPolling();
 
         var fileContent = document.getElementById('fb-file-content');
         if (!fileContent) {
