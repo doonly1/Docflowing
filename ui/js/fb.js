@@ -284,7 +284,8 @@ var FileBase = {
                 }
                 html += '<div class="fb-card" data-fb-id="' + kb.id + '" data-fb-permission="' + kb.permission + '" data-fb-name="' + escapeHtmlText(kb.name) + '" data-fb-type="' + (kb.filebase_type || 'local') + '" data-fb-local-path="' + escapeHtmlText(kb.local_path || '') + '" data-fb-display-path="' + escapeHtmlText(kb.display_path || '') + '" onclick="FileBase.openKb(\'' + kb.id + '\',\'' + kb.permission + '\',\'' + escapeJsForHtmlAttr(kb.name) + '\',\'' + escapeJsForHtmlAttr(kb.local_path || '') + '\',\'' + escapeJsForHtmlAttr(kb.display_path || '') + '\')">';
                 html += '<h3>📁 ' + escapeHtmlText(kb.name) + '</h3>';
-                html += '<div class="fb-card-meta">' + (kb.display_path || kb.local_path || '') + '</div>';
+                var metaPath = kb.display_path || kb.local_path || '';
+                html += '<div class="fb-card-meta" title="' + escapeHtmlText(metaPath) + '">' + escapeHtmlText(metaPath) + '</div>';
                 html += '<div class="fb-card-sync-status" id="sync-status-' + kb.id + '" data-fb-id="' + kb.id + '">' + initialCountHtml + '</div>';
                 html += '</div>';
             }
@@ -317,26 +318,16 @@ var FileBase = {
             var total = status.total_files || 0;
             var syncable = status.syncable_files || 0;
             var synced = status.synced_files || 0;
-            var failed = status.failed_count || 0;
+
+            // 记录该库是否处于同步中,供轮询判断是否仍需继续
+            this._syncStates = this._syncStates || {};
+            this._syncStates[kbId] = { is_syncing: !!res.is_syncing, enabled: !!res.enabled };
 
             var text = '文件数: ' + total;
             var color = '#666';
-            if (res.enabled && syncable > 0) {
-                text = '文件数: ' + total + ' | 已同步: ' + synced + '/' + syncable;
-                if (res.is_syncing) {
-                    text = '⏳ 同步中: ' + synced + '/' + syncable;
-                    color = '#1a73e8';
-                } else if (synced >= syncable && failed === 0) {
-                    color = '#188038';
-                } else if (synced >= syncable && failed > 0) {
-                    color = '#b45309';
-                }
-                if (failed > 0) {
-                    text += ' | ⚠ 失败 ' + failed;
-                }
-            } else if (res.enabled) {
-                text = '文件数: ' + total + ' | 待同步';
-                color = '#1a73e8';
+            if (res.enabled) {
+                text = '文件数:' + total + ' 同步:' + syncable + '/' + synced;
+                color = '#444';
             }
 
             statusEl.innerHTML = '<small style="color:' + color + ';font-size:11px;">' + text + '</small>';
@@ -345,14 +336,17 @@ var FileBase = {
         }
     },
 
-    // ─────────────────── 同步状态轮询(首页列表 5s 刷新一次) ───────────────────
+    // ─────────────────── 同步状态轮询(仅在有库同步中时刷新) ───────────────────
     // 此前状态只在渲染列表/开关同步时刷一次,后台 worker 实际在跑用户也看不见;
-    // 这里在文件库首页期间定时刷新各卡片状态,离开首页(进入库内/切换视图)自动停止。
+    // 这里在文件库首页期间定时刷新各卡片状态,但只在"至少有一个库处于同步中"时
+    // 才持续轮询——空闲(全部同步完/未开启)即自动停止,下次启动同步时由开关钩子
+    // 调 startSyncPolling() 恢复。离开首页(进入库内/切换视图)同样自动停止。
 
     startSyncPolling: function() {
         if (this._syncPollTimer) return;
-        var self = this;
+        this._syncStates = this._syncStates || {};
         this._syncPollAt = {};
+        var self = this;
         this._syncPollTimer = setInterval(function() {
             self._syncPollTick();
         }, 5000);
@@ -366,7 +360,7 @@ var FileBase = {
         this._syncPollAt = {};
     },
 
-    _syncPollTick: function() {
+    _syncPollTick: async function() {
         // 已进入某个库(详情页)或列表 DOM 已不存在 → 停止轮询
         if (this.currentFbId) {
             this.stopSyncPolling();
@@ -377,15 +371,45 @@ var FileBase = {
             this.stopSyncPolling();
             return;
         }
-        var cards = grid.querySelectorAll('.fb-card-sync-status[data-fb-id]');
-        for (var i = 0; i < cards.length; i++) {
-            var id = cards[i].getAttribute('data-fb-id');
-            if (!id) continue;
-            // 限频: 单库 4s 内不重复请求,避免接口慢时叠加
-            var now = Date.now();
-            if (this._syncPollAt[id] && now - this._syncPollAt[id] < 4000) continue;
-            this._syncPollAt[id] = now;
-            this._loadSyncStatus(id);
+        // 避免上一拍请求未返回时重复下发
+        if (this._syncPollBusy) return;
+        this._syncPollBusy = true;
+        try {
+            var cards = grid.querySelectorAll('.fb-card-sync-status[data-fb-id]');
+            var loads = [];
+            for (var i = 0; i < cards.length; i++) {
+                var id = cards[i].getAttribute('data-fb-id');
+                if (!id) continue;
+                // 限频: 单库 4s 内不重复请求,避免接口慢时叠加
+                var now = Date.now();
+                if (this._syncPollAt[id] && now - this._syncPollAt[id] < 4000) continue;
+                this._syncPollAt[id] = now;
+                loads.push(this._loadSyncStatus(id));
+            }
+            await Promise.all(loads);
+
+            // 重新确认仍在首页,await 期间可能已离开
+            if (this.currentFbId || !document.getElementById('fb-grid-container')) {
+                this.stopSyncPolling();
+                return;
+            }
+            // 仅统计当前仍在列表中的库;没有任何库处于同步中 → 空闲,停止轮询
+            var presentIds = {};
+            var present = grid.querySelectorAll('.fb-card-sync-status[data-fb-id]');
+            for (var j = 0; j < present.length; j++) {
+                var pid = present[j].getAttribute('data-fb-id');
+                if (pid) presentIds[pid] = true;
+            }
+            var anySyncing = false;
+            for (var k in this._syncStates) {
+                if (presentIds[k] && this._syncStates[k] && this._syncStates[k].is_syncing) {
+                    anySyncing = true;
+                    break;
+                }
+            }
+            if (!anySyncing) this.stopSyncPolling();
+        } finally {
+            this._syncPollBusy = false;
         }
     },
 
@@ -589,6 +613,8 @@ var FileBase = {
             var res2 = await this.api('/api/fb/' + kbId + '/sync', 'POST', { enabled: newEnabled });
             if (res2.success) {
                 await this._loadSyncStatus(kbId);
+                // 开启同步 → 启动/恢复轮询,让后台 worker 进度可见
+                if (newEnabled) this.startSyncPolling();
             } else {
                 showToast(res2.message || '操作失败', 'error');
             }
@@ -608,6 +634,8 @@ var FileBase = {
             setTimeout(function() {
                 FileBase._loadSyncStatus(kbId);
             }, 1000);
+            // 触发同步 → 启动/恢复轮询
+            this.startSyncPolling();
         } catch (e) {
             showToast('同步失败: ' + e.message, 'error');
         }

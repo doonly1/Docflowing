@@ -568,6 +568,7 @@ body.fb-resizing {
     border: 1px solid rgba(255, 255, 255, 0.6);
     cursor: pointer;
     transition: box-shadow 0.2s, transform 0.15s;
+    min-width: 0;
 }
 
 .fb-card:hover {
@@ -585,6 +586,9 @@ body.fb-resizing {
     font-size: 12px;
     color: #999;
     margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .fb-card .fb-card-type {
