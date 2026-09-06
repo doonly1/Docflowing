@@ -93,6 +93,8 @@ def add_page_number_single(file_path):
 
     doc.save(file_path)
     logger.info('添加页码：%s 成功。', os.path.basename(file_path))
+    # 上报产物路径，供前端完成后自动打开
+    print(f"[[OPEN]]{file_path}")
 
 
 def add_page_numbers(workdir):

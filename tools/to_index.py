@@ -119,7 +119,13 @@ def create_excel(file_info_list, root_dir, output_file='file_list.xlsx'):
 def build_index(workdir):
     logger.info("正在扫描目录: %s", workdir)
     file_info_list = collect_file_info(workdir)
+    if not file_info_list:
+        logger.warning("没有找到任何文件")
+        return
     create_excel(file_info_list, workdir, 'file_index.xlsx')
+    output_path = os.path.join(workdir, 'file_index.xlsx')
+    # 上报产物路径，供前端完成后自动打开
+    print(f"[[OPEN]]{output_path}")
 
 
 def build_index_from_metadata(metadata_list, folder_name, output_dir):

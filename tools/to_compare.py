@@ -2562,6 +2562,8 @@ def main(workdir, original_path=None, final_path=None):
     if success:
         logger.info("方法: %s", result_msg)
         logger.info("比较完成: %s", output_name)
+        # 上报产物路径，供前端完成后自动打开
+        print(f"[[OPEN]]{os.path.join(workdir, output_name)}")
     else:
         logger.error("\n比较失败: %s", result_msg)
 

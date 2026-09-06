@@ -9,37 +9,62 @@ logger = get_logger(__name__)
 
 
 def _convert_single_pdf_docx2pdf(file_path):
-    """使用 docx2pdf（win32com）转换单个文件（COM 线程安全）"""
+    """使用 docx2pdf（Word COM）转换单个 docx → PDF
+
+    docx2pdf 0.1.8 在转换成功后的 word.Quit() 阶段可能因 Word 进程已断开
+    抛 COMException(-2147023170) / AttributeError，导致「PDF 已生成却被判失败」。
+    这里以 PDF 产物为准：convert 抛异常但 PDF 已产出 → 仍算成功，仅记日志。
+    另预删旧 PDF，避免 SaveAs 覆盖已存在文件时弹出确认框导致挂起。
+    """
     import pythoncom
+    import os
     pythoncom.CoInitialize()
+    pdf_path = os.path.splitext(file_path)[0] + '.pdf'
     try:
+        # 先删旧 PDF：docx2pdf 未关 DisplayAlerts，覆盖已存在文件会弹确认框挂起
+        if os.path.exists(pdf_path):
+            try:
+                os.remove(pdf_path)
+            except OSError:
+                pass
         from docx2pdf import convert
         convert(file_path)
-        return file_path, True
+    except Exception as e:
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+            logger.warning('  docx2pdf 收尾异常但 PDF 已生成(忽略): %s - %r', file_path, e)
+        else:
+            logger.error('  docx2pdf 转换失败: %s - %r', file_path, e)
+            return file_path, False
     finally:
         pythoncom.CoUninitialize()
+    ok = os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0
+    if not ok:
+        logger.error('  docx2pdf 未产出 PDF: %s', file_path)
+    return file_path, ok
 
 
 def _convert_single_pdf_libreoffice(file_path, lo_cmd):
-    """使用 LibreOffice 转换单个文件"""
+    """使用 LibreOffice 转换单个文件（以 PDF 产物为准）"""
     workdir = os.path.dirname(file_path)
     cmd = [lo_cmd, '--headless', '--convert-to', 'pdf', '--outdir', workdir, file_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
-        return file_path, True
-    else:
+    pdf_path = os.path.splitext(file_path)[0] + '.pdf'
+    ok = result.returncode == 0 and os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0
+    if not ok:
         logger.error("  LibreOffice 转换失败: %s - %s", file_path, result.stderr.strip())
         return file_path, False
+    return file_path, True
 
 
 def convert_single_to_pdf(file_path):
     """将单个 docx 文件转换为 PDF
 
-    自动检测可用的转换引擎（docx2pdf 或 LibreOffice）。
+    自动检测可用的转换引擎（docx2pdf / LibreOffice）。
+    每文件输出「开始/完成」日志，供前端 output log 流式展示进度。
     """
     use_docx2pdf = False
     try:
-        from docx2pdf import convert  # noqa: F401
+        import docx2pdf  # noqa: F401
         use_docx2pdf = True
     except ImportError:
         pass
@@ -51,11 +76,20 @@ def convert_single_to_pdf(file_path):
         logger.error(libreoffice_install_hint())
         return False
 
+    base = os.path.basename(file_path)
     if use_docx2pdf:
+        logger.info('  转换中(Word): %s', base)
         _, success = _convert_single_pdf_docx2pdf(file_path)
     else:
-        logger.info('使用 LibreOffice 转换: %s', os.path.basename(file_path))
+        logger.info('  转换中(LibreOffice): %s', base)
         _, success = _convert_single_pdf_libreoffice(file_path, lo_cmd)
+
+    if success:
+        logger.info('  完成: %s.pdf', os.path.splitext(base)[0])
+        # 上报产物路径，供前端完成后自动打开
+        print(f"[[OPEN]]{os.path.splitext(file_path)[0]}.pdf")
+    else:
+        logger.error('  失败: %s', base)
     return success
 
 

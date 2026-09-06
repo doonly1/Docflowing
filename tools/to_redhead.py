@@ -134,6 +134,8 @@ def add_seal_single(file_path):
     save_path = os.path.join(workdir, basename)
     doc.save(save_path)
     logger.info('文档已保存：%s', basename)
+    # 上报产物路径，供前端完成后自动打开
+    print(f"[[OPEN]]{save_path}")
 
 
 def add_seal(workdir):

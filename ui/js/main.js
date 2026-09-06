@@ -280,6 +280,8 @@
             resultDiv.style.display = 'block';
 
             let response;
+            // 工具执行产出的文件路径列表（来自 SSE end 事件的 open_files）
+            let resultFiles = [];
 
             if (selDir.type === 'kb') {
                 const bodyData = {
@@ -332,6 +334,9 @@
                                         resultDiv.innerHTML = '<pre class="output-pre">' + escapeHtml(errorContent) + '</pre>';
                                     } else {
                                         outputLog.textContent += '\n\n[结束]';
+                                        if (data.open_files && Array.isArray(data.open_files)) {
+                                            resultFiles = data.open_files;
+                                        }
                                     }
                                 }
                             } catch (e) {}
@@ -339,11 +344,16 @@
                     }
                 }
                 loadFileList(null, currentTool);
-                // 文档比较完成后自动打开结果文件（仅 pywebview 桌面模式）
-                if (currentTool === 'to_compare' && typeof pywebview !== 'undefined') {
-                    var origName = selectedFiles && selectedFiles.length > 0 ? selectedFiles[0] : '';
-                    var outputName = '差异标注-' + origName;
-                    try { pywebview.api.openFileWithOsApp(selDir.path + '/' + outputName); } catch (e) {}
+                // 工具成功执行后自动打开产物（仅 pywebview 桌面模式）：
+                // 单个产物 → 用系统默认程序直接打开；多个产物 → 打开所在目录
+                if (typeof pywebview !== 'undefined' && resultFiles.length > 0) {
+                    try {
+                        if (resultFiles.length === 1) {
+                            pywebview.api.openFileWithOsApp(resultFiles[0]);
+                        } else {
+                            pywebview.api.openFolder(resultFiles[0]);
+                        }
+                    } catch (e) {}
                 }
             } catch (error) {
                 resultDiv.className = 'error';

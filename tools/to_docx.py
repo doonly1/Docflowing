@@ -299,7 +299,10 @@ def generate_docx(file_path):
     set_headings(doc)
     set_appendix(doc)
     set_date(doc)
-    save_docx(doc, f"{base_name}.docx", workdir)
+    output_path = save_docx(doc, f"{base_name}.docx", workdir)
+    if output_path:
+        # 上报产物路径，供前端完成后自动打开
+        print(f"[[OPEN]]{output_path}")
     return True
 
 

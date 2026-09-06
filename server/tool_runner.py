@@ -8,6 +8,29 @@ import logging
 import importlib
 from contextlib import redirect_stdout
 
+# 工具产物上报标记：工具脚本 print "[[OPEN]]<绝对路径>"，由 runner 拦截并随 SSE end 事件带回 open_files，
+# 前端据此在完成后自动打开产物 / 所在目录
+_OPEN_PREFIX = '[[OPEN]]'
+
+
+def _split_open_marker(lines):
+    """分离普通输出行与 [[OPEN]] 产物路径行。
+
+    Returns:
+        (normal_lines, open_files): 普通日志行列表 与 产物绝对路径列表
+    """
+    open_files = []
+    normal = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(_OPEN_PREFIX):
+            path = stripped[len(_OPEN_PREFIX):].strip()
+            if path:
+                open_files.append(path)
+        else:
+            normal.append(line)
+    return normal, open_files
+
 
 def run_tool_in_process(tool, files, target_path, script_path):
     """导入工具模块并在当前进程中运行，产出 SSE event 行
@@ -81,10 +104,13 @@ def run_tool_in_process(tool, files, target_path, script_path):
     except Exception as e:
         stdout_text = stdout_buf.getvalue()
         log_text = log_buf.getvalue()
-        all_output = stdout_text + log_text
-        for line in all_output.splitlines():
+        normal_lines, open_files = _split_open_marker((stdout_text + log_text).splitlines())
+        for line in normal_lines:
             yield f'data: {json.dumps({"type": "output", "content": line})}\n\n'
-        yield f'data: {json.dumps({"type": "end", "success": False, "error": str(e)})}\n\n'
+        payload = {'type': 'end', 'success': False, 'error': str(e)}
+        if open_files:
+            payload['open_files'] = open_files
+        yield f'data: {json.dumps(payload)}\n\n'
         return
     finally:
         root_logger.removeHandler(handler)
@@ -93,6 +119,10 @@ def run_tool_in_process(tool, files, target_path, script_path):
 
     stdout_text = stdout_buf.getvalue()
     log_text = log_buf.getvalue()
-    for line in (stdout_text + log_text).splitlines():
+    normal_lines, open_files = _split_open_marker((stdout_text + log_text).splitlines())
+    for line in normal_lines:
         yield f'data: {json.dumps({"type": "output", "content": line})}\n\n'
-    yield f'data: {json.dumps({"type": "end", "success": True})}\n\n'
+    payload = {'type': 'end', 'success': True}
+    if open_files:
+        payload['open_files'] = open_files
+    yield f'data: {json.dumps(payload)}\n\n'
