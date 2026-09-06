@@ -791,16 +791,12 @@
                         <h2 style="margin:4px 0 0;font-size:20px;color:#1a1a2e;">文澜</h2>
                         <div style="font-size:11px;color:#999;">Docflowing · Document Workflow</div>
                     </div>
-                    <div style="text-align:center;font-size:11px;color:#bbb;margin:2px 0 10px;">公文处理与 AI 知识管理平台 · <span id="aboutVersion">版本读取中…</span></div>
-                    <div style="background:#f7f7fa;border-radius:8px;padding:10px 14px;font-size:12px;color:#555;margin-bottom:14px;">
-                        文档处理工具 · 文件库 · 知识库 AI 会话 · P2P 共享。<br>
-                        数据本地保存，离线可用；AI 功能需自行配置 LLM。
-                    </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
-                        <a href="` + ABOUT_LINKS.project + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">GitHub 主页</a>
-                        <a href="` + ABOUT_LINKS.docs + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">在线文档</a>
-                        <a href="` + ABOUT_LINKS.releases + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">更新日志</a>
-                        <a href="` + ABOUT_LINKS.license + `" target="_blank" style="flex:1;min-width:160px;text-align:center;padding:7px 8px;background:#fff;border:1px solid #e94560;color:#e94560;border-radius:6px;font-size:12px;text-decoration:none;cursor:pointer;">开源许可</a>
+                    <div style="text-align:center;font-size:11px;color:#bbb;margin:2px 0 12px;">公文处理与 AI 知识管理平台 · <span id="aboutVersion">版本读取中…</span></div>
+                    <div style="display:flex;justify-content:center;flex-wrap:wrap;gap:4px 16px;margin:0 0 16px;">
+                        <a href="` + ABOUT_LINKS.project + `" target="_blank" style="color:#e94560;font-size:12px;text-decoration:none;cursor:pointer;">项目主页</a>
+                        <a href="` + ABOUT_LINKS.docs + `" target="_blank" style="color:#e94560;font-size:12px;text-decoration:none;cursor:pointer;">在线文档</a>
+                        <a href="` + ABOUT_LINKS.releases + `" target="_blank" style="color:#e94560;font-size:12px;text-decoration:none;cursor:pointer;">更新日志</a>
+                        <a href="` + ABOUT_LINKS.license + `" target="_blank" style="color:#e94560;font-size:12px;text-decoration:none;cursor:pointer;">开源许可</a>
                     </div>
                     <div style="text-align:center;margin-top:4px;">
                         <button onclick="closeAbout()" style="padding:5px 28px;background:#e94560;color:white;border:none;border-radius:4px;font-size:13px;cursor:pointer;">确定</button>
