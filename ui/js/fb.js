@@ -417,15 +417,20 @@ var FileBase = {
     showAddLocalFolder: async function() {
         var self = this;
         var path = '';
+        var pickerAvailable = false;
         // 桌面壳：原生目录选择对话框（tkinter）
         try {
             if (window.electronAPI && window.electronAPI.selectDirectory) {
+                pickerAvailable = true;
                 path = (await window.electronAPI.selectDirectory()) || '';
             }
         } catch (e) {
             console.warn('selectDirectory failed:', e);
+            pickerAvailable = false; // 原生选择器异常，允许手输兜底
         }
-        // 浏览器模式 / 对话框取消 / 失败：回退为手输绝对路径
+        // 原生选择器可用但用户点了取消：直接放弃，不再弹手输框
+        if (pickerAvailable && !path) return;
+        // 浏览器模式 / 原生选择器不可用：回退为手输绝对路径
         if (!path) {
             var manual = await showPrompt('请输入本地文件夹的绝对路径（如 D:\\我的资料）', '');
             if (!manual || !manual.trim()) return;
@@ -2478,7 +2483,13 @@ var FileBase = {
             return;
         }
 
-        // 本地文件库 → 调用本地软件打开
+        // 本地文件库 → md/markdown 用内置在线编辑器（用户可能没有本地编辑器）
+        if (ext === 'md' || ext === 'markdown') {
+            this.openMarkdownEditor(relPath);
+            return;
+        }
+
+        // 本地文件库 → 其余类型调用本地软件打开
         var fileName = relPath.split('/').pop();
         // 统一走后端 API，由 os.path.normpath + os.startfile 处理路径，跨平台最可靠
         var url = '/api/fb/' + this.currentFbId + '/local-files/open-with-app?path=' + encodeURIComponent(relPath);

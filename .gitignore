@@ -23,8 +23,7 @@ node_modules/
 package-lock.json
 .npmrc
 
-# 前端 lib（由 postinstall 自动生成）
-ui/lib/
+# 前端 lib（marked/quill/turndown 等 vendor，随源码入库保证编辑器离线可用）
 
 # 桌面壳构建输出（pywebview）
 release/

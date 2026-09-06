@@ -1316,8 +1316,8 @@
     };
 
     window._ensureQuill = function() {
-        if (window._quillPromise) return window._quillPromise;
         if (typeof Quill !== 'undefined') return Promise.resolve();
+        if (window._quillPromise) return window._quillPromise;
         window._quillPromise = Promise.all([
             window._loadScriptAsync(
                 window._LIB_PREFIX + 'quill/dist/quill.js',
@@ -1327,16 +1327,23 @@
                 window._LIB_PREFIX + 'quill/dist/quill.snow.css',
                 'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css'
             )
-        ]);
+        ]).catch(function(e) {
+            // 失败不缓存：下次调用重新尝试（本地库补齐 / 网络恢复后即可用）
+            window._quillPromise = null;
+            throw e;
+        });
         return window._quillPromise;
     };
     window._ensureMarked = function() {
-        if (window._markedPromise) return window._markedPromise;
         if (typeof marked !== 'undefined') return Promise.resolve();
+        if (window._markedPromise) return window._markedPromise;
         window._markedPromise = window._loadScriptAsync(
             window._LIB_PREFIX + 'marked/marked.min.js',
             'https://cdn.jsdelivr.net/npm/marked/marked.min.js'
-        );
+        ).catch(function(e) {
+            window._markedPromise = null;
+            throw e;
+        });
         return window._markedPromise;
     };
     window._ensurePdfJs = function() {
@@ -1374,7 +1381,10 @@
         window._turndownPromise = window._loadScriptAsync(
             window._LIB_PREFIX + 'turndown/dist/turndown.js',
             'https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.min.js'
-        );
+        ).catch(function(e) {
+            window._turndownPromise = null;
+            throw e;
+        });
         return window._turndownPromise;
     };
     </script>
