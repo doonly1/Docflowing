@@ -16,7 +16,7 @@
 版本号必须是 ``X.Y.Z`` 三段纯数字，更新器依赖它做版本比对。
 """
 
-APP_VERSION = '1.0.6'
+APP_VERSION = '1.0.7'
 
 # 更新通道。'stable' 只接收 stable 清单；'beta' 可接收 beta 与 stable。
 UPDATE_CHANNEL = 'stable'
