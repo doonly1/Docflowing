@@ -248,7 +248,6 @@ var FileBase = {
             h += '<div class="fb-file-toolbar">';
             h += '<input type="text" id="fb-search-input" placeholder="搜索文档..." onkeydown="if(event.keyCode===13) FileBase.search()">';
             h += '<button onclick="FileBase.search()">🔍</button>';
-            h += '<button onclick="FileBase.showCreateRootFolder()">📁 新建文件库</button>';
             h += '<button onclick="FileBase.showAddLocalFolder()" title="选择本地已有文件夹作为文件库">📂 添加本地文件库</button>';
             h += '<button onclick="FileBase.showCreateNetworkRootFolder()">🌐 新建网络文件库</button>';
             h += '</div>';
@@ -271,7 +270,7 @@ var FileBase = {
             var kbs = res.kbs || [];
 
             if (kbs.length === 0) {
-                grid.innerHTML = '<div class="fb-empty">暂无文件库，右键区域创建</div>';
+                grid.innerHTML = '<div class="fb-empty">暂无文件库。首次使用已自动创建「示例文件库」，也可点上方「📂 添加本地文件库」把已有文件夹加进来，或右键此区域。</div>';
                 return;
             }
 
@@ -413,10 +412,6 @@ var FileBase = {
         }
     },
 
-    showCreateRootFolder: function() {
-        this._showLocalPathDialog();
-    },
-
     // ─────────────────── 添加本地文件库（选择本地已有文件夹） ───────────────────
 
     showAddLocalFolder: async function() {
@@ -450,43 +445,6 @@ var FileBase = {
         });
         if (res.success) {
             showToast('已添加文件库：' + name, 'success');
-            await self.renderKbList();
-        } else {
-            showToast(res.message || '添加失败', 'error');
-        }
-    },
-
-    _showLocalPathDialog: function() {
-        var self = this;
-        var h = '<div class="fb-modal-overlay" id="fb-modal-overlay"><div class="fb-modal" style="max-width:420px">';
-        h += '<h3>📁 新建文件库</h3>';
-        h += '<div style="margin-bottom:12px">';
-        h += '<input type="text" id="fb-local-name" placeholder="输入文件库名称" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box">';
-        h += '</div>';
-        h += '<div class="fb-modal-actions">';
-        h += '<button class="fb-btn-primary" onclick="FileBase._doCreateLocalRootFolder()">创建</button>';
-        h += '<button class="fb-btn-cancel" onclick="FileBase.closeModal()">取消</button>';
-        h += '</div></div></div>';
-        document.body.insertAdjacentHTML('beforeend', h);
-        requestAnimationFrame(function() { document.getElementById('fb-modal-overlay').classList.add('show'); });
-        document.getElementById('fb-modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'fb-modal-overlay') self.closeModal(); });
-        setTimeout(function() { document.getElementById('fb-local-name').focus(); }, 100);
-    },
-
-    _doCreateLocalRootFolder: async function() {
-        var name = (document.getElementById('fb-local-name').value || '').trim();
-        if (!name) { showToast('请输入文件库名称', 'error'); return; }
-        this.closeModal();
-        await this._createLocalRootFolder(name);
-    },
-
-    _createLocalRootFolder: async function(name) {
-        var self = this;
-        var res = await this.api('/api/fb/create-folder', 'POST', {
-            filebase_type: 'local',
-            name: name
-        });
-        if (res.success) {
             await self.renderKbList();
         } else {
             showToast(res.message || '添加失败', 'error');
@@ -559,8 +517,7 @@ var FileBase = {
             var kbDisplayPath = kbCard.getAttribute('data-fb-display-path');
             menu.innerHTML = this._buildKbCardContextMenu(kbId, kbName, kbPermission, kbLocalPath, kbDisplayPath);
         } else {
-            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showCreateRootFolder();FileBase.hideContextMenu()"><span class="icon">📁</span> 新建文件库</div>';
-            emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showAddLocalFolder();FileBase.hideContextMenu()"><span class="icon">📂</span> 添加本地文件库</div>';
+            var emptyMenu = '<div class="fb-menu-item" onclick="FileBase.showAddLocalFolder();FileBase.hideContextMenu()"><span class="icon">📂</span> 添加本地文件库</div>';
             if (window.authRole === 'admin') {
                 emptyMenu += '<div class="fb-menu-item" onclick="FileBase.showCreateNetworkRootFolder();FileBase.hideContextMenu()"><span class="icon">🌐</span> 新建网络文件库</div>';
             }
@@ -690,6 +647,7 @@ var FileBase = {
             var res = await this.api('/api/fb/' + kbId, 'DELETE');
             if (res.success) {
                 await this.renderKbList();
+                showToast(res.message || '文件库已删除', 'success');
             } else {
                 showToast(res.message || '删除失败', 'error');
             }
